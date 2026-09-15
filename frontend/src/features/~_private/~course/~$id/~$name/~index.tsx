@@ -1,14 +1,12 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { type SVGProps, useMemo } from 'react';
+import { useEffect, useState, type SVGProps } from 'react';
 
-import { dataCourses, mockCourses } from '@/components/data/~mock-courses';
-import { getSessionMember } from '@/components/data/~mock-session';
-import { getSubmissionBySubmissionId, SubmissionData } from '@/components/data/~mock-submissions';
+import { courseDriver } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import StudyLayout from '@/components/study-layout';
+import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import type { SubmissionView, SubmissionViewerRole } from '@/types/submission';
 
-
-// === ICONS ===
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -25,71 +23,62 @@ export function UserCircleIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// === Định nghĩa Route ===
 export const Route = createFileRoute('/_private/course/$id/$name/')({
   component: RouteComponent,
 });
 
-function formatISODate(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    const time = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const day = date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    return `${time} ${day}`; // Format: "19:00 10/10/2024"
-  } catch {
-    return 'Invalid Date';
-  }
-}
-
-
-
-// === Các Component con (Giữ nguyên) ===
-
-const getScoreColor = (score?: number) => {
-  if (score === undefined) return 'text-gray-500';
+const getScoreColor = (score: number | null) => {
+  if (score === null) return 'text-gray-500';
   if (score >= 7) return 'text-green-600';
   if (score >= 5) return 'text-[#F9BA08]';
   return 'text-[#EA4335]';
 };
 
-const getSubmittedAtColor = (submittedAt?: string, dueDate?: string) => {
+const formatDate = (value: string | null) =>
+  value
+    ? new Date(value).toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+    : 'Chưa nộp';
+
+const getSubmittedAtColor = (submittedAt: string | null, dueDate: string) => {
   if (!submittedAt || !dueDate) return 'text-gray-500';
-  const submitted = new Date(submittedAt);
-  const due = new Date(dueDate);
-  if (submitted <= due) return 'text-green-600';
-  return 'text-red-600';
+  const submitted = new Date(submittedAt).getTime();
+  const due = new Date(dueDate).getTime();
+  if (Number.isNaN(due)) return 'text-gray-500';
+  return submitted <= due ? 'text-green-600' : 'text-red-600';
 };
 
-function SubmissionRow({ entry, dueDate , id }: { entry: SubmissionData, dueDate?: string, id: string }) {
-  const nameEntry = getSessionMember( 's-1', entry.memberId);
-  console.log("id:", id);
+function SubmissionRow({ entry }: { entry: SubmissionView }) {
+  const stuname = entry.student.email.split('@')[0];
+
   return (
     <tr className="border-b last-of-type:border-0">
       <td className="px-4 py-3">
-        <Link to={`/profile/$id` as string} className="font-medium text-blue-600">{nameEntry ? nameEntry.name : 'Unknown'}</Link>
+        <Link to={`/profile/$id` as string} className="font-medium text-blue-600">{entry.student.name}</Link>
+        <div className="text-xs text-gray-500">{entry.student.email}</div>
       </td>
       <td className="px-4 py-3">
         <div className={`font-medium ${getScoreColor(entry.score)}`}>
-          {entry.score !== undefined ? entry.score.toFixed(1) : 'Chưa chấm'}
+          {entry.score !== null ? entry.score.toFixed(1) : 'Chưa chấm'}
         </div>
       </td>
+      <td className="px-4 py-3"><div className="text-gray-700">{entry.feedback || 'Không có nhận xét'}</div></td>
       <td className="px-4 py-3">
-        <div className="text-gray-700">{entry.comment || 'Không có nhận xét'}</div>
+        {entry.submittedAt ? (
+          <div className={getSubmittedAtColor(entry.submittedAt, entry.assignment.dueDate)}>
+            {formatDate(entry.submittedAt)}
+            {entry.assignment.dueDate ? <span> (Hạn: {entry.assignment.dueDate})</span> : null}
+          </div>
+        ) : <div className="text-gray-500">Chưa nộp</div>}
       </td>
       <td className="px-4 py-3">
-        {entry.submittedAt !== '' ? (
-          <div className={`${getSubmittedAtColor(entry.submittedAt, dueDate)}`}>{formatISODate(entry.submittedAt as string)} 
-        {dueDate && (<span> (Hạn: {formatISODate(dueDate)})</span>)}
-        </div>
-        ) : (
-          <div className="text-gray-500">Chưa nộp</div>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <Link
-          to={`/course/4/s1/${nameEntry?.name}` as any}
-          className="text-blue-600 hover:underline"
-        >
+        <Link to={'/course/$id/$name/$stuname' as any} params={{ id: entry.courseId, name: entry.assignment.id, stuname } as any} className="text-blue-600 hover:underline">
           Xem bài nộp
         </Link>
       </td>
@@ -97,143 +86,94 @@ function SubmissionRow({ entry, dueDate , id }: { entry: SubmissionData, dueDate
   );
 }
 
-// === Component chính của Route ===
+function getViewerContext() {
+  const viewerRole: SubmissionViewerRole = localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student';
+  const rawUserStore = localStorage.getItem('userStore');
+
+  try {
+    const userStore = rawUserStore ? JSON.parse(rawUserStore) as { state?: { user?: { email?: string } } } : null;
+    return { viewerRole, studentEmail: userStore?.state?.user?.email };
+  } catch {
+    return { viewerRole, studentEmail: undefined };
+  }
+}
+
 function RouteComponent() {
   const { id, name } = Route.useParams();
-  const course = useMemo(() => {
-    return mockCourses.find((c) => c.id === id) ?? mockCourses[0];
+  const course = courseDriver.getById(id);
+  const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [viewerContext] = useState(getViewerContext);
 
-  }, [id]);
-  const dataCourse = dataCourses.find((c) => c.id === id);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
 
-  if (!dataCourse) {
-    return (
-      <StudyLayout>
-        <Link
-          to={`/course/${id}/` as string}
-          className='mb-4 inline-flex items-center gap-2 text-blue-600 hover:underline'
-        >
-          <ArrowLeft className='size-4' />
-          Quay lại trang khóa học
-        </Link>
-        <div>Khóa học không tồn tại.</div>
-      </StudyLayout>
-    )
-  }
+    backendDriver
+      .getSubmissions({
+        courseId: id,
+        assignmentId: name,
+        viewerRole: viewerContext.viewerRole,
+        studentEmail: viewerContext.viewerRole === 'student' ? viewerContext.studentEmail : undefined,
+      })
+      .then((response) => {
+        if (active) setSubmissions(response.data.items);
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải dữ liệu bài nộp.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
 
-  const submissions = getSubmissionBySubmissionId(name as string);
-
+    return () => {
+      active = false;
+    };
+  }, [id, name, viewerContext]);
 
   if (!course) {
-    return (
-      <StudyLayout>
-        <Link
-          to={`/_private/course/${id}/` as string}
-          className='mb-4 inline-flex items-center gap-2 text-blue-600 hover:underline'
-        >
-          <ArrowLeft className='size-4' />
-          Quay lại trang khóa học
-        </Link>
-        <div>Khóa học không tồn tại.</div>
-      </StudyLayout>
-    );
+    return <StudyLayout><div className="p-8 text-center text-gray-500">Khóa học không tồn tại.</div></StudyLayout>;
   }
 
-  if (!submissions) {
-    return (
-      <StudyLayout>
-        <Link
-          to={`/course/${id}/` as string}
-          className='mb-4 inline-flex items-center gap-2 text-blue-600 hover:underline'
-        >
-          <ArrowLeft className='size-4' />
-          Quay lại trang khóa học
-        </Link>
-        <div>Dữ liệu bài nộp không tồn tại.</div>
-      </StudyLayout>
-    )
-  }
-
-
-  const dataSubmission = dataCourse['content'].find((c) => c.id === name)?.data;
   return (
     <StudyLayout>
       <div className="w-full font-['Archivo']">
-        {/* Back button */}
-        <Link
-          // onClick={() => navigate({ to: '/dashboard' })}
-          to={`/course/${id}/` as string}
-          className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
-        >
+        <Link to={`/course/${id}/` as string} className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700">
           <ArrowLeft className="size-5" />
           <span className="font-medium">Quay lại</span>
         </Link>
 
-        {/* Course header */}
-        <div
-          className="relative rounded-lg p-8 text-white shadow-lg"
-          style={{
-            backgroundImage: `url(${course.bgImage})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            minHeight: '250px',
-          }}
-        >
+        <div className="relative rounded-lg p-8 text-white shadow-lg" style={{ backgroundImage: `url(${course.bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', minHeight: '250px' }}>
           <div className="relative z-10">
-            <p className="mb-2 text-sm font-medium text-gray-200">
-              {course.code}
-            </p>
+            <p className="mb-2 text-sm font-medium text-gray-200">{course.code}</p>
             <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
-            <p className="text-lg text-gray-100">
-              Giảng viên: {course.instructor}
-            </p>
-
-            {/* Button "tổng quan" + "Đánh giá" */}
-            <div className="mt-6 flex gap-4">
-              <Link
-                to={`/course/${id}` as any}
-                className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] backdrop-blur-sm transition hover:bg-white/80"
-              >
-                Tổng quan
-              </Link>
-
-              <button className="rounded-lg bg-[#0329E9] px-4 py-2 font-medium backdrop-blur-sm transition hover:bg-[#0329E9]/80">
-                Đánh giá
-              </button>
-            </div>
+            <p className="text-lg text-gray-100">Giảng viên: {course.instructor}</p>
           </div>
         </div>
-        <div>
-          {/* Submission Table */}
-          <div className="mt-8 overflow-x-auto rounded-lg border">
-            <table className="w-full min-w-[600px] table-auto border-collapse">
-              <thead className="bg-gray-100">
-                <tr>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">
-                    Tên sinh viên
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">
-                    Điểm số
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">
-                    Nhận xét
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">
-                    Ngày nộp
-                  </th>
-                  <th className="px-4 py-3 text-left font-medium text-gray-700">
-                    Xem bài nộp
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {submissions.map((entry, index) => (
-                  <SubmissionRow key={index} entry={entry} dueDate={dataSubmission?.dueDate} id={id} />
-                ))}
-              </tbody>
-            </table>
-          </div>
+
+        <div className="mt-8 overflow-x-auto rounded-lg border">
+          <table className="w-full min-w-[800px] table-auto border-collapse">
+            <thead className="bg-gray-100">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Tên sinh viên</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Điểm số</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Nhận xét</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Ngày nộp</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Xem bài nộp</th>
+              </tr>
+            </thead>
+            <tbody>
+              {submissions.map((entry) => <SubmissionRow key={entry.id} entry={entry} />)}
+            </tbody>
+          </table>
         </div>
+
+        {loading ? <div className="py-10 text-center text-gray-500">Đang tải bài nộp...</div> : null}
+        {error ? <div className="py-10 text-center text-red-600">{error}</div> : null}
+        {!loading && !error && submissions.length === 0 ? <div className="py-10 text-center text-gray-500">Chưa có dữ liệu bài nộp.</div> : null}
       </div>
     </StudyLayout>
   );

@@ -1,3 +1,6 @@
+import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
+import { createBackendDataDriver } from '@/services/json-data-driver';
+
 import { mockCourses } from './~mock-courses';
 import { NAMES_POOL } from './~mock-names';
 
@@ -20,7 +23,7 @@ export const mockLocations = [
 // --- Định nghĩa Type ---
 
 // Kiểu dữ liệu cho các tùy chọn dropdown
-type DropdownOption = {
+export type DropdownOption = {
   id: string;
   name: string;
 };
@@ -28,6 +31,8 @@ type DropdownOption = {
 // Kiểu dữ liệu cho một đơn đăng ký của GIA SƯ
 export type PastRegistration = {
   id: string;
+  ownerRole?: 'student' | 'tutor' | 'coordinator' | 'chairman';
+  ownerEmail?: string;
   Name: string;
   Email: string;
   subjects: DropdownOption[]; // Danh sách các môn học (từ mockCourses)
@@ -122,6 +127,26 @@ export const mockPastRegistrations: PastRegistration[] = [
   }
 ];
 
+/** Backend driver replacing direct writes to mockPastRegistrations. */
+export const pastRegistrationDriver = createBackendDataDriver(
+  mockPastRegistrations,
+  {
+    list: async () => (await backendDriver.getRegistrations({ ...getCurrentViewerContext(), registrationType: 'student' })).data.items,
+    create: async (record) => (await backendDriver.createRegistration({
+      ...getCurrentViewerContext(),
+      registrationType: 'student',
+      item: { ...record, ownerRole: 'student', ownerEmail: record.Email },
+    })).data.item,
+    update: async (id, patch) => (await backendDriver.updateRegistration({
+      ...getCurrentViewerContext(),
+      registrationType: 'student',
+      registrationId: id,
+      patch,
+    })).data.item,
+    remove: async (id) => (await backendDriver.deleteRegistration(id, getCurrentViewerContext())).data.deleted,
+  },
+);
+
 // --- Helpers to create new registrations ---
 /**
  * Create and store a new PastTutorRegistration.
@@ -150,13 +175,9 @@ export function createPastRegistration(input: Partial<PastRegistration> & {
     status: 'Pending',
     createdAt: new Date().toISOString(),
   };
-  mockPastRegistrations.unshift(record);
-  return record;
+  return pastRegistrationDriver.create(record);
 }
 
 export function deletePastRegistration(id: string): boolean {
-  const idx = mockPastRegistrations.findIndex(r => r.id === id);
-  if (idx === -1) return false;
-  mockPastRegistrations.splice(idx, 1);
-  return true;
+  return pastRegistrationDriver.remove(id);
 }

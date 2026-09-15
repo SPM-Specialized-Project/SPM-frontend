@@ -1,5 +1,5 @@
-import { PastRegistration } from "@/components/data/~mock-register";
-import { mockTutorRegistrations } from "@/components/data/~mock-tutor-register";
+import { type PastRegistration, pastRegistrationDriver } from "@/components/data/~mock-register";
+import { tutorRegistrationDriver } from "@/components/data/~mock-tutor-register";
 
 export function hardMatch(student: PastRegistration, tutor: PastRegistration){
     // 1. môn
@@ -33,30 +33,13 @@ export function hardMatch(student: PastRegistration, tutor: PastRegistration){
 }
 
 export function getMatchedTutors(student: PastRegistration) {
-    return mockTutorRegistrations.filter(tutor => hardMatch(student, tutor));
+    return tutorRegistrationDriver.list().filter(tutor => hardMatch(student, tutor));
 }
 
 export function matchAllStudents() {
-    return mockPastRegistrations.map(student => ({
+    return pastRegistrationDriver.list().map(student => ({
         student: student.Name,
         matchedTutors: getMatchedTutors(student),
     }));
 }
-// ========================
-// QUICK TEST (TEMPORARY)
-// ========================
-
-import { mockPastRegistrations } from "@/components/data/~mock-register";
-
-console.log("=== QUICK MATCHING TEST ===");
-
-// Lấy student đầu tiên trong mock
-const student = mockPastRegistrations[0];
-
-// Lấy tutor trùng 4 điều kiện
-const result = getMatchedTutors(student);
-
-console.log("=== MATCHING ALL STUDENTS ===");
-console.log(matchAllStudents());
-console.log("=============================");
 

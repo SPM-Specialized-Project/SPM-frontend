@@ -3,7 +3,7 @@ import { ChevronUpDownIcon } from '@heroicons/react/24/outline';
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useState, useEffect, useRef, Fragment, useMemo } from 'react';
 
-import { mockCourses, dataCourses } from '@/components/data/~mock-courses';
+import { courseDriver, type Course, type DataCourses } from '@/components/data/~mock-courses';
 import { Play as PlayIcon } from '@/components/icons';
 import { Paper as PaperIcon } from '@/components/icons';
 import ArrowLeft from '@/components/icons/arrow-left';
@@ -12,6 +12,8 @@ import CalendarIcon from '@/components/icons/calendar';
 import DescriptionIcon from '@/components/icons/description';
 import LinkIcon from '@/components/icons/link';
 import StudyLayout from '@/components/study-layout';
+import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import type { CourseContent, CourseContentType } from '@/types/course-content';
 import filePDF from 'public/group07_report 02.pdf';
 
 import { CheckCircleIcon, FolderIcon } from './components/course-icons';
@@ -25,15 +27,59 @@ export const Route = createFileRoute('/_private/course/$id/')({
   component: CourseDetailsComponent,
 });
 
+function isCourseContentType(value: string): value is CourseContentType {
+  return [
+    'introduction',
+    'material',
+    'movie',
+    'note',
+    'reference',
+    'submission',
+    'bookReference',
+  ].includes(value);
+}
+
 function CourseDetailsComponent() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const course = mockCourses.find((c) => c.id === id);
-  const originalCourseDetail = dataCourses.find((c) => c.id === id);
-  const [courseDetail, setCourseDetail] = useState(originalCourseDetail);
+  const [course, setCourse] = useState<Course | undefined>(() => courseDriver.getById(id));
+  const [courseDetail, setCourseDetail] = useState<DataCourses | undefined>();
+  const [isCourseLoading, setIsCourseLoading] = useState(true);
+  const [courseError, setCourseError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('');
   const [file, setFile] = useState<File | null>(null);
   const [changedFile, setchangedFile] = useState<File | null>(null);
+
+  useEffect(() => {
+    let disposed = false;
+
+    setIsCourseLoading(true);
+    setCourseError(null);
+
+    backendDriver
+      .getCourseDetail(id)
+      .then(({ data }) => {
+        if (disposed) return;
+        setCourse(data.course);
+        setCourseDetail(data.detail);
+      })
+      .catch((error: unknown) => {
+        if (disposed) return;
+        setCourseDetail(undefined);
+        setCourseError(
+          error instanceof BackendDriverError
+            ? error.message
+            : 'Không thể tải dữ liệu khóa học.',
+        );
+      })
+      .finally(() => {
+        if (!disposed) setIsCourseLoading(false);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [id]);
 
   const previewUrl = useMemo(() => {
     return file ? URL.createObjectURL(file) : '';
@@ -226,7 +272,7 @@ function CourseDetailsComponent() {
     const found = Object.entries(pdfModules).find(([k]) =>
       k.endsWith(filename),
     );
-    const val: any = found ? found[1] : `@/src/data/${filename}`;
+    const val: unknown = found ? found[1] : `@/src/data/${filename}`;
 
     // Normalize possible module shapes to a string URL.
     if (val == null) return '';
@@ -251,19 +297,22 @@ function CourseDetailsComponent() {
     return String(val);
   };
 
-  const renderSectionContent = (item: any, index: number) => {
+  const renderSectionContent = (item: CourseContent, index: number) => {
     const Icon = typeToIconMap[item.type] || BookIcon;
 
     // Handler to update item
-    const handleUpdateItem = (field: string, value: any) => {
+    const handleUpdateItem = (field: 'title' | 'type', value: string) => {
       if (courseDetail) {
-        // content items can be a discriminated union with different 'data' shapes.
-        // Cast to any[] locally to avoid TypeScript assignment narrowing issues
-        const updatedContent: any[] = [...(courseDetail.content || [])];
-        updatedContent[index] = {
-          ...(updatedContent[index] as any),
-          [field]: value,
-        };
+        const updatedContent = [...courseDetail.content];
+        const current = updatedContent[index];
+        if (!current) return;
+
+        if (field === 'title') {
+          updatedContent[index] = { ...current, title: value };
+        } else if (isCourseContentType(value)) {
+          updatedContent[index] = { ...current, type: value } as CourseContent;
+        }
+
         setCourseDetail({ ...courseDetail, content: updatedContent });
       }
     };
@@ -282,13 +331,16 @@ function CourseDetailsComponent() {
     };
 
     // Handler to update nested data
-    const handleUpdateData = (dataField: string, value: any) => {
+    const handleUpdateData = (dataField: string, value: unknown) => {
       if (courseDetail) {
-        // Use any[] to avoid TS errors when merging different data shapes
-        const updatedContent: any[] = [...(courseDetail.content || [])];
-        const prev = updatedContent[index] as any;
+        const updatedContent = [...courseDetail.content];
+        const prev = updatedContent[index];
+        if (!prev) return;
 
-        const newData = { ...(prev?.data || {}), [dataField]: value };
+        const newData = {
+          ...(prev.data as Record<string, unknown>),
+          [dataField]: value,
+        };
 
         // Special handling for submission status changes
         if (prev?.type === 'submission' && dataField === 'status') {
@@ -317,7 +369,7 @@ function CourseDetailsComponent() {
         updatedContent[index] = {
           ...prev,
           data: newData,
-        };
+        } as CourseContent;
         setCourseDetail({ ...courseDetail, content: updatedContent });
       }
     };
@@ -2123,7 +2175,7 @@ function CourseDetailsComponent() {
                 {/* Form thêm sách tham khảo */}
                 <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
                   <div className="space-y-3">
-                    {item.data?.books?.map((book: any, bookIndex: number) => (
+                    {item.data?.books?.map((book, bookIndex) => (
                       <div key={bookIndex} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-gray-50 p-4">
                         <div className="flex-1 space-y-2">
                           <input
@@ -2151,7 +2203,7 @@ function CourseDetailsComponent() {
                         </div>
                         <button
                           onClick={() => {
-                            const books = (item.data?.books || []).filter((_: any, i: number) => i !== bookIndex);
+                            const books = (item.data?.books || []).filter((_, i) => i !== bookIndex);
                             handleUpdateData('books', books);
                           }}
                           className="text-red-600 hover:text-red-800"
@@ -2184,7 +2236,7 @@ function CourseDetailsComponent() {
                 </h2>
                 {item.data?.books && item.data.books.length > 0 && (
                   <div className="space-y-3">
-                    {item.data.books.map((book: any, bookIndex: number) => (
+                    {item.data.books.map((book, bookIndex) => (
                       <div key={bookIndex} className="flex items-center gap-3 rounded-lg border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md">
                         <ReferenceBookIcon className="size-8 flex-shrink-0" />
                         <div className="flex-1">
@@ -2213,12 +2265,22 @@ function CourseDetailsComponent() {
     }
   };
 
-  if (!course) {
+  if (isCourseLoading && !courseDetail) {
+    return (
+      <StudyLayout>
+        <div className="flex min-h-64 items-center justify-center text-gray-600">
+          Đang tải dữ liệu khóa học...
+        </div>
+      </StudyLayout>
+    );
+  }
+
+  if (courseError || !course) {
     return (
       <StudyLayout>
         <div className="flex flex-col items-center justify-center py-20">
           <h1 className="mb-4 text-3xl font-bold text-gray-800">
-            Không tìm thấy khóa học
+            {courseError ?? 'Không tìm thấy khóa học'}
           </h1>
           <p className="mb-8 text-gray-600">
             Khóa học với ID "{id}" không tồn tại.
@@ -2563,7 +2625,7 @@ function CourseDetailsComponent() {
                   <div className="absolute inset-y-0 left-[13px] w-0.5 bg-gray-300" />
 
                   {/* Timeline items - dynamically from content */}
-                  {courseDetail.content?.map((item: any, index: number) => {
+                  {courseDetail.content.map((item, index) => {
                     const Icon = typeToIconMap[item.type] || BookIcon;
                     const sectionKey = `${item.type}-${index}`;
                     const isActive = activeTab === sectionKey;
@@ -2610,10 +2672,11 @@ function CourseDetailsComponent() {
                       const defaultType = 'material';
 
                       // Tạo dữ liệu mặc định đầy đủ theo từng loại
-                      const getDefaultData = (type: string): any => {
+                      const getDefaultData = (type: CourseContentType): CourseContent => {
                         switch (type) {
                           case 'introduction':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'introduction',
                               title: 'Giới thiệu mới',
                               data: {
@@ -2622,38 +2685,35 @@ function CourseDetailsComponent() {
                             };
                           case 'material':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'material',
                               title: 'Tài liệu mới',
-                              data: {
-                                document: null,
-                              },
+                              data: {},
                             };
                           case 'movie':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'movie',
                               title: 'Video mới',
-                              data: {
-                                video: null,
-                              },
+                              data: {},
                             };
                           case 'note':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'note',
                               title: 'Ghi chú mới',
-                              data: {
-                                assignment: null,
-                              },
+                              data: {},
                             };
                           case 'reference':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'reference',
                               title: 'Tham khảo mới',
-                              data: {
-                                link: null,
-                              },
+                              data: {},
                             };
                           case 'submission':
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'submission',
                               title: 'Bài nộp mới',
                               data: {
@@ -2662,13 +2722,19 @@ function CourseDetailsComponent() {
                                 canEdit: true,
                               },
                             };
+                          case 'bookReference':
+                            return {
+                              id: `content-${Date.now()}`,
+                              type: 'bookReference',
+                              title: 'Sách tham khảo mới',
+                              data: { books: [] },
+                            };
                           default:
                             return {
+                              id: `content-${Date.now()}`,
                               type: 'material',
                               title: 'Danh mục mới',
-                              data: {
-                                document: null,
-                              },
+                              data: {},
                             };
                         }
                       };
@@ -2707,7 +2773,7 @@ function CourseDetailsComponent() {
                 ref={contentContainerRef}
                 className="mt-10 max-h-[calc(100vh-220px)] overflow-auto rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
               >
-                {courseDetail.content?.map((item: any, index: number) => {
+                {courseDetail.content.map((item, index) => {
                   const sectionKey = `${item.type}-${index}`;
                   return (
                     <div

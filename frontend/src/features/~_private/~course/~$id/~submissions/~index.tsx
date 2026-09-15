@@ -1,15 +1,13 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
-import { type SVGProps, useState, useMemo } from 'react'; // << [THAY ĐỔI] Import thêm useState, useMemo
+import { type SVGProps, useEffect, useMemo, useState } from 'react';
 
-import { mockCourses, dataCourses } from '@/components/data/~mock-courses';
-import { mockSessions } from '@/components/data/~mock-session';
-import { getAllSubmissions } from '@/components/data/~mock-submissions';
+import { courseDriver } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
+import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import type { SubmissionView } from '@/types/submission';
 
-
-// === ICONS (Giữ nguyên) ===
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" {...props}>
@@ -26,67 +24,65 @@ export function UserCircleIcon(props: SVGProps<SVGSVGElement>) {
   );
 }
 
-// === Định nghĩa Route (Giữ nguyên) ===
 export const Route = createFileRoute('/_private/course/$id/submissions/')({
   component: RouteComponent,
 });
 
-// === Component SubmissionItem (Giữ nguyên) ===
-
-const getScoreColor = (score?: number) => {
-  if (score === undefined) return 'text-gray-500';
+const getScoreColor = (score: number | null) => {
+  if (score === null) return 'text-gray-500';
   if (score >= 7) return 'text-green-600';
   if (score >= 5) return 'text-[#F9BA08]';
   return 'text-[#EA4335]';
 };
 
-type SubmissionEntry = {
-  name: string;
-  email: string;
-  submittedAt: string;
-  score?: number;
-  submissionName?: string; 
-  submissionId?: string;
-};
+const formatDate = (value: string | null) =>
+  value
+    ? new Date(value).toLocaleString('vi-VN', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+    : 'Chưa nộp';
 
-function SubmissionItem({ entry, courseId }: { entry: SubmissionEntry; courseId: string }) {
-  const { name, email, submittedAt, score, submissionName, submissionId } = entry;
-  const scoreColor = getScoreColor(score);
-
-  const stuname = email.split('@')[0];
+function SubmissionItem({ entry, courseId }: { entry: SubmissionView; courseId: string }) {
+  const { student, assignment, submittedAt, score } = entry;
+  const stuname = student.email.split('@')[0];
 
   return (
     <div className="flex items-center justify-between rounded-lg border border-gray-700 bg-white p-5 shadow-custom-yellow">
-      {/* Thông tin sinh viên & thời gian và tên bài nộp*/}
       <div className="flex items-center gap-4">
         <UserCircleIcon className="size-12 shrink-0 text-gray-500" />
         <div className="flex flex-col gap-1.5">
           <div>
-            <Link to={`/profile/$id` as string} className="text-xs font-semibold text-blue-600">{name}</Link>
-            <p className="text-sm text-gray-500">{email}</p>
+            <Link to={`/profile/$id` as string} className="text-xs font-semibold text-blue-600">
+              {student.name}
+            </Link>
+            <p className="text-sm text-gray-500">{student.email}</p>
           </div>
           <div className="flex items-center gap-2 text-sm text-gray-600">
             <ClockIcon className="size-4" />
-            <span>{submittedAt}</span>
+            <span>{formatDate(submittedAt)}</span>
           </div>
           <div className="text-sm text-gray-600">
-            Bài nộp: <span className="font-medium text-gray-900">{submissionName}</span>
+            Bài nộp: <span className="font-medium text-gray-900">{assignment.title}</span>
           </div>
         </div>
       </div>
 
-      {/* Điểm & Nút bấm */}
       <div className="flex shrink-0 items-center gap-6">
-        {score !== undefined ? (
-          <span className={`text-xl font-bold ${scoreColor}`}>
+        {score !== null ? (
+          <span className={`text-xl font-bold ${getScoreColor(score)}`}>
             {score.toLocaleString('vi-VN')} điểm
           </span>
         ) : (
           <span className="text-sm font-medium text-gray-500">Chưa chấm</span>
         )}
         <Link
-          to={"/course/$id/$name/$stuname" as any}
-          params={{ id: courseId, name: submissionId || 'submission1', stuname } as any}
+          to={'/course/$id/$name/$stuname' as any}
+          params={{ id: courseId, name: assignment.id, stuname } as any}
           className="rounded-lg bg-[#0329E9] px-5 py-2.5 text-sm font-medium text-white transition hover:bg-blue-700"
         >
           Xem bài nộp
@@ -96,238 +92,99 @@ function SubmissionItem({ entry, courseId }: { entry: SubmissionEntry; courseId:
   );
 }
 
-
-function parseSubmissionDate(dateString: string): Date {
-  try {
-    const parts = dateString.split(' '); // ['19:00', '10/10/2024']
-    const timeParts = parts[0].split(':'); // ['19', '00']
-    const dateParts = parts[1].split('/'); // ['10', '10', '2024'] (DD, MM, YYYY)
-
-    return new Date(
-      +dateParts[2],       // year
-      +dateParts[1] - 1,   // month (0-indexed)
-      +dateParts[0],       // day
-      +timeParts[0],       // hours
-      +timeParts[1]        // minutes
-    );
-  } catch (e: string | any) {
-    console.error('Lỗi parse ngày tháng:', e);
-    return new Date(0);
-  }
-}
-
-function formatISODate(isoString: string): string {
-  try {
-    const date = new Date(isoString);
-    const time = date.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const day = date.toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
-    return `${time} ${day}`; // Format: "19:00 10/10/2024"
-  } catch (e) {
-    console.error('Lỗi format ngày:', e);
-    return 'Invalid Date';
-  }
-}
-
-function createFakeEmail(name: string): string {
-  const noDiacritics = name
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d");
-  const emailPrefix = noDiacritics.replace(/\s+/g, '.');
-  return `${emailPrefix}@gmail.com`;
-}
-
-
 function RouteComponent() {
-  const { id } = Route.useParams() as { id: string }; // 'id' này là courseId
-
+  const { id } = Route.useParams();
+  const course = courseDriver.getById(id);
   const [searchEmail, setSearchEmail] = useState('');
   const [sortOrder, setSortOrder] = useState('Cũ nhất');
+  const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const navigate = Route.useNavigate();
-  const course = mockCourses.find(c => c.id === id)!;
 
-  const allSubmissions: SubmissionEntry[] = useMemo(() => {
-    // // 1. Lọc các session thuộc khóa học này
-    // const courseSessions = mockSessions.filter(
-    //   (s) => s.courseId === id,
-    // );
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError('');
 
-    // return courseSessions.flatMap((session) =>
-    //   session.members.map(member => {
-    //     // 3. Tạo dữ liệu 'SubmissionEntry'
-    //     const score = generateRandomScore(); // Tạo điểm ngẫu nhiên
-    //     return {
-    //       name: member.name,
-    //       email: createFakeEmail(member.name), // Tạo email giả
-    //       submittedAt: formatISODate(session.start), // Dùng ngày bắt đầu session
-    //       score: score,
-    //       submissionName: session.title, // Dùng tiêu đề session làm "submissionName"
-    //     };
-    //   })
-    // );
-    const submission = getAllSubmissions();
-    const courseData = dataCourses.find(c => c.id === id);
-    
-    return submission
-      .filter(sub => sub.submittedAt) 
-      .map((sub) => {
-        const member = mockSessions
-          .flatMap(s => s.members)
-          .find(m => m.id === sub.memberId);
-        
-        // Tìm submission content từ dataCourses
-        const submissionContent = courseData?.content.find(
-          item => item.id === sub.submissionId && item.type === 'submission'
-        );
-        
-        return {
-          name: member ? member.name : 'Unknown',
-          email: createFakeEmail(member ? member.name : 'unknown'),
-          submittedAt: formatISODate(sub.submittedAt!),
-          score: sub.score,
-          submissionName: submissionContent?.title || 'Submission',
-          submissionId: sub.submissionId,
-        };
+    backendDriver
+      .getSubmissions({ courseId: id, viewerRole: 'tutor' })
+      .then((response) => {
+        if (active) setSubmissions(response.data.items.filter((item) => item.submittedAt));
+      })
+      .catch((reason: unknown) => {
+        if (!active) return;
+        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải bài nộp.');
+      })
+      .finally(() => {
+        if (active) setLoading(false);
       });
-  }, [id]); 
 
-  const displayedSubmissions = allSubmissions
-    .filter(entry =>
-      entry.email.toLowerCase().includes(searchEmail.toLowerCase())
-    )
-    .sort((a, b) => {
-      // 4. Sắp xếp dựa trên state `sortOrder`
-      const dateA = parseSubmissionDate(a.submittedAt);
-      const dateB = parseSubmissionDate(b.submittedAt);
+    return () => {
+      active = false;
+    };
+  }, [id]);
 
-      if (sortOrder === 'Mới nhất') {
-        return dateB.getTime() - dateA.getTime(); // Mới nhất lên đầu
-      }
-      return dateA.getTime() - dateB.getTime(); // Cũ nhất lên đầu (mặc định)
-    });
+  const displayedSubmissions = useMemo(
+    () =>
+      [...submissions]
+        .filter((entry) => entry.student.email.toLowerCase().includes(searchEmail.toLowerCase()))
+        .sort((a, b) => {
+          const dateA = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+          const dateB = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+          return sortOrder === 'Mới nhất' ? dateB - dateA : dateA - dateB;
+        }),
+    [searchEmail, sortOrder, submissions],
+  );
+
+  if (!course) {
+    return <StudyLayout><div className="p-8 text-center text-gray-500">Khóa học không tồn tại.</div></StudyLayout>;
+  }
 
   return (
     <StudyLayout>
-      {/* Back button (vẫn hoạt động) */}
-      {/* <Link
-          to={'/course/$id' as any}
-          className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
-        >
-          <ArrowLeft className="size-5" />
-          <span className="font-medium">Quay lại</span>
-        </Link> */}
-      <div>
-        {/* Back button */}
-        <button
-          onClick={() => navigate({ to: `/course/${id}` })}
-          className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
-        >
-          <ArrowLeft className="size-5" />
-          <span className="font-medium">Quay lại</span>
-        </button>
+      <button
+        onClick={() => navigate({ to: `/course/${id}` })}
+        className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
+      >
+        <ArrowLeft className="size-5" />
+        <span className="font-medium">Quay lại</span>
+      </button>
 
-        {/* Course header with background */}
-        <div
-          className="relative mb-8 rounded-lg p-8 text-white shadow-lg"
-          style={{
-            backgroundImage: `url(${course.bgImage})`,
-            backgroundSize: 'cover',
-            backgroundPosition: 'center',
-            minHeight: '250px',
-          }}
-        >
-          <div className="relative z-10">
-            <p className="mb-2 text-sm font-medium text-gray-200">
-              {course.code}
-            </p>
-            <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
-            <p className="text-lg text-gray-100">
-              Giảng viên: {course.instructor}
-            </p>
-
-            {/* Button "tổng quan" + "Đánh giá" */}
-            <div className="mt-6 flex gap-4">
-              <button
-                onClick={() => {
-                  navigate({ to: `/course/${id}` });
-                }}
-                className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] backdrop-blur-sm transition hover:bg-white/80">
-                Tổng quan
-              </button>
-              <button
-                onClick={() => {
-                  navigate({ to: `/course/${id}/rating` });
-                }}
-                className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] backdrop-blur-sm transition hover:bg-white/80"
-              >
-                Đánh giá
-              </button>
-            </div>
+      <div
+        className="relative mb-8 rounded-lg p-8 text-white shadow-lg"
+        style={{ backgroundImage: `url(${course.bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', minHeight: '250px' }}
+      >
+        <div className="relative z-10">
+          <p className="mb-2 text-sm font-medium text-gray-200">{course.code}</p>
+          <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
+          <p className="text-lg text-gray-100">Giảng viên: {course.instructor}</p>
+          <div className="mt-6 flex gap-4">
+            <button onClick={() => navigate({ to: `/course/${id}` })} className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] transition hover:bg-white/80">Tổng quan</button>
+            <button onClick={() => navigate({ to: `/course/${id}/rating` })} className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] transition hover:bg-white/80">Đánh giá</button>
           </div>
         </div>
       </div>
-      {/* Tiêu đề trang (giữ nguyên) */}
-      <h1 className="mb-6 text-3xl font-bold text-gray-800">
-        Tất cả bài nộp
-      </h1>
 
-      {/* Thanh filter và search (giữ nguyên) */}
+      <h1 className="mb-6 text-3xl font-bold text-gray-800">Tất cả bài nộp</h1>
       <div className="flex w-full items-center gap-4 bg-white pb-4">
         <div className="relative flex-1">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <Search className="size-5 text-gray-400" aria-hidden="true" />
-          </div>
-          <input
-            type="text"
-            name="search1"
-            id="search1"
-            className="block w-full rounded-lg border-gray-300 py-2.5 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6"
-            placeholder="Tìm kiếm..."
-          />
+          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3"><Search className="size-5 text-gray-400" aria-hidden="true" /></div>
+          <input type="text" name="searchEmail" id="searchEmail" className="block w-full rounded-lg border-gray-300 py-2.5 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6" placeholder="Nhập email học sinh để tìm kiếm ..." value={searchEmail} onChange={(event) => setSearchEmail(event.target.value)} />
         </div>
-
-        <div className="relative flex-1">
-          <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3">
-            <Search className="size-5 text-gray-400" aria-hidden="true" />
-          </div>
-          <input
-            type="text"
-            name="search2"
-            id="search2"
-            className="block w-full rounded-lg border-gray-300 py-2.5 pl-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 placeholder:text-gray-400 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6"
-            placeholder="Nhập email học sinh để tìm kiếm ..."
-            value={searchEmail}
-            onChange={(e) => setSearchEmail(e.target.value)}
-          />
-        </div>
-
-        <div>
-          <select
-            aria-label="Sắp xếp bài nộp theo"
-            id="sort"
-            name="sort"
-            className="block w-full min-w-[120px] rounded-lg border-gray-300 py-2.5 pl-3 pr-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6"
-            value={sortOrder}
-            onChange={(e) => setSortOrder(e.target.value)}
-          >
-            <option>Cũ nhất</option>
-            <option>Mới nhất</option>
-          </select>
-        </div>
+        <select aria-label="Sắp xếp bài nộp theo" id="sort" name="sort" className="block min-w-[120px] rounded-lg border-gray-300 py-2.5 pl-3 pr-10 text-gray-900 shadow-sm ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-inset focus:ring-blue-500 sm:text-sm sm:leading-6" value={sortOrder} onChange={(event) => setSortOrder(event.target.value)}>
+          <option>Cũ nhất</option>
+          <option>Mới nhất</option>
+        </select>
       </div>
 
-      <div className="space-y-6">
-        {displayedSubmissions.length > 0 ? (
-          displayedSubmissions.map((entry) => (
-            (<SubmissionItem key={`${entry.email}-${entry.submittedAt}`} entry={entry} courseId={id} />)
-          ))
-        ) : (
-          <div className="py-10 text-center text-gray-500">
-            <p>Không tìm thấy bài nộp nào.</p>
-          </div>
-        )}
-      </div>
+      {loading ? <div className="py-10 text-center text-gray-500">Đang tải bài nộp...</div> : null}
+      {error ? <div className="py-10 text-center text-red-600">{error}</div> : null}
+      {!loading && !error ? (
+        <div className="space-y-6">
+          {displayedSubmissions.length > 0 ? displayedSubmissions.map((entry) => <SubmissionItem key={entry.id} entry={entry} courseId={id} />) : <div className="py-10 text-center text-gray-500">Không tìm thấy bài nộp nào.</div>}
+        </div>
+      ) : null}
     </StudyLayout>
-  )
+  );
 }

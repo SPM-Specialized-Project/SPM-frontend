@@ -4,8 +4,9 @@ import { createFileRoute, useParams, useNavigate, Link } from '@tanstack/react-r
 import React, { useState, useEffect } from 'react' // Thêm useEffect
 import { toast } from 'react-toastify'
 
-import { getSessionById, updateSession } from '@/components/data/~mock-session'
+import { sessionDriver, updateSession } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 import { DeclinePopup } from './components/decline-popup'
 
@@ -46,8 +47,9 @@ function RouteComponent() {
   const { id } = useParams({ from: Route.id });
   const [declinePopup, setDeclinePopup] = useState(false);
   const navigate = useNavigate()
+  const sessions = useJsonData(sessionDriver)
 
-  const current = id ? getSessionById(id as string) : undefined
+  const current = id ? sessions.find((item) => item.id === id) : undefined
 
   // === Handlers (chỉ dùng cho Manager) ===
   const handleDeclineOpen = () => setDeclinePopup(true)

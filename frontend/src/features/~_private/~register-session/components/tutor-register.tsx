@@ -6,13 +6,14 @@ import { useNavigate } from '@tanstack/react-router';
 import React, { useState, useRef, useEffect } from 'react';
 
 // Import dữ liệu giả (từ file mock chúng ta đã tạo)
-import { mockCourses } from '@/components/data/~mock-courses';
+import { courseDriver } from '@/components/data/~mock-courses';
 import {
   mockLanguages,
   mockLocations
 } from '@/components/data/~mock-register';
 import type { PastRegistration as TutorReg } from '@/components/data/~mock-register';
-import { mockTutorRegistrations } from '@/components/data/~mock-tutor-register';
+import { tutorRegistrationDriver } from '@/components/data/~mock-tutor-register';
+import { useJsonData } from '@/services/use-json-data';
 
 // --- BIẾN ĐỔI SVG THÀNH COMPONENT ---
 // (Tái sử dụng các SVG bạn đã cung cấp)
@@ -70,9 +71,10 @@ const sessionTypeOptions: DropdownOption[] = [
 // === COMPONENT CHÍNH ===
 
 export function TutorRegister() {
+  const courses = useJsonData(courseDriver);
   // State cho form
   // Build course options from mockCourses
-  const courseOptions: DropdownOption[] = mockCourses.map(course => ({ id: course.id, name: `${course.title} (${course.code})` }));
+  const courseOptions: DropdownOption[] = courses.map(course => ({ id: course.id, name: `${course.title} (${course.code})` }));
   const [courseSelected, setCourseSelected] = useState<DropdownOption>(courseOptions[0]);
   const [language, setLanguage] = useState(mockLanguages[0]);
   const [sessionType, setSessionType] = useState(sessionTypeOptions[0]);
@@ -308,7 +310,7 @@ export function TutorRegister() {
               type="button"
               className="rounded-lg bg-blue-700 px-6 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-800"
               onClick={() => {
-                // Build tutor registration object and push to mockTutorRegistrations
+                // Build tutor registration object and persist it through the JSON driver
                 // Get tutor name from localStorage if available
                 let tutorName = 'Anonymous Tutor';
                 try {
@@ -337,7 +339,7 @@ export function TutorRegister() {
                   createdAt: new Date().toISOString(),
                 };
 
-                mockTutorRegistrations.unshift(newReg);
+                tutorRegistrationDriver.create(newReg);
                 // setSubmitted(true);
                 setTimeout(() => navigate({ to: '/registration-history' }), 1500);
               }}

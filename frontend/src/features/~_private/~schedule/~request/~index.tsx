@@ -8,10 +8,11 @@ import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-r
 import React, { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 
-import { mockCourses } from '@/components/data/~mock-courses'
+import { courseDriver } from '@/components/data/~mock-courses'
 import { getAllNames } from '@/components/data/~mock-names'
 import { saveSession, type SessionMember } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 export const Route = createFileRoute('/_private/schedule/request/')({
   beforeLoad: async () => {
@@ -41,6 +42,7 @@ export const Route = createFileRoute('/_private/schedule/request/')({
 function RouteComponent() {
   const navigate = useNavigate()
   const searchParams = useSearch({ from: '/_private/schedule/request/' })
+  const courses = useJsonData(courseDriver)
   
   // Form states
   const [title, setTitle] = useState(searchParams.title || '')
@@ -103,7 +105,7 @@ function RouteComponent() {
         present: false, // Default to not present yet
       }))
 
-    const course = mockCourses.find((c) => c.id === courseId)
+    const course = courses.find((c) => c.id === courseId)
 
     const newSession = {
       id: `s-${Date.now().toString(36)}`,
@@ -161,6 +163,7 @@ function RouteComponent() {
                 setStartDate={setStartDate}
                 endDate={endDate}
                 setEndDate={setEndDate}
+                courses={courses}
               />
 
               {/* Section: Chọn học sinh */}
@@ -187,6 +190,7 @@ function RouteComponent() {
  * Section 1: Thông tin cơ bản (Card có sóng)
  */
 interface BasicInfoSectionProps {
+  courses: ReadonlyArray<{ id: string; title: string }>
   title: string
   setTitle: (v: string) => void
   courseId: string
@@ -200,6 +204,7 @@ interface BasicInfoSectionProps {
 }
 
 function BasicInfoSection({
+  courses,
   title,
   setTitle,
   courseId,
@@ -317,7 +322,7 @@ function BasicInfoSection({
           onChange={(e) => setCourseId(e.target.value)}
         >
           <option value="">Chọn khóa học</option>
-          {mockCourses.map((c) => (
+          {courses.map((c) => (
             <option key={c.id} value={c.id}>{c.title}</option>
           ))}
         </FormSelect>

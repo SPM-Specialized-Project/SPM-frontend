@@ -5,9 +5,9 @@ import { toast } from 'react-toastify';
 
 // import CustomGoogleButton from '@/components/button/google-button';
 import handleAxiosError from '@/helpers/handle-axios-error';
+import { BackendDriverError, backendDriver } from '@/services/backend-driver';
 import { useAuthStore, useUserStore } from '@/stores';
 
-import mockupUsers from '../../../public/mockupUsers.json';
 // import overseaStudent from '../../assets/animations/Uy24MEqryK.json';
 import BachKhoaLogo from '../../assets/bachkhoa.png';
 
@@ -93,61 +93,35 @@ function RouteComponent() {
     try {
       setLoading(true);
 
-      // Find user from mockup data
-      const foundUser = mockupUsers.find(
-        (u) => u.email === email && u.password === password
-      );
-
-      if (!foundUser) {
-        // toast.error('Email hoặc mật khẩu không đúng!');
-        alert('Email hoặc mật khẩu không đúng!');
-        setWrongCredentials(true);
-        return;
-      }
-
-      // Generate a token based on user info
-      const accessToken = `token-${foundUser.role}-${Date.now()}`;
+      const response = await backendDriver.login({ email, password });
+      const { accessToken, role, user } = response.data;
 
       // Set token in auth store (this also sets isAuthenticated = true)
       setToken(accessToken);
 
       // Persist remembered email if requested
       try {
-        if (rememberMe) localStorage.setItem('rememberedEmail', foundUser.email);
+        if (rememberMe) localStorage.setItem('rememberedEmail', user.email);
         else localStorage.removeItem('rememberedEmail');
       } catch {
         // ignore storage errors
       }
 
-      // Set user data in user store
-      setUser({
-        _id: foundUser.email,
-        googleId: '',
-        appleId: null,
-        email: foundUser.email,
-        firstName: foundUser.role.charAt(0).toUpperCase() + foundUser.role.slice(1),
-        lastName: 'User',
-        picture: null,
-        dateOfBirth: null,
-        phone: null,
-        isManager: foundUser.role === 'coordinator' || foundUser.role === 'tutor' || foundUser.role === 'chairman',
-        isStudent: foundUser.role === 'student',
-        isTutor: foundUser.role === 'tutor',
-        isCoordinator: foundUser.role === 'coordinator',
-        statisticalPermission: foundUser.role === 'coordinator' || foundUser.role === 'chairman',
-        isChairman: foundUser.role === 'chairman',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        address: '',
-        highSchool: null,
-      });
+      setUser(user);
+      localStorage.setItem('role', role);
+      setWrongCredentials(false);
 
-      toast.success(`Đăng nhập thành công với vai trò ${foundUser.role}!`);
+      toast.success(`Đăng nhập thành công với vai trò ${role}!`);
       navigate({ to: '/dashboard' });
     } catch (error: unknown) {
-      handleAxiosError(error, (message: string) => {
-        toast.error(message);
-      });
+      if (error instanceof BackendDriverError) {
+        setWrongCredentials(error.code === 'INVALID_CREDENTIALS');
+        toast.error(error.message);
+      } else {
+        handleAxiosError(error, (message: string) => {
+          toast.error(message);
+        });
+      }
     } finally {
       setLoading(false);
     }

@@ -1,8 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 
-import { mockCourses } from '@/components/data/~mock-courses';
+import { courseDriver } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import StudyLayout from '@/components/study-layout';
+import { useJsonData } from '@/services/use-json-data';
 
 
 export const Route = createFileRoute('/_private/statistical/$id/')({
@@ -12,7 +13,8 @@ export const Route = createFileRoute('/_private/statistical/$id/')({
 function RouteComponent() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const course = mockCourses.find((c) => c.id === id);
+  const courses = useJsonData(courseDriver);
+  const course = courses.find((c) => c.id === id);
 
   // Refs for scroll spy - now using string keys from content types
   if (!course) {

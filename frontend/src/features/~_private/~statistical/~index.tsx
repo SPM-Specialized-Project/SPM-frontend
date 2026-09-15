@@ -4,13 +4,14 @@ import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import React, { useState } from 'react';
 
 import boxSvg from '@/assets/box.svg';
-import { mockCourses } from '@/components/data/~mock-courses';
+import { courseDriver } from '@/components/data/~mock-courses';
 import ChevronLeft from '@/components/icons/arrow-left';
 import ChevronRight from '@/components/icons/arrow-right';
 import ChevronDown from '@/components/icons/chevron';
 // replaced local double-chevron icons with Heroicons to fix rendering issues
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
+import { useJsonData } from '@/services/use-json-data';
 
 
 export const Route = createFileRoute('/statistical/' as any)({
@@ -37,13 +38,19 @@ const sampleTimes = [
   '08:30 13/10/2024',
 ]
 
-const mockCourseData = mockCourses.map((c, i) => ({
+type CourseStat = {
+  id: string;
+  title: string;
+  time: string;
+};
+
+const toCourseStats = (courses: ReadonlyArray<{ id: string; title: string }>): CourseStat[] => courses.map((c, i) => ({
   id: c.id,
   title: c.title,
   time: sampleTimes[i % sampleTimes.length],
 }))
 
-const CourseStatsCard: React.FC<{ course: typeof mockCourseData[0] }> = ({ course }) => {
+const CourseStatsCard: React.FC<{ course: CourseStat }> = ({ course }) => {
   const navigate = useNavigate();
 
   return (
@@ -92,17 +99,19 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({
 
 
 function RouteComponent() {
+  const courses = useJsonData(courseDriver);
+  const courseData = toCourseStats(courses);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(8);
   const [sortOrder, setSortOrder] = useState('newest');
 
   const isFirstDisabled = currentPage === 1;
-  const totalPages = Math.max(1, Math.ceil(mockCourses.length / itemsPerPage));
+  const totalPages = Math.max(1, Math.ceil(courseData.length / itemsPerPage));
   const isLastDisabled = currentPage === totalPages;
 
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
-  const displayedCourses = mockCourses.slice(startIndex, endIndex);
+  const displayedCourses = courseData.slice(startIndex, endIndex);
 
   const isPrevDisabled = currentPage === 1;
   const isNextDisabled = currentPage === totalPages;
@@ -157,7 +166,7 @@ function RouteComponent() {
           </div>
         </div>
 
-        {mockCourses.length === 0 ? (
+        {courseData.length === 0 ? (
           <div className="mb-8 flex flex-col items-center justify-center py-12">
             <img
               src={boxSvg}
@@ -169,8 +178,8 @@ function RouteComponent() {
         ) : (
           <div className="mb-8 space-y-4">
             {displayedCourses.map((course) => {
-              const courseData = mockCourseData.find((c) => c.id === course.id)
-              return <CourseStatsCard key={course.id} course={courseData!} />
+              const courseStat = courseData.find((c) => c.id === course.id)
+              return <CourseStatsCard key={course.id} course={courseStat!} />
             })}
           </div>
         )}

@@ -3,9 +3,10 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import React, { useState } from 'react'
 import { toast } from 'react-toastify'
 
-import { mockCourses } from '@/components/data/~mock-courses'
+import { courseDriver } from '@/components/data/~mock-courses'
 import { createRequestSession } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 export const Route = createFileRoute('/_private/schedule/request/new/')({
   beforeLoad: async () => {
@@ -17,6 +18,7 @@ export const Route = createFileRoute('/_private/schedule/request/new/')({
 // === COMPONENT CHÍNH CỦA TRANG ===
 function RouteComponent() {
   const navigate = useNavigate()
+  const courses = useJsonData(courseDriver)
 
   const [courseId, setCourseId] = useState('')
   const [title, setTitle] = useState('')
@@ -68,7 +70,7 @@ function RouteComponent() {
 
                 <FormSelect label="Khóa học (*):" id="course" value={courseId} onChange={(e) => setCourseId(e.target.value)}>
                   <option value="">Chọn khóa học</option>
-                  {mockCourses.map((c) => (
+                  {courses.map((c) => (
                     <option key={c.id} value={c.id}>{c.title}</option>
                   ))}
                 </FormSelect>

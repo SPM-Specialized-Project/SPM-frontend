@@ -10,12 +10,13 @@ import {
 } from '@heroicons/react/24/solid'
 import React, { useState, useMemo } from 'react'
 
-import { mockCourses } from '@/components/data/~mock-courses'
-import { mockPastRegistrations, type PastRegistration } from '@/components/data/~mock-register'
-import { mockSessions, type Session } from '@/components/data/~mock-session'
-import { mockTutorRegistrations } from '@/components/data/~mock-tutor-register'
+import { courseDriver } from '@/components/data/~mock-courses'
+import { pastRegistrationDriver, type PastRegistration } from '@/components/data/~mock-register'
+import { sessionDriver, type Session } from '@/components/data/~mock-session'
+import { tutorRegistrationDriver } from '@/components/data/~mock-tutor-register'
 import { Trash } from '@/components/icons'
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll'
+import { useJsonData } from '@/services/use-json-data'
 
 import { MatchingPopup } from './popup'
 
@@ -49,6 +50,11 @@ const ITEMS_PER_PAGE_BOTTOM = 5;
 
 // === Component Tab Kết Quả ===
 export function ResultTab() {
+  const courses = useJsonData(courseDriver);
+  const studentRegistrations = useJsonData(pastRegistrationDriver);
+  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
+  const sessions = useJsonData(sessionDriver);
+
   // --- State cho Phần Trên (Matched) ---
   const [topCurrentPage, setTopCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -66,7 +72,7 @@ export function ResultTab() {
   // --- Data cho Phần Trên (Matched Sessions) ---
   const matchedData = useMemo(() => {
     // 1. Nhóm các session theo courseId
-    const sessionsByCourse = mockSessions.reduce((acc, session) => {
+    const sessionsByCourse = sessions.reduce((acc, session) => {
       const courseId = session.courseId;
       if (!acc[courseId]) {
         acc[courseId] = [];
@@ -77,7 +83,7 @@ export function ResultTab() {
 
     // 2. Map với thông tin từ mockCourses để lấy tên và mã môn học
     return Object.keys(sessionsByCourse).map(courseId => {
-      const course = mockCourses.find(c => c.id === courseId);
+      const course = courses.find(c => c.id === courseId);
       const sessions = sessionsByCourse[courseId];
       return {
         courseId: courseId,
@@ -87,7 +93,7 @@ export function ResultTab() {
         sessions: sessions, // Các lớp/buổi học thuộc môn này
       };
     });
-  }, []);
+  }, [courses, sessions]);
 
   // 3. Phân trang cho phần trên
   const topTotalPages = Math.ceil(matchedData.length / ITEMS_PER_PAGE_TOP);
@@ -101,7 +107,7 @@ export function ResultTab() {
   // 1. Gộp và chuẩn hóa dữ liệu (Tái sử dụng logic từ index.tsx)
   const allUnmatchedRequests = useMemo((): UnifiedRegistration[] => {
     // Xử lý Student Registrations
-    const studentRequests: UnifiedRegistration[] = mockPastRegistrations.map(r => ({
+    const studentRequests: UnifiedRegistration[] = studentRegistrations.map(r => ({
       id: r.id,
       courseCode: r.subjects?.[0]?.name?.split('(')?.[1]?.replace(')', '') ?? 'N/A',
       name: r.Name,
@@ -114,7 +120,7 @@ export function ResultTab() {
     }));
 
     // Xử lý Tutor Registrations
-    const tutorRequests: UnifiedRegistration[] = mockTutorRegistrations.map(r => ({
+    const tutorRequests: UnifiedRegistration[] = tutorRegistrations.map(r => ({
       id: r.id,
       courseCode: r.subjects?.[0]?.name?.split('(')?.[1]?.replace(')', '') ?? 'N/A',
       name: r.Name,
@@ -130,7 +136,7 @@ export function ResultTab() {
     return [...studentRequests, ...tutorRequests]
       .filter(req => req.status === 'Pending');
 
-  }, []);
+  }, [studentRegistrations, tutorRegistrations]);
 
   // 2. Lọc dữ liệu dựa trên state search
   const filteredBottomRequests = useMemo(() => {
@@ -177,11 +183,11 @@ export function ResultTab() {
     const courseCode = selectedRegistration.courseCode;
 
     if (selectedRegistration.role === 'Student') {
-      const matchingTutors = mockTutorRegistrations
+      const matchingTutors = tutorRegistrations
         .filter(tutor => tutor.subjects.some(subject => subject?.name?.includes(courseCode)));
       return { people: matchingTutors, label: 'Tutor' };
     } else {
-      const matchingStudents = mockPastRegistrations
+      const matchingStudents = studentRegistrations
         .filter(student => (student.subjects?.[0]?.name?.split('(')?.[1]?.replace(')', '') ?? '') === courseCode);
       return { people: matchingStudents, label: 'Student' };
     }

@@ -9,14 +9,15 @@ import React, { useState, useMemo } from 'react'
 
 // --- Import Mock Data ---
 import {
-  mockPastRegistrations,
   mockLocations,
   mockLanguages,
+  pastRegistrationDriver,
 } from '@/components/data/~mock-register'
 import {
-  mockTutorRegistrations,
+  tutorRegistrationDriver,
 } from '@/components/data/~mock-tutor-register'
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll'
+import { useJsonData } from '@/services/use-json-data'
 
 import { FilterPopup, type FilterState } from './filter-popup'
 import { MatchingPopup } from './popup'
@@ -149,6 +150,9 @@ function Pagination({ currentPage, totalPages, onPageChange }: PaginationProps) 
 
 // Main DataTab component: contains search, filter, table, pagination, and popups
 export function DataTab() {
+  const studentRegistrations = useJsonData(pastRegistrationDriver);
+  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
+
   // Copied constants from overview context
   const ITEMS_PER_PAGE = 10;
 
@@ -170,7 +174,7 @@ export function DataTab() {
 
   // Build unified requests
   const allRequests = useMemo(() => {
-    const studentRequests = mockPastRegistrations.map(r => ({
+    const studentRequests = studentRegistrations.map(r => ({
       id: r.id,
       courseCode: r.subjects?.[0]?.name.split('(')[1]?.replace(')', '') ?? 'N/A',
       name: r.Name,
@@ -182,7 +186,7 @@ export function DataTab() {
       status: r.status,
     }));
 
-    const tutorRequests = mockTutorRegistrations.map(r => ({
+    const tutorRequests = tutorRegistrations.map(r => ({
       id: r.id,
       courseCode: r.subjects?.[0]?.name?.split('(')?.[1]?.replace(')', '') ?? 'N/A',
       name: r.Name,
@@ -195,7 +199,7 @@ export function DataTab() {
     }));
 
     return [...studentRequests, ...tutorRequests];
-  }, []);
+  }, [studentRegistrations, tutorRegistrations]);
 
   const filteredRequests = useMemo(() => {
     return allRequests
@@ -246,10 +250,10 @@ export function DataTab() {
     if (!selectedRegistration) return { people: [], label: '' };
     const courseCode = selectedRegistration.courseCode;
     if (selectedRegistration.role === 'Student') {
-      const matchingTutors = mockTutorRegistrations.filter(tutor => tutor.subjects?.some(s => s?.name?.includes(courseCode)));
+      const matchingTutors = tutorRegistrations.filter(tutor => tutor.subjects?.some(s => s?.name?.includes(courseCode)));
       return { people: matchingTutors, label: 'Tutor' };
     }
-    const matchingStudents = mockPastRegistrations.filter(s => (s.subjects?.[0]?.name.split('(')?.[1]?.replace(')', '') ?? '') === courseCode);
+    const matchingStudents = studentRegistrations.filter(s => (s.subjects?.[0]?.name.split('(')?.[1]?.replace(')', '') ?? '') === courseCode);
     return { people: matchingStudents, label: 'Student' };
   };
 
@@ -258,11 +262,9 @@ export function DataTab() {
   const handleMatchTutor = (tutorId: string) => {
     if (!selectedRegistration) return;
     if (selectedRegistration.role === 'Student') {
-      const idx = mockPastRegistrations.findIndex(r => r.id === selectedRegistration.id);
-      if (idx !== -1) mockPastRegistrations[idx].status = 'Approved';
+      pastRegistrationDriver.update(selectedRegistration.id, { status: 'Approved' });
     } else {
-      const idx = mockTutorRegistrations.findIndex(r => r.id === selectedRegistration.id);
-      if (idx !== -1) mockTutorRegistrations[idx].status = 'Approved';
+      tutorRegistrationDriver.update(selectedRegistration.id, { status: 'Approved' });
     }
     // Keep tutorId referenced to satisfy linter and for debugging
     console.log('Assigned person id:', tutorId, 'for registration:', selectedRegistration.id);

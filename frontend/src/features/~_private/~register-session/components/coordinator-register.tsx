@@ -5,9 +5,10 @@ import {
 import { useNavigate } from '@tanstack/react-router';
 import React, { useState, useRef, useEffect } from 'react';
 
-import { mockCourseCreationRequests, type CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
+import { courseCreationRequestDriver, type CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
 import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
+import { useJsonData } from '@/services/use-json-data';
 
 // --- BIẾN ĐỔI SVG THÀNH COMPONENT ---
 // (Tái sử dụng các SVG bạn đã cung cấp)
@@ -77,6 +78,8 @@ const sessionTypeOptions: DropdownOption[] = [
 // === COMPONENT CHÍNH ===
 
 export function CoordinatorRegister() {
+  const courseCreationRequests = useJsonData(courseCreationRequestDriver);
+
   // State cho form - Coordinator tạo môn học mới
   const [courseName, setCourseName] = useState(''); // Tên môn học
   const [courseCode, setCourseCode] = useState(''); // Mã môn học
@@ -165,14 +168,14 @@ export function CoordinatorRegister() {
             </div>
 
             <div className="max-h-[calc(90vh-120px)] overflow-y-auto p-6">
-              {mockCourseCreationRequests.length === 0 ? (
+              {courseCreationRequests.length === 0 ? (
                 <div className="py-12 text-center text-gray-500">
                   <HistoryIcon className="mx-auto mb-4 size-16 opacity-20" />
                   <p className="text-lg">Chưa có môn học nào được tạo</p>
                 </div>
               ) : (
                 <div className="space-y-4">
-                  {mockCourseCreationRequests.map((request) => (
+                  {courseCreationRequests.map((request) => (
                     <div
                       key={request.id}
                       className="rounded-lg border border-gray-200 bg-white p-6 shadow-custom-yellow transition hover:shadow-md"
@@ -198,9 +201,7 @@ export function CoordinatorRegister() {
                           type="button"
                           onClick={() => {
                             if (confirm(`Bạn có chắc chắn muốn xóa môn học "${request.courseName}"?`)) {
-                              const index = mockCourseCreationRequests.findIndex(r => r.id === request.id);
-                              if (index > -1) {
-                                mockCourseCreationRequests.splice(index, 1);
+                              if (courseCreationRequestDriver.remove(request.id)) {
                                 // Force re-render by closing and reopening modal
                                 setIsHistoryModalOpen(false);
                                 setTimeout(() => setIsHistoryModalOpen(true), 0);
@@ -550,7 +551,7 @@ export function CoordinatorRegister() {
                   createdAt: new Date().toISOString(),
                 };
 
-                mockCourseCreationRequests.unshift(newRequest);
+                courseCreationRequestDriver.create(newRequest);
                 alert('Yêu cầu tạo môn học đã được gửi!');
                 setTimeout(() => navigate({ to: '/registration-history' }), 1500);
               }}

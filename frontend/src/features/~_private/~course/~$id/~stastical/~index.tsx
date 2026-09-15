@@ -13,10 +13,11 @@ import {
 import React from 'react'
 
 // Giả sử đường dẫn đến file mock data
-import { Course, mockCourses } from '@/components/data/~mock-courses'
+import { courseDriver, type Course } from '@/components/data/~mock-courses'
 // import { mockSessions } from '@/components/data/~mock-session'
 import { ArrowLeft } from '@/components/icons'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 /**
  * Định nghĩa route
@@ -32,6 +33,7 @@ function RouteComponent() {
   // Lấy $id (courseId) từ URL
   const { id: courseId } = useParams({ from: Route.id });
   const navigate = useNavigate();
+  const courses = useJsonData(courseDriver);
 
   // Lấy tất cả "lượt nộp bài" (mỗi thành viên trong mỗi session)
   const allSubmissions = React.useMemo(() => {
@@ -39,7 +41,7 @@ function RouteComponent() {
     // const courseSessions = mockSessions.filter(
     //   (s) => s.courseId === courseId,
     // );
-    const course = mockCourses.find((c) => c.id === courseId) as Course;
+    const course = courses.find((c) => c.id === courseId) as Course;
 
 
 
@@ -320,7 +322,7 @@ function RouteComponent() {
         </div>
       </StudyLayout>
     );
-  }, [courseId, navigate]);
+  }, [courseId, courses, navigate]);
 
   return allSubmissions;
 }

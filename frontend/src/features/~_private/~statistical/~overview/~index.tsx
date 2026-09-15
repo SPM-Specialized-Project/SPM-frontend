@@ -1,8 +1,9 @@
 import { ClockIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { createFileRoute, Link } from '@tanstack/react-router'
 
-import { mockCourses } from '@/components/data/~mock-courses'
+import { courseDriver } from '@/components/data/~mock-courses'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 // 1. Dữ liệu mockup dựa trên hình ảnh
 // Sinh ra nhiều khóa học khác nhau (đa dạng tên khoa và nhiều bản ghi)
@@ -17,7 +18,13 @@ const sampleTimes = [
 ]
 
 // Tạo dữ liệu hiển thị từ mockCourses (mỗi entry lấy title từ mockCourses)
-const mockCourseData = mockCourses.map((c, i) => ({
+type CourseStat = {
+  id: string;
+  title: string;
+  time: string;
+};
+
+const toCourseStats = (courses: ReadonlyArray<{ id: string; title: string }>): CourseStat[] => courses.map((c, i) => ({
   id: c.id,
   title: c.title,
   time: sampleTimes[i % sampleTimes.length],
@@ -27,7 +34,7 @@ const mockCourseData = mockCourses.map((c, i) => ({
 function CourseStatsCard({
   course,
 }: {
-  course: (typeof mockCourseData)[0]
+  course: CourseStat
 }) {
   return (
     <div className="flex items-center justify-between rounded-lg border border-gray-600 bg-white p-5 shadow-custom-yellow">
@@ -61,6 +68,9 @@ export const Route = createFileRoute('/_private/statistical/overview/')({
 })
 
 function RouteComponent() {
+  const courses = useJsonData(courseDriver);
+  const courseData = toCourseStats(courses);
+
   return (
     <StudyLayout>
       <div className="min-h-full bg-gray-50 p-4 md:p-8">
@@ -74,7 +84,7 @@ function RouteComponent() {
         </Link>
         <div className="mx-auto max-w-5xl">
           <div className="space-y-4">
-            {mockCourseData.map((course) => (
+            {courseData.map((course) => (
               <CourseStatsCard key={course.id} course={course} />
             ))}
           </div>

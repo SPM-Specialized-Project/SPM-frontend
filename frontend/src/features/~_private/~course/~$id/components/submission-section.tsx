@@ -2,33 +2,19 @@ import React, { ComponentType } from 'react';
 
 import { Paper as PaperIcon } from '@/components/icons';
 import CalendarIcon from '@/components/icons/calendar';
+import type { CourseSubmission } from '@/types/course-content';
 
 import { SectionHeader } from './shared-components';
-
-interface SubmittedFile {
-  name: string;
-  submittedAt: string;
-}
-
-interface SubmissionData {
-  status: 'not-submitted' | 'submitted' | 'graded';
-  dueDate: string;
-  canEdit?: boolean;
-  grade?: string | null;
-  maxGrade?: string | null;
-  feedback?: string | null;
-  submittedFile?: SubmittedFile;
-}
 
 interface SubmissionSectionProps {
   Icon: ComponentType<{ className?: string }>;
   title: string;
-  data: SubmissionData;
+  data: CourseSubmission;
   changing: boolean;
   type: string;
   onTitleChange: (value: string) => void;
   onTypeChange: (value: string) => void;
-  onDataChange: (field: string, value: any) => void;
+  onDataChange: (field: string, value: unknown) => void;
   onDelete: () => void;
 }
 

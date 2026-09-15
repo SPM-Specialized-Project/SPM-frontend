@@ -6,8 +6,9 @@ import {
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { useRef, useState } from 'react'
 
-import { getMockSessions } from '@/components/data/~mock-session'
+import { sessionDriver } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 import { ScheduleDetailPopup } from './components/schedule-detail-popup'
 
@@ -92,6 +93,7 @@ function dayIndexFromISO(iso: string) {
 // --- COMPONENT CHÍNH CỦA TRANG ---
 
 function RouteComponent() {
+  const sessions = useJsonData(sessionDriver);
   // Reference date (any date within the currently visible week). We start at today.
   const [referenceDate, setReferenceDate] = useState(new Date());
   // Compute week labels for the header based on the referenceDate
@@ -128,7 +130,7 @@ function RouteComponent() {
 
   // Filter and map sessions to calendar items, only showing those within the currently visible week
   // and within visible hours (07:00-22:00). Computed inside component so it re-runs on state change.
-  const calendarItems = getMockSessions()
+  const calendarItems = sessions
     .filter((s) => {
       const startDate = new Date(s.start);
       // Keep only sessions starting within [weekStart, weekEnd)

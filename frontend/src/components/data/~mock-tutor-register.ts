@@ -1,3 +1,6 @@
+import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
+import { createBackendDataDriver } from '@/services/json-data-driver';
+
 import { mockCourses } from './~mock-courses';
 import { mockLanguages, mockLocations , PastRegistration} from './~mock-register';
 
@@ -73,9 +76,26 @@ export const mockTutorRegistrations: PastRegistration[] = [
   },
 ];
 
+/** Backend driver replacing direct writes to mockTutorRegistrations. */
+export const tutorRegistrationDriver = createBackendDataDriver(
+  mockTutorRegistrations,
+  {
+    list: async () => (await backendDriver.getRegistrations({ ...getCurrentViewerContext(), registrationType: 'tutor' })).data.items,
+    create: async (record) => (await backendDriver.createRegistration({
+      ...getCurrentViewerContext(),
+      registrationType: 'tutor',
+      item: { ...record, ownerRole: 'tutor', ownerEmail: record.Email },
+    })).data.item,
+    update: async (id, patch) => (await backendDriver.updateRegistration({
+      ...getCurrentViewerContext(),
+      registrationType: 'tutor',
+      registrationId: id,
+      patch,
+    })).data.item,
+    remove: async (id) => (await backendDriver.deleteRegistration(id, getCurrentViewerContext())).data.deleted,
+  },
+);
+
 export function deleteTutorRegistration(id: string): boolean {
-  const idx = mockTutorRegistrations.findIndex(r => r.id === id);
-  if (idx === -1) return false;
-  mockTutorRegistrations.splice(idx, 1);
-  return true;
+  return tutorRegistrationDriver.remove(id);
 }

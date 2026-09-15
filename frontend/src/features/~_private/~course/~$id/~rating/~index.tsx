@@ -2,10 +2,11 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useMemo, useState, useEffect } from 'react';
 
-import { mockCourses } from '@/components/data/~mock-courses';
+import { courseDriver } from '@/components/data/~mock-courses';
 import { ArrowLeft } from '@/components/icons';
 import Icon from '@/components/icons/icon';
 import StudyLayout from '@/components/study-layout';
+import { useJsonData } from '@/services/use-json-data';
 import storage from '@/utils/storage';
 
 export const Route = createFileRoute('/_private/course/$id/rating/')({
@@ -86,9 +87,10 @@ export function StarRating({
 
 function RouteComponent() {
   const { id } = Route.useParams();
+  const courses = useJsonData(courseDriver);
   const course = useMemo(() => {
-    return mockCourses.find((c) => c.id === id) ?? mockCourses[0];
-  }, [id]);
+    return courses.find((c) => c.id === id) ?? courses[0];
+  }, [courses, id]);
   const [comment, setComment] = useState('');
   const [searchName, setSearchName] = useState('');
   const [searchEmail, setSearchEmail] = useState('');

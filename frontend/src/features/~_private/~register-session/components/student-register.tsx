@@ -3,12 +3,13 @@ import { useNavigate } from '@tanstack/react-router';
 import React, { useState, useRef, useEffect } from 'react';
 
 // Import dữ liệu giả (điều chỉnh đường dẫn nếu cần)
-import { mockCourses } from '@/components/data/~mock-courses';
+import { courseDriver } from '@/components/data/~mock-courses';
 import {
   mockLanguages,
   mockLocations,
   createPastRegistration,
 } from '@/components/data/~mock-register';
+import { useJsonData } from '@/services/use-json-data';
 
 // --- BIẾN ĐỔI SVG THÀNH COMPONENT ---
 
@@ -53,9 +54,10 @@ const LocationIcon = (props: React.SVGProps<SVGSVGElement>) => (
 // === COMPONENT CHÍNH ===
 
 export function StudentRegister() {
+  const courses = useJsonData(courseDriver);
   // State cho form
   // Dropdown option arrays for subject and session type (from mock data)
-  const subjectOptions: DropdownOption[] = mockCourses.map((c) => ({ id: c.id, name: `${c.title} (${c.code})` }));
+  const subjectOptions: DropdownOption[] = courses.map((c) => ({ id: c.id, name: `${c.title} (${c.code})` }));
   const [isSaved, setIsSaved] = useState(true);
   const [showSaveStatus, setShowSaveStatus] = useState(false);
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);

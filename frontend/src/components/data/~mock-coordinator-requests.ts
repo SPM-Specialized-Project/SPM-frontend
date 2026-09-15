@@ -1,3 +1,6 @@
+import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
+import { createBackendDataDriver } from '@/services/json-data-driver';
+
 import { mockLanguages, mockLocations } from './~mock-register';
 
 // --- Định nghĩa Type ---
@@ -11,6 +14,8 @@ type DropdownOption = {
 // Kiểu dữ liệu cho một yêu cầu tạo môn học của COORDINATOR
 export type CourseCreationRequest = {
   id: string;
+  ownerRole?: 'student' | 'tutor' | 'coordinator' | 'chairman';
+  ownerEmail?: string;
   coordinatorName: string;
   coordinatorEmail: string;
   courseName: string; // Tên môn học mới
@@ -115,3 +120,21 @@ export const mockCourseCreationRequests: CourseCreationRequest[] = [
     updatedAt: '2025-11-09T09:20:00Z',
   },
 ];
+
+/** Backend driver for course creation requests. */
+export const courseCreationRequestDriver = createBackendDataDriver(
+  mockCourseCreationRequests,
+  {
+    list: async () => (await backendDriver.getCourseCreationRequests(getCurrentViewerContext())).data.items,
+    create: async (record) => (await backendDriver.createCourseCreationRequest({
+      ...getCurrentViewerContext(),
+      item: { ...record, ownerRole: 'coordinator', ownerEmail: record.coordinatorEmail },
+    })).data.item,
+    update: async (id, patch) => (await backendDriver.updateCourseCreationRequest({
+      ...getCurrentViewerContext(),
+      requestId: id,
+      patch,
+    })).data.item,
+    remove: async (id) => (await backendDriver.deleteCourseCreationRequest(id, getCurrentViewerContext())).data.deleted,
+  },
+);

@@ -1,6 +1,11 @@
 import React from 'react';
 
 import BookIcon from '@/components/icons/book';
+import type {
+  CourseContent,
+  CourseContentType,
+  CourseDetail,
+} from '@/types/course-content';
 
 import { typeToIconMap } from './course-constants';
 import { IntroductionSection } from './introduction-section';
@@ -9,16 +14,6 @@ import { MovieSection } from './movie-section';
 import { NoteSection } from './note-section';
 import { ReferenceSection } from './reference-section';
 import { SubmissionSection } from './submission-section';
-
-interface CourseContent {
-  type: string;
-  title: string;
-  data: any;
-}
-
-interface CourseDetail {
-  content?: CourseContent[];
-}
 
 interface ContentSectionProps {
   item: CourseContent;
@@ -42,10 +37,18 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
   const Icon = typeToIconMap[item.type] || BookIcon;
 
   // Handler to update item field
-  const handleUpdateItem = (field: string, value: any) => {
+  const handleUpdateItem = (field: 'title' | 'type', value: string) => {
     if (courseDetail) {
-      const updatedContent: any[] = [...(courseDetail.content || [])];
-      updatedContent[index] = { ...(updatedContent[index] as any), [field]: value };
+      const updatedContent = [...courseDetail.content];
+      const current = updatedContent[index];
+      if (!current) return;
+
+      if (field === 'title') {
+        updatedContent[index] = { ...current, title: value };
+      } else if (isCourseContentType(value)) {
+        updatedContent[index] = { ...current, type: value } as CourseContent;
+      }
+
       setCourseDetail({ ...courseDetail, content: updatedContent });
     }
   };
@@ -59,11 +62,16 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
   };
 
   // Handler to update nested data
-  const handleUpdateData = (dataField: string, value: any) => {
+  const handleUpdateData = (dataField: string, value: unknown) => {
     if (courseDetail) {
-      const updatedContent: any[] = [...(courseDetail.content || [])];
-      const prev = updatedContent[index] as any;
-      const newData = { ...(prev?.data || {}), [dataField]: value };
+      const updatedContent = [...courseDetail.content];
+      const prev = updatedContent[index];
+      if (!prev) return;
+
+      const newData = {
+        ...(prev.data as Record<string, unknown>),
+        [dataField]: value,
+      };
 
       // Special handling for submission status changes
       if (prev?.type === 'submission' && dataField === 'status') {
@@ -86,10 +94,22 @@ export const ContentSection: React.FC<ContentSectionProps> = ({
       updatedContent[index] = {
         ...prev,
         data: newData,
-      };
+      } as CourseContent;
       setCourseDetail({ ...courseDetail, content: updatedContent });
     }
   };
+
+function isCourseContentType(value: string): value is CourseContentType {
+  return [
+    'introduction',
+    'material',
+    'movie',
+    'note',
+    'reference',
+    'submission',
+    'bookReference',
+  ].includes(value);
+}
 
   switch (item.type) {
     case 'introduction':

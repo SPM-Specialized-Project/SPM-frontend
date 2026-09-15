@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 
-import { CourseCreationRequest, mockCourseCreationRequests } from '@/components/data/~mock-coordinator-requests';
+import { courseCreationRequestDriver, type CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
 import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
+import { useJsonData } from '@/services/use-json-data';
 
 type DropdownOption = {
   id: string;
@@ -14,7 +15,7 @@ const sessionTypeOptions = [
 ];
 
 function AdminRegister() {
-  const [requests, setRequests] = useState<CourseCreationRequest[]>(mockCourseCreationRequests);
+  const requests = useJsonData(courseCreationRequestDriver);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<CourseCreationRequest>>({});
 
@@ -28,17 +29,10 @@ function AdminRegister() {
   const handleSave = () => {
     if (!editingId) return;
     
-    setRequests(prev =>
-      prev.map(req =>
-        req.id === editingId
-          ? {
-              ...req,
-              ...editForm,
-              updatedAt: new Date().toISOString(),
-            }
-          : req
-      )
-    );
+    courseCreationRequestDriver.update(editingId, {
+      ...editForm,
+      updatedAt: new Date().toISOString(),
+    });
     
     setEditingId(null);
     setEditForm({});

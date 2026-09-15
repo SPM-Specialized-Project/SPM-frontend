@@ -7,10 +7,11 @@ import { createFileRoute, useParams, useNavigate, Link } from '@tanstack/react-r
 import React, { useState, useEffect } from 'react'
 import { toast } from 'react-toastify'
 
-import { mockCourses } from '@/components/data/~mock-courses'
+import { courseDriver } from '@/components/data/~mock-courses'
 import { getAllNames } from '@/components/data/~mock-names'
-import { getSessionById, updateSession, deleteSession, Session } from '@/components/data/~mock-session'
+import { sessionDriver, updateSession, deleteSession, Session } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
+import { useJsonData } from '@/services/use-json-data'
 
 export const Route = createFileRoute('/_private/schedule/$id/')({
   beforeLoad: async () => {
@@ -32,9 +33,11 @@ function RouteComponent() {
   // Lấy ID từ URL
   const { id } = useParams({ from: Route.id })
   const navigate = useNavigate()
+  const sessions = useJsonData(sessionDriver)
+  const courses = useJsonData(courseDriver)
 
-  // load session from mock data (if present)
-  const session = id ? getSessionById(id as string) : undefined
+  // load session from backend-backed driver
+  const session = id ? sessions.find((item) => item.id === id) : undefined
   // Build a shared mock members fallback (synchronized across components)
   const mockMembers = getAllNames().map((m) => ({ id: String(m.id), name: m.name }))
 
@@ -333,6 +336,7 @@ function RouteComponent() {
                 onEndChange={setEndLocal}
                 onLinkChange={setLink}
                 onLocationChange={setLocationVal}
+                courses={courses}
               />
               {/* Tutor note panel appears only after session end */}
               {session && new Date(session.end).getTime() < Date.now() && (
@@ -380,6 +384,7 @@ function RouteComponent() {
  * Section 1: Thông tin cơ bản
  */
 interface BasicInfoProps {
+  courses: ReadonlyArray<{ id: string; title: string }>
   title: string
   courseId: string
   courseTitle: string
@@ -398,6 +403,7 @@ interface BasicInfoProps {
 }
 
 function BasicInfoSection({
+  courses,
   title,
   courseId,
   sessionType,
@@ -440,7 +446,7 @@ function BasicInfoSection({
           value={courseId}
           onChange={(e) => onCourseIdChange(e.target.value)}
         >
-          {mockCourses.map((c) => (
+          {courses.map((c) => (
             <option key={c.id} value={c.id}>
               {c.id} - {c.title}
             </option>

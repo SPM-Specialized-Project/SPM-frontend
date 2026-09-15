@@ -1,17 +1,18 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useEffect, SVGProps } from 'react';
+import { useCallback, useState, useEffect, SVGProps } from 'react';
 
 
 import {
-  mockPastRegistrations,
   type PastRegistration,
-  deletePastRegistration
+  deletePastRegistration,
+  pastRegistrationDriver,
 } from '@/components/data/~mock-register';
 import {
-  mockTutorRegistrations,
-  deleteTutorRegistration
+  deleteTutorRegistration,
+  tutorRegistrationDriver,
 } from '@/components/data/~mock-tutor-register';
 import StudyLayout from '@/components/study-layout';
+import { useJsonData } from '@/services/use-json-data';
 
 // [THÊM] Định nghĩa kiểu dữ liệu cho user
 interface UserProfile {
@@ -44,12 +45,15 @@ export const Route = createFileRoute('/_private/registration-history/')({
 });
 
 function RouteComponent() {
+  const studentRegistrations = useJsonData(pastRegistrationDriver);
+  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
+
   // [SỬA] Dùng useState để lưu user, tránh lỗi khi render
   const [user, setUser] = useState<UserProfile | null>(null);
   const [registrations, setRegistrations] = useState<AnyRegistration[]>([]);
 
   // Tải lại danh sách đăng ký từ mock data, áp dụng cùng logic lọc theo user
-  const loadRegistrations = () => {
+  const loadRegistrations = useCallback(() => {
     try {
       const rawUserStore = localStorage.getItem('userStore');
       const userStore = rawUserStore ? JSON.parse(rawUserStore as string) : null;
@@ -61,23 +65,23 @@ function RouteComponent() {
       if (userLocalStore) {
         if (userLocalStore.isCoordinator) {
           const allRegs: AnyRegistration[] = [
-            ...mockPastRegistrations.map(r => ({ ...r, registrationType: 'Student' as const })),
-            ...mockTutorRegistrations.map(r => ({ ...r, registrationType: 'Tutor' as const })),
+            ...studentRegistrations.map(r => ({ ...r, registrationType: 'Student' as const })),
+            ...tutorRegistrations.map(r => ({ ...r, registrationType: 'Tutor' as const })),
           ];
           setRegistrations(allRegs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
         } else if (userLocalStore.isTutor) {
-          const myTutorRegs = mockTutorRegistrations
+          const myTutorRegs = tutorRegistrations
             .filter(r => r.Name.includes(userLocalStore.firstName))
             .map(r => ({ ...r, registrationType: 'Tutor' as const }));
           setRegistrations(myTutorRegs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
         } else {
           const name = userLocalStore.firstName;
 
-          const myStudentRegs = mockPastRegistrations
+          const myStudentRegs = studentRegistrations
             .filter(r => r.Name.includes(name))
             .map(r => ({ ...r, registrationType: 'Student' as const }));
 
-          const myTutorRegs = mockTutorRegistrations
+          const myTutorRegs = tutorRegistrations
             .filter(r => r.Name.includes(name))
             .map(r => ({ ...r, registrationType: 'Tutor' as const }));
 
@@ -92,7 +96,7 @@ function RouteComponent() {
       setUser(null);
       setRegistrations([]);
     }
-  };
+  }, [studentRegistrations, tutorRegistrations]);
 
   // Dùng useEffect để load dữ liệu ban đầu và khi trang trở về visible
   useEffect(() => {
@@ -105,7 +109,7 @@ function RouteComponent() {
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, []);
+  }, [loadRegistrations]);
 
   // Xử lý xóa: confirm -> xóa trong mock -> reload danh sách
   const handleRemove = (id: string) => {

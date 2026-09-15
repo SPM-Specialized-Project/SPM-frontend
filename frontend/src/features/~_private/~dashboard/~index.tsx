@@ -8,12 +8,13 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import React, { useState } from 'react';
 
 import boxSvg from '@/assets/box.svg';
-import { mockCourses, type Course } from '@/components/data/~mock-courses';
+import { courseDriver, type Course } from '@/components/data/~mock-courses';
 // removed pagination-specific chevron SVG imports - using emoji in controls now
 import ChevronRight from '@/components/icons/arrow-right';
 import ChevronDown from '@/components/icons/chevron';
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
+import { useJsonData } from '@/services/use-json-data';
 
 const CourseCard: React.FC<{ course: Course }> = ({ course }) => {
   const navigate = useNavigate();  
@@ -99,13 +100,14 @@ export const Route = createFileRoute('/_private/dashboard/')({
 });
 
 function DashboardComponent() {
+  const courses = useJsonData(courseDriver);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(8);
   const [sortOrder, setSortOrder] = useState('newest');
   const [searchQuery, setSearchQuery] = useState('');
 
   // Filter courses by search query
-  const filteredCourses = mockCourses.filter((course) => {
+  const filteredCourses = courses.filter((course) => {
     const query = searchQuery.toLowerCase().trim();
     if (!query) return true;
     return (
