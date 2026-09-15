@@ -1,6 +1,11 @@
 {
   "name": "SOFTWARE-ENGINEER-BTL",
   "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "backend": "node backend/server.mjs",
+    "backend:watch": "node --watch backend/server.mjs"
+  },
   "main": "index.js",
   "repository": "https://github.com/Tung-Quan/SOFTWARE-ENGINEER-BTL.git",
   "author": "khafu19768 <106819634+khafu19768@users.noreply.github.com>",

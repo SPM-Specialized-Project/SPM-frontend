@@ -1,0 +1,107 @@
+[
+  {
+    "id": "s-1",
+    "ownerRole": "tutor",
+    "ownerEmail": "tutor@gmail.com",
+    "courseId": "1",
+    "courseTitle": "Computer Network",
+    "title": "Computer Network - Buổi 1",
+    "desc": "Giới thiệu syllabus và môi trường học tập.",
+    "tutorNote": "https://docs.example.com/tutor-notes/session-1",
+    "instructor": "Nguyễn Lê Duy Lai",
+    "instructorEmail": "nguyen.le.duy.lai@tutor.example.com",
+    "method": "online",
+    "link": "https://meet.example.com/abc-123",
+    "start": "2025-12-17T09:00:00.000Z",
+    "end": "2025-12-17T10:00:00.000Z",
+    "members": [
+      {
+        "id": 1,
+        "name": "Nguyễn Văn A",
+        "present": true
+      },
+      {
+        "id": 2,
+        "name": "Trần Thị B",
+        "present": false
+      }
+    ],
+    "studentNames": [
+      "Nguyễn Văn A",
+      "Trần Thị B"
+    ],
+    "requestType": "new",
+    "status": "scheduled",
+    "createdAt": "2025-12-01T08:00:00.000Z"
+  },
+  {
+    "id": "s-2",
+    "ownerRole": "tutor",
+    "ownerEmail": "tutor@gmail.com",
+    "courseId": "2",
+    "courseTitle": "Database System",
+    "title": "Database System - Lab",
+    "desc": "Thiết kế schema và queries cơ bản.",
+    "tutorNote": "https://docs.example.com/tutor-notes/session-2",
+    "instructor": "Nguyễn Thị Ái Thảo",
+    "instructorEmail": "nguyen.thi.ai.thao@tutor.example.com",
+    "method": "offline",
+    "location": "Phòng A-101",
+    "start": "2025-12-17T13:00:00.000Z",
+    "end": "2025-12-17T15:00:00.000Z",
+    "members": [
+      {
+        "id": 1,
+        "name": "Phạm Văn D",
+        "present": true
+      },
+      {
+        "id": 2,
+        "name": "Hoàng Thị E",
+        "present": true
+      }
+    ],
+    "studentNames": [
+      "Phạm Văn D",
+      "Hoàng Thị E"
+    ],
+    "requestType": "makeup",
+    "status": "scheduled",
+    "createdAt": "2025-12-01T08:00:00.000Z"
+  },
+  {
+    "id": "s-3",
+    "ownerRole": "tutor",
+    "ownerEmail": "tutor@gmail.com",
+    "courseId": "2",
+    "courseTitle": "Database System",
+    "title": "Database System - Tổng hợp",
+    "desc": "Tổng hợp chương 1-3 và Q&A.",
+    "tutorNote": "https://docs.example.com/tutor-notes/session-3",
+    "instructor": "Nguyễn Thị Ái Thảo",
+    "instructorEmail": "nguyen.thi.ai.thao@tutor.example.com",
+    "method": "online",
+    "link": "https://meet.example.com/xyz-789",
+    "start": "2025-12-18T10:00:00.000Z",
+    "end": "2025-12-18T11:30:00.000Z",
+    "members": [
+      {
+        "id": 1,
+        "name": "Phạm Văn D",
+        "present": false
+      },
+      {
+        "id": 2,
+        "name": "Hoàng Thị E",
+        "present": false
+      }
+    ],
+    "studentNames": [
+      "Phạm Văn D",
+      "Hoàng Thị E"
+    ],
+    "requestType": "new",
+    "status": "scheduled",
+    "createdAt": "2025-12-01T08:00:00.000Z"
+  }
+]

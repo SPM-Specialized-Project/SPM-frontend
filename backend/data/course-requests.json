@@ -1,0 +1,74 @@
+[
+  {
+    "id": "course-req-1",
+    "ownerRole": "coordinator",
+    "ownerEmail": "coordinator@gmail.com",
+    "coordinatorName": "Nguyễn Văn An",
+    "coordinatorEmail": "coordinator@gmail.com",
+    "courseName": "Advanced Machine Learning",
+    "courseCode": "CS401",
+    "languages": [
+      {
+        "id": "vi",
+        "name": "Tiếng Việt"
+      },
+      {
+        "id": "en",
+        "name": "English"
+      }
+    ],
+    "sessionTypes": [
+      {
+        "id": "online",
+        "name": "Học trực tuyến"
+      }
+    ],
+    "locations": [],
+    "timeSlots": [
+      {
+        "id": "slot-1",
+        "date": "2025-11-15",
+        "time": "08:00"
+      }
+    ],
+    "description": "Khóa học chuyên sâu về Machine Learning và ứng dụng thực tế.",
+    "status": "Approved",
+    "reasons": "Nội dung phù hợp với chương trình đào tạo.",
+    "createdAt": "2025-11-01T09:00:00.000Z",
+    "updatedAt": "2025-11-03T14:30:00.000Z"
+  },
+  {
+    "id": "course-req-2",
+    "ownerRole": "coordinator",
+    "ownerEmail": "coordinator@gmail.com",
+    "coordinatorName": "Trần Thị Bình",
+    "coordinatorEmail": "coordinator@gmail.com",
+    "courseName": "Cloud Computing Fundamentals",
+    "courseCode": "CS350",
+    "languages": [
+      {
+        "id": "vi",
+        "name": "Tiếng Việt"
+      }
+    ],
+    "sessionTypes": [
+      {
+        "id": "hybrid",
+        "name": "Học trực tiếp kết hợp trực tuyến"
+      }
+    ],
+    "locations": [],
+    "meetLink": "https://meet.google.com/abc-xyz-123",
+    "timeSlots": [
+      {
+        "id": "slot-2",
+        "date": "2025-11-20",
+        "time": "14:00"
+      }
+    ],
+    "description": "Giới thiệu về điện toán đám mây và triển khai ứng dụng.",
+    "status": "Pending",
+    "reasons": "Chờ phê duyệt từ ban giám hiệu.",
+    "createdAt": "2025-11-10T11:20:00.000Z"
+  }
+]

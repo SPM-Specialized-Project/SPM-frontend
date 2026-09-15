@@ -1,0 +1,87 @@
+[
+  {
+    "id": "reg-1",
+    "registrationType": "student",
+    "ownerRole": "student",
+    "ownerEmail": "student@gmail.com",
+    "Name": "Student",
+    "Email": "student@gmail.com",
+    "subjects": [
+      {
+        "id": "3",
+        "name": "Operating System (79748_CO2013_003185_CLC)"
+      }
+    ],
+    "languages": [
+      {
+        "id": "vi",
+        "name": "Tiếng Việt"
+      }
+    ],
+    "sessionTypes": [
+      {
+        "id": "hybrid",
+        "name": "Học trực tiếp kết hợp trực tuyến"
+      }
+    ],
+    "locations": [
+      {
+        "id": "p1",
+        "name": "Phường 1"
+      }
+    ],
+    "specialRequest": "Muốn học sâu về quản lý bộ nhớ và virtual memory.",
+    "status": "Approved",
+    "createdAt": "2025-11-01T10:00:00.000Z"
+  },
+  {
+    "id": "tutor-reg-1",
+    "registrationType": "tutor",
+    "ownerRole": "tutor",
+    "ownerEmail": "tutor@gmail.com",
+    "Name": "Tutor",
+    "Email": "tutor@gmail.com",
+    "subjects": [
+      {
+        "id": "2",
+        "name": "Database System (79748_CO2013_003184_CLC)"
+      }
+    ],
+    "languages": [
+      {
+        "id": "vi",
+        "name": "Tiếng Việt"
+      }
+    ],
+    "sessionTypes": [
+      {
+        "id": "hybrid",
+        "name": "Học trực tiếp kết hợp trực tuyến"
+      }
+    ],
+    "locations": [
+      {
+        "id": "p3",
+        "name": "Phường 3"
+      }
+    ],
+    "specialRequest": "Chuyên dạy SQL, tối ưu hóa truy vấn và NoSQL.",
+    "status": "Pending",
+    "createdAt": "2025-11-10T11:20:00.000Z"
+  },
+  {
+    "id": "tutor-reg-1789460401956",
+    "Name": "Tutor",
+    "Email": "tutor@tutor.example.com",
+    "subjects": [],
+    "languages": [],
+    "sessionTypes": [],
+    "locations": [],
+    "specialRequest": "d",
+    "status": "Pending",
+    "createdAt": "2026-09-15T08:20:01.956Z",
+    "ownerRole": "tutor",
+    "ownerEmail": "tutor@tutor.example.com",
+    "registrationType": "tutor"
+  }
+]
