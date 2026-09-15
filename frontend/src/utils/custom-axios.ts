@@ -3,7 +3,7 @@ import axios from 'axios';
 import storage from '@/helpers/storage';
 
 const instance = axios.create({
-  baseURL: 'http://locahost:3001', // port BE, will be changed later when BE is ready
+  baseURL: import.meta.env.VITE_BACKEND_URL ?? '/api',
   withCredentials: true,
 });
 
