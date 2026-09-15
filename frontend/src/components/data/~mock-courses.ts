@@ -1,6 +1,9 @@
 import bgBlue from '@/assets/bg-dashboard-blue.png';
 import bgGreen from '@/assets/bg-dashboard-green.png';
 import bgRed from '@/assets/bg-dashboard-red.png';
+import { backendDriver } from '@/services/backend-driver';
+import { createBackendDataDriver } from '@/services/json-data-driver';
+import type { CourseDetail } from '@/types/course-content';
 
 
 export type Course = {
@@ -193,19 +196,14 @@ export const mockCourses: Course[] = [
     sessionsOrganized: 17,
   },
 ];
-export type DataCourses={
-  id: string,
-  code: string,
-  title: string,
-  instructor: string,
-  content:{
-    id: string,
-    type: string,
-    data: any
-  }[]
-}
 
-export const dataCourses = [
+/** Backend-backed course catalogue driver. The local list is only the first paint fallback. */
+export const courseDriver = createBackendDataDriver(mockCourses, {
+  list: async () => (await backendDriver.getCourses({ viewerRole: 'coordinator' })).data.items,
+});
+export type DataCourses = CourseDetail;
+
+export const dataCourses: DataCourses[] = [
   {
     id: '4',
     code: '79748_CO2013_003186_CLC',
@@ -340,6 +338,16 @@ export const dataCourses = [
     ],
   },
 ];
+
+/** Course-content driver used by the detail/submission screens. */
+export const courseDetailDriver = createBackendDataDriver(dataCourses, {
+  list: async () => {
+    const records = await Promise.all(
+      dataCourses.map(async (course) => (await backendDriver.getCourseDetail(course.id)).data.detail),
+    );
+    return records;
+  },
+});
 // Mock: số lượng bài đã nộp theo khóa học và submission
 // key: courseId -> key: submission key (tên hoặc id) -> số bài đã nộp
 export const mockSubmissionSubmittedCounts: Record<
