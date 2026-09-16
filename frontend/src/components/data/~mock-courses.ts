@@ -1,8 +1,8 @@
 import bgBlue from '@/assets/bg-dashboard-blue.png';
 import bgGreen from '@/assets/bg-dashboard-green.png';
 import bgRed from '@/assets/bg-dashboard-red.png';
-import { backendDriver } from '@/services/backend-driver';
-import { createBackendDataDriver } from '@/services/json-data-driver';
+import { api } from '@/services/api-client';
+import { createRemoteDataStore } from '@/services/data-store';
 import type { CourseDetail } from '@/types/course-content';
 
 
@@ -197,9 +197,24 @@ export const mockCourses: Course[] = [
   },
 ];
 
-/** Backend-backed course catalogue driver. The local list is only the first paint fallback. */
-export const courseDriver = createBackendDataDriver(mockCourses, {
-  list: async () => (await backendDriver.getCourses({ viewerRole: 'coordinator' })).data.items,
+/** API-backed course catalogue. The local list is only the first paint fallback. */
+export const withCoursePresentation = (serverCourse: Omit<Course, 'bgImage'>): Course => {
+  const localCourse = mockCourses.find((course) => course.id === serverCourse.id);
+
+  return {
+    ...(localCourse ?? mockCourses[0]),
+    ...serverCourse,
+    stats: { ...(localCourse?.stats ?? serverCourse.stats), ...serverCourse.stats },
+    students: serverCourse.students?.length
+      ? serverCourse.students
+      : (localCourse?.students ?? []),
+    bgImage: localCourse?.bgImage ?? bgBlue,
+  };
+};
+
+export const courseStore = createRemoteDataStore(mockCourses, {
+  list: async () =>
+    (await api.getCourses({ viewerRole: 'coordinator' })).data.items.map(withCoursePresentation),
 });
 export type DataCourses = CourseDetail;
 
@@ -339,11 +354,11 @@ export const dataCourses: DataCourses[] = [
   },
 ];
 
-/** Course-content driver used by the detail/submission screens. */
-export const courseDetailDriver = createBackendDataDriver(dataCourses, {
+/** API-backed course content store used by the detail/submission screens. */
+export const courseDetailStore = createRemoteDataStore(dataCourses, {
   list: async () => {
     const records = await Promise.all(
-      dataCourses.map(async (course) => (await backendDriver.getCourseDetail(course.id)).data.detail),
+      dataCourses.map(async (course) => (await api.getCourseDetail(course.id)).data.detail),
     );
     return records;
   },

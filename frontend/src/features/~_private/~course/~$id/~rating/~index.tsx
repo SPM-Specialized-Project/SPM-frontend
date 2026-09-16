@@ -1,9 +1,9 @@
 import { createFileRoute, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 import storage from '@/utils/storage';
 
 import { CoordinatorRatingView } from './components/coordinator-rating-view';
@@ -20,7 +20,7 @@ export const Route = createFileRoute('/_private/course/$id/rating/')({
 
 function RouteComponent() {
   const { id } = Route.useParams();
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const course = useMemo(
     () => courses.find((item) => item.id === id) ?? courses[0],
     [courses, id],

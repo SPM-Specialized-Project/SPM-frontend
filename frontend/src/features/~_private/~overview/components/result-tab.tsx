@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
-import { pastRegistrationDriver, type PastRegistration } from '@/components/data/~mock-register';
-import { sessionDriver, type Session } from '@/components/data/~mock-session';
-import { tutorRegistrationDriver } from '@/components/data/~mock-tutor-register';
+import { courseStore } from '@/components/data/~mock-courses';
+import { pastRegistrationStore, type PastRegistration } from '@/components/data/~mock-register';
+import { sessionStore, type Session } from '@/components/data/~mock-session';
+import { tutorRegistrationStore } from '@/components/data/~mock-tutor-register';
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { MatchedSessionsPanel } from './matched-sessions-panel';
 import { MatchingPopupOverlay } from './matching-popup-overlay';
@@ -16,10 +16,10 @@ const ITEMS_PER_PAGE_TOP = 3;
 const ITEMS_PER_PAGE_BOTTOM = 5;
 
 export function ResultTab() {
-  const courses = useJsonData(courseDriver);
-  const studentRegistrations = useJsonData(pastRegistrationDriver);
-  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
-  const sessions = useJsonData(sessionDriver);
+  const courses = useDataStore(courseStore);
+  const studentRegistrations = useDataStore(pastRegistrationStore);
+  const tutorRegistrations = useDataStore(tutorRegistrationStore);
+  const sessions = useDataStore(sessionStore);
 
   const [topCurrentPage, setTopCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());

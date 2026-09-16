@@ -1,8 +1,8 @@
 import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { CoordinatorCourseView } from '../components/coordinator-course-view';
 
@@ -13,7 +13,7 @@ export const Route = createFileRoute('/_private/course/$id/stastical/')({
 function RouteComponent() {
   const { id: courseId } = useParams({ from: Route.id });
   const navigate = useNavigate();
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const course = courses.find((item) => item.id === courseId);
 
   if (!course) {

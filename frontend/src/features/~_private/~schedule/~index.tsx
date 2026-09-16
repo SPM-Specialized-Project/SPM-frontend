@@ -2,9 +2,9 @@ import { ArrowLeftIcon } from '@heroicons/react/24/solid';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useState } from 'react';
 
-import { sessionDriver } from '@/components/data/~mock-session';
+import { sessionStore } from '@/components/data/~mock-session';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { CalendarGrid } from './components/calendar-grid';
 import { BannerWave } from './components/schedule-banner';
@@ -19,7 +19,7 @@ export const Route = createFileRoute('/_private/schedule/')({
 });
 
 function RouteComponent() {
-  const sessions = useJsonData(sessionDriver);
+  const sessions = useDataStore(sessionStore);
   const [referenceDate, setReferenceDate] = useState(new Date());
   const [role, setRole] = useState<'student' | 'tutor'>(
     localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student',

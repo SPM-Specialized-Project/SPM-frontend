@@ -3,10 +3,10 @@ import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import React, { useState } from 'react'
 import { toast } from 'react-toastify'
 
-import { courseDriver } from '@/components/data/~mock-courses'
+import { courseStore } from '@/components/data/~mock-courses'
 import { createRequestSession } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
-import { useJsonData } from '@/services/use-json-data'
+import { useDataStore } from '@/services/use-data-store'
 
 export const Route = createFileRoute('/_private/schedule/request/new/')({
   beforeLoad: async () => {
@@ -18,7 +18,7 @@ export const Route = createFileRoute('/_private/schedule/request/new/')({
 // === COMPONENT CHÍNH CỦA TRANG ===
 function RouteComponent() {
   const navigate = useNavigate()
-  const courses = useJsonData(courseDriver)
+  const courses = useDataStore(courseStore)
 
   const [courseId, setCourseId] = useState('')
   const [title, setTitle] = useState('')

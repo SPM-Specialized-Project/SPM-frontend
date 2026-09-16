@@ -1,9 +1,9 @@
 import { ClockIcon, ArrowLeftIcon } from '@heroicons/react/24/outline'
 import { createFileRoute, Link } from '@tanstack/react-router'
 
-import { courseDriver } from '@/components/data/~mock-courses'
+import { courseStore } from '@/components/data/~mock-courses'
 import StudyLayout from '@/components/study-layout'
-import { useJsonData } from '@/services/use-json-data'
+import { useDataStore } from '@/services/use-data-store'
 
 // 1. Dữ liệu mockup dựa trên hình ảnh
 // Sinh ra nhiều khóa học khác nhau (đa dạng tên khoa và nhiều bản ghi)
@@ -68,7 +68,7 @@ export const Route = createFileRoute('/_private/statistical/overview/')({
 })
 
 function RouteComponent() {
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const courseData = toCourseStats(courses);
 
   return (
