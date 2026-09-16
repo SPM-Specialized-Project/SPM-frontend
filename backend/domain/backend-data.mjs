@@ -74,7 +74,7 @@ const getCourseDetail = (course, viewerRole = 'student') => ({
   ],
   permissions: getResourcePermissions({ viewerRole, resourceType: 'course' }),
   meta: {
-    source: 'local-backend',
+    source: 'node-backend',
     updatedAt: new Date().toISOString(),
     viewerRole: normalizeRole(viewerRole),
   },
@@ -143,7 +143,7 @@ const toResource = (record, viewerRole, viewerEmail, resourceType = 'generic') =
     resourceType,
   }),
   meta: {
-    source: 'local-backend',
+    source: 'node-backend',
     updatedAt: record.updatedAt ?? record.createdAt ?? new Date().toISOString(),
     viewerRole: normalizeRole(viewerRole),
     ownerRole: record.ownerRole,
@@ -170,7 +170,7 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
       canCreate: isManager(viewerRole) || viewerRole === 'student' || viewerRole === 'tutor',
     },
     meta: {
-      source: 'local-backend',
+      source: 'node-backend',
       updatedAt: new Date().toISOString(),
       total: visibleItems.length,
     },
@@ -204,7 +204,7 @@ const createCourseSubmissionRecords = (course, assignmentId) =>
       },
       status: isGraded ? 'graded' : 'submitted',
       score: isGraded ? 8.5 : null,
-      feedback: isGraded ? 'Bài làm đạt yêu cầu trong backend driver.' : '',
+      feedback: isGraded ? 'Bài làm đạt yêu cầu trong Node.js backend.' : '',
       submittedAt,
       fileUrl: '/group07_report 02.pdf',
     };

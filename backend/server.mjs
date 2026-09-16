@@ -9,12 +9,12 @@ const server = http.createServer((request, response) => {
     const status = Number(error?.status) || 500;
     sendJson(response, status, {
       code: error?.code ?? 'BACKEND_ERROR',
-      message: error?.message ?? 'Backend driver error.',
+      message: error?.message ?? 'Backend error.',
     });
   });
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('SPM backend driver listening at http://localhost:' + PORT);
+  console.log('SPM Node.js backend listening at http://localhost:' + PORT);
   console.log('Persistent submission data: ' + SUBMISSIONS_FILE);
 });

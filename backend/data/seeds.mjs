@@ -134,7 +134,7 @@ const INITIAL_SUBMISSIONS = [
     },
     status: 'graded',
     score: 8.5,
-    feedback: 'Bài làm đạt yêu cầu trong backend driver.',
+    feedback: 'Bài làm đạt yêu cầu trong Node.js backend.',
     submittedAt: '2025-01-10T09:00:00.000Z',
     fileUrl: '/group07_report 02.pdf',
   },

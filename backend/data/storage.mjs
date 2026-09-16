@@ -15,6 +15,7 @@ import {
 } from './seeds.mjs';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
+let writeQueue = Promise.resolve();
 
 const ensureDataDirectory = () => mkdir(DATA_DIRECTORY, { recursive: true });
 

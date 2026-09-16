@@ -31,7 +31,7 @@ async function handleRequest(request, response) {
   const parts = requestUrl.pathname.split('/').filter(Boolean);
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/health') {
-    sendJson(response, 200, { ok: true, service: 'spm-backend-driver' });
+    sendJson(response, 200, { ok: true, service: 'spm-backend' });
     return;
   }
 
@@ -44,7 +44,7 @@ async function handleRequest(request, response) {
     if (!user) throw apiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng!');
 
     sendJson(response, 200, {
-      accessToken: `local-backend-token-${user.role}-${Date.now()}`,
+      accessToken: `node-backend-token-${user.role}-${Date.now()}`,
       user: createUser(user),
       role: user.role,
     });
@@ -118,7 +118,7 @@ async function handleRequest(request, response) {
         canCreate: viewerRole === 'student',
       },
       meta: {
-        source: 'local-backend',
+        source: 'node-backend',
         updatedAt: new Date().toISOString(),
         total: items.length,
       },
