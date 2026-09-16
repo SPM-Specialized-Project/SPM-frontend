@@ -1,5 +1,5 @@
-import { FormInput, FormSelect } from "./detail-form-controls";
 import { BannerWave } from "./detail-banner";
+import { FormInput, FormSelect } from "./detail-form-controls";
 
 interface BasicInfoProps {
   courses: ReadonlyArray<{ id: string; title: string }>

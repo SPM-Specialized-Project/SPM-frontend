@@ -1,8 +1,9 @@
 import CalendarIcon from '@/components/icons/calendar';
 import DescriptionIcon from '@/components/icons/description';
+import type { CourseContent } from '@/types/course-content';
+
 import pdfIcon from './pdfIcon.png';
 import type { SectionRendererProps } from './section-renderer-types';
-import type { CourseContent } from '@/types/course-content';
 
 type SubmissionItem = Extract<CourseContent, { type: 'submission' }>;
 type SubmissionStudentProps = Pick<SectionRendererProps<SubmissionItem>, 'item' | 'file' | 'setFile' | 'changedFile' | 'setchangedFile' | 'previewUrl' | 'changedPreviewUrl'>;

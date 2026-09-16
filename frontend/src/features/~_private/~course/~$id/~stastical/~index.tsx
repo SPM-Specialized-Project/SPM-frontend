@@ -28,7 +28,6 @@ function RouteComponent() {
     <StudyLayout>
       <CoordinatorCourseView
         course={course}
-        id={courseId}
         onBack={() => navigate({ to: `/course/${courseId}` as any })}
         onRate={() => navigate({ to: `/course/${courseId}/rating` as any })}
       />

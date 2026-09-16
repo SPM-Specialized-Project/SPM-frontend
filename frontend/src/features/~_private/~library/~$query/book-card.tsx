@@ -1,5 +1,5 @@
-import Book from '@/components/icons/book';
 import ChevronRight from '@/components/icons/arrow-right';
+import Book from '@/components/icons/book';
 import type { Book as BookType } from '@/types/book.type';
 
 export function BookCard({ book, onDetails }: { book: BookType; onDetails: (book: BookType) => void }) {

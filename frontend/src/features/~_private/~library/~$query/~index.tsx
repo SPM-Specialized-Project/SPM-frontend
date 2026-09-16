@@ -9,8 +9,8 @@ import type { Book as BookType } from '@/types/book.type';
 import { searchVNULibrary } from '@/utils/vnu-library';
 
 import { BookCard } from './book-card';
-import { LibraryPagination } from './library-pagination';
 import { BookDetailsModal } from './lib-popup';
+import { LibraryPagination } from './library-pagination';
 
 export const Route = createFileRoute('/_private/library/$query/')({
   component: RouteComponent,

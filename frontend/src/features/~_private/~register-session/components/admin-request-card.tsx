@@ -1,6 +1,6 @@
 import { AdminRequestEditor } from './admin-request-editor';
-import { AdminRequestView } from './admin-request-view';
 import type { AdminRequestCardProps } from './admin-request-types';
+import { AdminRequestView } from './admin-request-view';
 
 export function AdminRequestCard({ request, editing, onEdit, ...editorProps }: AdminRequestCardProps) {
   return (

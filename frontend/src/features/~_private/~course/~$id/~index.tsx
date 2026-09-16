@@ -162,7 +162,6 @@ function CourseDetailsComponent() {
       <StudyLayout>
         <CoordinatorCourseView
           course={course}
-          id={id}
           onBack={() => navigate({ to: '/statistical' })}
           onRate={() => navigate({ to: `/course/${id}/rating` })}
         />

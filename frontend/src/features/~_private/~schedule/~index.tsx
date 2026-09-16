@@ -7,8 +7,8 @@ import StudyLayout from '@/components/study-layout';
 import { useJsonData } from '@/services/use-json-data';
 
 import { CalendarGrid } from './components/calendar-grid';
-import { ScheduleHeader } from './components/schedule-header';
 import { BannerWave } from './components/schedule-banner';
+import { ScheduleHeader } from './components/schedule-header';
 import { dayIndexFromISO, getWeekLabels, toHHMM, type CalendarItemData } from './components/schedule-utils';
 
 export const Route = createFileRoute('/_private/schedule/')({

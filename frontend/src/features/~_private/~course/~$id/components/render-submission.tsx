@@ -1,9 +1,9 @@
 import type { CourseContent } from '@/types/course-content';
 
+import type { SectionRendererProps } from './section-renderer-types';
 import { SubmissionHeader } from './submission-header';
 import { SubmissionManagerView } from './submission-manager-view';
 import { SubmissionStudentView } from './submission-student-view';
-import type { SectionRendererProps } from './section-renderer-types';
 
 type SubmissionItem = Extract<CourseContent, { type: 'submission' }>;
 

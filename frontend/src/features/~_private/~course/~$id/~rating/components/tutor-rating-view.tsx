@@ -2,8 +2,8 @@ import type { Dispatch, SetStateAction } from 'react';
 
 import type { Course } from '@/components/data/~mock-courses';
 
-import { FeedbackField } from './student-rating-view';
 import { RatingCourseHeader } from './rating-course-header';
+import { FeedbackField } from './student-rating-view';
 
 type TutorRatingViewProps = {
   course: Course;

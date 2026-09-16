@@ -1,7 +1,7 @@
+import BookIcon from '@/components/icons/book';
 import type { CourseContent } from '@/types/course-content';
 
 import { typeToIconMap } from './course-constants';
-import BookIcon from '@/components/icons/book';
 
 type CourseContentNavigationProps = {
   content: CourseContent[];

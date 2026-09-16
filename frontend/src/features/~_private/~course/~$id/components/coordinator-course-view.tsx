@@ -5,7 +5,6 @@ import ArrowLeft from '@/components/icons/arrow-left';
 
 type CoordinatorCourseViewProps = {
   course: Course;
-  id: string;
   onBack: () => void;
   onRate: () => void;
 };
@@ -18,7 +17,6 @@ const statisticCards = [
 
 export function CoordinatorCourseView({
   course,
-  id,
   onBack,
   onRate,
 }: CoordinatorCourseViewProps) {

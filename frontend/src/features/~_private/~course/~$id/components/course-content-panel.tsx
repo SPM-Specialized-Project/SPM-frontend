@@ -1,8 +1,9 @@
 import type { MutableRefObject, ReactNode } from 'react';
 
 import type { DataCourses } from '@/components/data/~mock-courses';
-import { CreateMaterialIcon } from './course-icons';
 import type { CourseContent } from '@/types/course-content';
+
+import { CreateMaterialIcon } from './course-icons';
 
 type CourseContentPanelProps = {
   courseDetail: DataCourses;

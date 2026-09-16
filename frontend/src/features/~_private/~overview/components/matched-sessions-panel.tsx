@@ -1,8 +1,8 @@
 import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/solid';
 import { Fragment } from 'react';
 
-import { Pagination, SessionDetailsRow, TableCell, TableHeader } from './result-ui';
 import type { MatchedCourseGroup } from './result-types';
+import { Pagination, SessionDetailsRow, TableCell, TableHeader } from './result-ui';
 
 export function MatchedSessionsPanel({
   data,

@@ -2,6 +2,7 @@ import { Listbox, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 
 import BookIcon from '@/components/icons/book';
+
 import { categoryTypes, typeToIconMap } from './course-constants';
 import type { SectionRendererProps } from './section-renderer-types';
 

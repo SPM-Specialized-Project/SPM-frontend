@@ -1,9 +1,10 @@
 import { Link } from '@tanstack/react-router';
 
 import CalendarIcon from '@/components/icons/calendar';
+import type { CourseContent } from '@/types/course-content';
+
 import { CheckCircleIcon, FolderIcon } from './course-icons';
 import type { SectionRendererProps } from './section-renderer-types';
-import type { CourseContent } from '@/types/course-content';
 
 type SubmissionItem = Extract<CourseContent, { type: 'submission' }>;
 type SubmissionManagerProps = Pick<SectionRendererProps<SubmissionItem>, 'item' | 'onUpdateData'> & { id: string };

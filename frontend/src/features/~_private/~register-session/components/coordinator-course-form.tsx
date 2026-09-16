@@ -1,3 +1,5 @@
+import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
+
 import {
   AddButton,
   FormDropdown,
@@ -6,7 +8,6 @@ import {
   type DropdownOption,
 } from './coordinator-form-controls';
 import { ClockIcon, LanguageIcon, LocationIcon, SessionTypeIcon } from './coordinator-icons';
-import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
 
 const sessionTypeOptions: DropdownOption[] = [
   { id: 'online', name: 'Học trực tiếp' },

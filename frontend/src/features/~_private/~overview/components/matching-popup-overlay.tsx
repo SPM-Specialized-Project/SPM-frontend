@@ -1,5 +1,6 @@
-import { MatchingPopup } from './popup';
 import type { PastRegistration } from '@/components/data/~mock-register';
+
+import { MatchingPopup } from './popup';
 import type { UnifiedRegistration } from './result-types';
 
 export function MatchingPopupOverlay({

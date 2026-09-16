@@ -7,9 +7,9 @@ import { useJsonData } from '@/services/use-json-data';
 import storage from '@/utils/storage';
 
 import { CoordinatorRatingView } from './components/coordinator-rating-view';
+import type { RatingItem, RatingUserStore } from './components/rating-types';
 import { StudentRatingView } from './components/student-rating-view';
 import { TutorRatingView } from './components/tutor-rating-view';
-import type { RatingItem, RatingUserStore } from './components/rating-types';
 
 export type { RatingItem } from './components/rating-types';
 export { StarRating } from './components/star-rating';

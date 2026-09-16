@@ -1,7 +1,7 @@
 import { MagnifyingGlassIcon } from '@heroicons/react/24/solid';
 
-import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
 import type { UnifiedRegistration } from './result-types';
+import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
 
 export function UnmatchedRequestsPanel({
   requests,

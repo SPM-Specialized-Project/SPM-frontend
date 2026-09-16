@@ -11,7 +11,7 @@ const Footer: React.FC = () => {
       <div className="container mx-auto flex items-center px-6 py-8">
         
         {/* Phần Logo */}
-        <div className="flex-shrink-0">
+        <div className="shrink-0">
           {/* SỬA: Sử dụng biến logo đã import */}
           <img 
             src={BachKhoaLogo} 

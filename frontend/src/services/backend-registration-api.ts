@@ -1,6 +1,5 @@
 import type { PastRegistration } from '@/components/data/~mock-register';
 
-import { backendApi, backendRequest } from './backend-http';
 import type {
   BackendMutationRequest,
   BackendResourceResponse,
@@ -10,6 +9,7 @@ import type {
   RegistrationQuery,
   UpdateRegistrationRequest,
 } from './backend-driver-types';
+import { backendApi, backendRequest } from './backend-http';
 
 export const registrationApi = {
   getRegistrations(

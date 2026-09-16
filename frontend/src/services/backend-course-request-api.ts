@@ -1,6 +1,5 @@
 import type { CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
 
-import { backendApi, backendRequest } from './backend-http';
 import type {
   BackendMutationRequest,
   BackendResourceResponse,
@@ -10,6 +9,7 @@ import type {
   CourseRequestQuery,
   UpdateCourseRequestRequest,
 } from './backend-driver-types';
+import { backendApi, backendRequest } from './backend-http';
 
 export const courseRequestApi = {
   getCourseCreationRequests(

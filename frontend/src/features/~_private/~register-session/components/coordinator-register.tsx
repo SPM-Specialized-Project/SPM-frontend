@@ -10,13 +10,13 @@ import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
 import { useJsonData } from '@/services/use-json-data';
 
 import {
-  type DropdownOption,
-} from './coordinator-form-controls';
-import { HistoryIcon } from './coordinator-icons';
-import {
   CoordinatorCourseForm,
   type CoordinatorTimeSlot,
 } from './coordinator-course-form';
+import {
+  type DropdownOption,
+} from './coordinator-form-controls';
+import { HistoryIcon } from './coordinator-icons';
 import { CourseCreationHistoryModal } from './course-creation-history-modal';
 import { ScheduleModal } from './schedule-modal';
 

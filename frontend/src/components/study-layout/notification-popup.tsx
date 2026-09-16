@@ -4,7 +4,7 @@ import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
 
 import { BellIcon, CheckIcon, SettingsIcon } from './notification-icons';
 import { NotificationList } from './notification-list';
-import { getNotificationsStore, subscribeNotifications, updateNotificationsStore } from './notification-store';
+import { getNotificationsStore, updateNotificationsStore } from './notification-store';
 import type { Notification } from './notification-types';
 
 export { getNotificationsStore, subscribeNotifications } from './notification-store';

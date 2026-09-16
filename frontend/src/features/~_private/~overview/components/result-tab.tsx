@@ -9,8 +9,8 @@ import { useJsonData } from '@/services/use-json-data';
 
 import { MatchedSessionsPanel } from './matched-sessions-panel';
 import { MatchingPopupOverlay } from './matching-popup-overlay';
-import { UnmatchedRequestsPanel } from './unmatched-requests-panel';
 import type { MatchedCourseGroup, UnifiedRegistration } from './result-types';
+import { UnmatchedRequestsPanel } from './unmatched-requests-panel';
 
 const ITEMS_PER_PAGE_TOP = 3;
 const ITEMS_PER_PAGE_BOTTOM = 5;

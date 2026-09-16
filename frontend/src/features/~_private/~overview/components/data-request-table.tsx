@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
-import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
 import type { UnifiedRegistration } from './result-types';
+import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
 
 export function DataRequestTable({
   requests,

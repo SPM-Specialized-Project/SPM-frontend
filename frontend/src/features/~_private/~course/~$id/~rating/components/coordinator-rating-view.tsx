@@ -1,9 +1,10 @@
 import { useState } from 'react';
 
 import type { Course } from '@/components/data/~mock-courses';
-import { StarRating } from './star-rating';
 
 import { RatingCourseHeader } from './rating-course-header';
+import { StarRating } from './star-rating';
+
 
 type CoordinatorRatingViewProps = {
   course: Course;

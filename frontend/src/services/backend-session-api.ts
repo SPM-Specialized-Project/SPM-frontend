@@ -1,6 +1,5 @@
 import type { Session } from '@/components/data/~mock-session';
 
-import { backendApi, backendRequest } from './backend-http';
 import type {
   BackendListQuery,
   BackendMutationRequest,
@@ -10,6 +9,7 @@ import type {
   SessionListResponse,
   UpdateSessionRequest,
 } from './backend-driver-types';
+import { backendApi, backendRequest } from './backend-http';
 
 export const sessionApi = {
   getSessions(query: BackendListQuery): Promise<BackendResponse<SessionListResponse>> {

@@ -1,12 +1,12 @@
 import { courseDriver, type Course } from '@/components/data/~mock-courses';
 
-import { backendApi, backendRequest } from './backend-http';
 import type {
   BackendListQuery,
   BackendResponse,
   CourseDetailResponse,
   CourseListResponse,
 } from './backend-driver-types';
+import { backendApi, backendRequest } from './backend-http';
 
 const getCourseWithLocalPresentation = <T extends Course>(serverCourse: T): T => {
   const localCourse = courseDriver.getById(serverCourse.id);

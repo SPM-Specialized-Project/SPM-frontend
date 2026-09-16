@@ -1,4 +1,3 @@
-import { backendApi, backendRequest } from './backend-http';
 import type {
   BackendResponse,
   SubmissionListResponse,
@@ -6,6 +5,7 @@ import type {
   SubmissionUpdateResponse,
   UpdateSubmissionRequest,
 } from './backend-driver-types';
+import { backendApi, backendRequest } from './backend-http';
 
 export const submissionApi = {
   getSubmissions(
