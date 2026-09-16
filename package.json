@@ -3,8 +3,9 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
-    "backend": "node backend/server.mjs",
-    "backend:watch": "node --watch backend/server.mjs"
+    "backend": "npm --prefix backend run start",
+    "backend:watch": "npm --prefix backend run dev",
+    "backend:test": "npm --prefix backend test"
   },
   "main": "index.js",
   "repository": "https://github.com/Tung-Quan/SOFTWARE-ENGINEER-BTL.git",
