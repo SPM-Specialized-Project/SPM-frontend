@@ -9,6 +9,7 @@ import type {
   ApiMutationRequest,
   ApiResourceResponse,
   ApiResponse,
+  AddMembershipRequest,
   CourseDetailResponse,
   CourseListResponse,
   CourseRequestListResponse,
@@ -18,6 +19,10 @@ import type {
   CreateSessionRequest,
   LoginRequest,
   LoginResponse,
+  MembershipListResponse,
+  MembershipMutationResponse,
+  MembershipQuery,
+  RevokeMembershipRequest,
   RegistrationListResponse,
   RegistrationQuery,
   SessionListResponse,
@@ -90,10 +95,48 @@ export const api = {
     return request(() => apiClient.get<CourseListResponse>('/courses', { params: query }));
   },
 
-  getCourseDetail(courseId: string): Promise<ApiResponse<CourseDetailResponse>> {
+  getCourseDetail(
+    courseId: string,
+    query?: MembershipQuery,
+  ): Promise<ApiResponse<CourseDetailResponse>> {
     return request(() =>
       apiClient.get<CourseDetailResponse>(
         `/courses/${encodeURIComponent(courseId)}/detail`,
+        { params: query },
+      ),
+    );
+  },
+
+  getMemberships(
+    classroomId: string,
+    query: MembershipQuery,
+  ): Promise<ApiResponse<MembershipListResponse>> {
+    return request(() =>
+      apiClient.get<MembershipListResponse>(
+        `/classrooms/${encodeURIComponent(classroomId)}/memberships`,
+        { params: query },
+      ),
+    );
+  },
+
+  addMembership(
+    addRequest: AddMembershipRequest,
+  ): Promise<ApiResponse<MembershipMutationResponse>> {
+    return request(() =>
+      apiClient.post<MembershipMutationResponse>(
+        `/classrooms/${encodeURIComponent(addRequest.classroomId)}/memberships`,
+        addRequest,
+      ),
+    );
+  },
+
+  revokeMembership(
+    revokeRequest: RevokeMembershipRequest,
+  ): Promise<ApiResponse<MembershipMutationResponse>> {
+    return request(() =>
+      apiClient.patch<MembershipMutationResponse>(
+        `/classrooms/${encodeURIComponent(revokeRequest.classroomId)}/memberships/${encodeURIComponent(revokeRequest.membershipId)}`,
+        { ...revokeRequest, status: 'REVOKED' },
       ),
     );
   },
