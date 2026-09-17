@@ -114,7 +114,7 @@ const getResourcePermissions = ({
     (viewerEmail && ownerEmail && viewerEmail === ownerEmail) ||
       (!viewerEmail && ownerRole && role === ownerRole),
   );
-  const canView = isManager(role) || resourceType === 'course' || resourceType === 'session'
+  const canView = isManager(role) || resourceType === 'course'
     ? true
     : isOwner;
   const canEdit = isManager(role) || (
@@ -134,7 +134,9 @@ const getResourcePermissions = ({
 };
 
 const toResource = (record, viewerRole, viewerEmail, resourceType = 'generic') => ({
-  ...clone(record),
+  ...clone(resourceType === 'course' && viewerRole === 'student'
+    ? { ...record, students: [] }
+    : record),
   permissions: getResourcePermissions({
     viewerRole,
     ownerRole: record.ownerRole,
@@ -167,7 +169,9 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
       canView: true,
       canEdit: isManager(viewerRole),
       canDelete: isManager(viewerRole),
-      canCreate: isManager(viewerRole) || viewerRole === 'student' || viewerRole === 'tutor',
+      canCreate: isManager(viewerRole) ||
+        (resourceType === 'registration' && (viewerRole === 'student' || viewerRole === 'tutor')) ||
+        (resourceType === 'session' && viewerRole === 'tutor'),
     },
     meta: {
       source: 'node-backend',

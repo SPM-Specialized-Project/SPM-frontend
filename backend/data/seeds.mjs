@@ -1,8 +1,12 @@
 const USERS = [
   { email: 'student@gmail.com', password: 'student123', role: 'student' },
+  { email: 'student2@gmail.com', password: 'student2123', role: 'student' },
   { email: 'tutor@gmail.com', password: 'tutor123', role: 'tutor' },
   { email: 'coordinator@gmail.com', password: 'coordinator123', role: 'coordinator' },
   { email: 'chairman@gmail.com', password: 'chairman123', role: 'chairman' },
+  { email: 'lecturer@gmail.com', password: 'lecturer123', role: 'lecturer' },
+  { email: 'lecturer2@gmail.com', password: 'lecturer2123', role: 'lecturer' },
+  { email: 'admin@gmail.com', password: 'admin123', role: 'admin' },
 ];
 
 const COURSE_2 = {
