@@ -2,13 +2,13 @@ import { useNavigate } from '@tanstack/react-router';
 import React, { useEffect, useRef, useState } from 'react';
 
 // Import dữ liệu giả (điều chỉnh đường dẫn nếu cần)
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import {
   mockLanguages,
   mockLocations,
   createPastRegistration,
 } from '@/components/data/~mock-register';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { FormDropdown, FormSection, FormTextArea, type DropdownOption } from './tutor-register-form';
 
@@ -46,7 +46,7 @@ const LocationIcon = (props: React.SVGProps<SVGSVGElement>) => (
 // === COMPONENT CHÍNH ===
 
 export function StudentRegister() {
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   // State cho form
   // Dropdown option arrays for subject and session type (from mock data)
   const subjectOptions: DropdownOption[] = courses.map((c) => ({ id: c.id, name: `${c.title} (${c.code})` }));

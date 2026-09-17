@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 
 // import CustomGoogleButton from '@/components/button/google-button';
 import handleAxiosError from '@/helpers/handle-axios-error';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import { ApiError, api } from '@/services/api-client';
 import { useAuthStore, useUserStore } from '@/stores';
 
 // import overseaStudent from '../../assets/animations/Uy24MEqryK.json';
@@ -93,7 +93,7 @@ function RouteComponent() {
     try {
       setLoading(true);
 
-      const response = await backendDriver.login({ email, password });
+      const response = await api.login({ email, password });
       const { accessToken, role, user } = response.data;
 
       // Set token in auth store (this also sets isAuthenticated = true)
@@ -114,7 +114,7 @@ function RouteComponent() {
       toast.success(`Đăng nhập thành công với vai trò ${role}!`);
       navigate({ to: '/dashboard' });
     } catch (error: unknown) {
-      if (error instanceof BackendDriverError) {
+      if (error instanceof ApiError) {
         setWrongCredentials(error.code === 'INVALID_CREDENTIALS');
         toast.error(error.message);
       } else {

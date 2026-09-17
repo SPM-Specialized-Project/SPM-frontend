@@ -2,12 +2,12 @@ import { useNavigate } from '@tanstack/react-router';
 import { useState } from 'react';
 
 import {
-  courseCreationRequestDriver,
+  courseCreationRequestStore,
   type CourseCreationRequest,
 } from '@/components/data/~mock-coordinator-requests';
 import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import {
   CoordinatorCourseForm,
@@ -21,7 +21,7 @@ import { CourseCreationHistoryModal } from './course-creation-history-modal';
 import { ScheduleModal } from './schedule-modal';
 
 export function CoordinatorRegister() {
-  const courseCreationRequests = useJsonData(courseCreationRequestDriver);
+  const courseCreationRequests = useDataStore(courseCreationRequestStore);
   const navigate = useNavigate();
   const [courseName, setCourseName] = useState('');
   const [courseCode, setCourseCode] = useState('');
@@ -95,7 +95,7 @@ export function CoordinatorRegister() {
       createdAt: new Date().toISOString(),
     };
 
-    courseCreationRequestDriver.create(newRequest);
+    courseCreationRequestStore.create(newRequest);
     alert('Yêu cầu tạo môn học đã được gửi!');
     setTimeout(() => navigate({ to: '/registration-history' }), 1500);
   };
@@ -126,7 +126,7 @@ export function CoordinatorRegister() {
             setIsHistoryModalOpen(false);
             setTimeout(() => setIsHistoryModalOpen(true), 0);
           }}
-          onDeleteRequest={(requestId) => courseCreationRequestDriver.remove(requestId)}
+          onDeleteRequest={(requestId) => courseCreationRequestStore.remove(requestId)}
         />
       )}
       {isScheduleModalOpen && (

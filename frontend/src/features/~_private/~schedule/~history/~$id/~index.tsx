@@ -2,9 +2,9 @@ import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState } from 'react';
 import { toast } from 'react-toastify';
 
-import { sessionDriver, updateSession } from '@/components/data/~mock-session';
+import { sessionStore, updateSession } from '@/components/data/~mock-session';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { DeclinePopup } from './components/decline-popup';
 import { ManagerHistoryView, StudentHistoryView } from './history-detail-views';
@@ -21,7 +21,7 @@ function RouteComponent() {
   const [declinePopup, setDeclinePopup] = useState(false);
   const { id } = useParams({ from: Route.id });
   const navigate = useNavigate();
-  const sessions = useJsonData(sessionDriver);
+  const sessions = useDataStore(sessionStore);
   const current = sessions.find((session) => session.id === id);
 
   useEffect(() => {

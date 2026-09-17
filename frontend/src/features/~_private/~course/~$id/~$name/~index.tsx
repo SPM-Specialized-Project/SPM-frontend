@@ -1,10 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useState, type SVGProps } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import StudyLayout from '@/components/study-layout';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import { ApiError, api } from '@/services/api-client';
 import type { SubmissionView, SubmissionViewerRole } from '@/types/submission';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
@@ -100,7 +100,7 @@ function getViewerContext() {
 
 function RouteComponent() {
   const { id, name } = Route.useParams();
-  const course = courseDriver.getById(id);
+  const course = courseStore.getById(id);
   const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -111,7 +111,7 @@ function RouteComponent() {
     setLoading(true);
     setError('');
 
-    backendDriver
+    api
       .getSubmissions({
         courseId: id,
         assignmentId: name,
@@ -123,7 +123,7 @@ function RouteComponent() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải dữ liệu bài nộp.');
+        setError(reason instanceof ApiError ? reason.message : 'Không thể tải dữ liệu bài nộp.');
       })
       .finally(() => {
         if (active) setLoading(false);

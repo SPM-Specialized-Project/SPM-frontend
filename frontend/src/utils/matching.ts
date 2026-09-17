@@ -1,5 +1,5 @@
-import { type PastRegistration, pastRegistrationDriver } from "@/components/data/~mock-register";
-import { tutorRegistrationDriver } from "@/components/data/~mock-tutor-register";
+import { type PastRegistration, pastRegistrationStore } from "@/components/data/~mock-register";
+import { tutorRegistrationStore } from "@/components/data/~mock-tutor-register";
 
 export function hardMatch(student: PastRegistration, tutor: PastRegistration){
     // 1. môn
@@ -33,11 +33,11 @@ export function hardMatch(student: PastRegistration, tutor: PastRegistration){
 }
 
 export function getMatchedTutors(student: PastRegistration) {
-    return tutorRegistrationDriver.list().filter(tutor => hardMatch(student, tutor));
+    return tutorRegistrationStore.list().filter(tutor => hardMatch(student, tutor));
 }
 
 export function matchAllStudents() {
-    return pastRegistrationDriver.list().map(student => ({
+    return pastRegistrationStore.list().map(student => ({
         student: student.Name,
         matchedTutors: getMatchedTutors(student),
     }));

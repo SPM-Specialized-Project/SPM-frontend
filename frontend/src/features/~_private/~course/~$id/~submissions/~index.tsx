@@ -1,11 +1,11 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { type SVGProps, useEffect, useMemo, useState } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import { ApiError, api } from '@/services/api-client';
 import type { SubmissionView } from '@/types/submission';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
@@ -94,7 +94,7 @@ function SubmissionItem({ entry, courseId }: { entry: SubmissionView; courseId: 
 
 function RouteComponent() {
   const { id } = Route.useParams();
-  const course = courseDriver.getById(id);
+  const course = courseStore.getById(id);
   const [searchEmail, setSearchEmail] = useState('');
   const [sortOrder, setSortOrder] = useState('Cũ nhất');
   const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
@@ -107,14 +107,14 @@ function RouteComponent() {
     setLoading(true);
     setError('');
 
-    backendDriver
+    api
       .getSubmissions({ courseId: id, viewerRole: 'tutor' })
       .then((response) => {
         if (active) setSubmissions(response.data.items.filter((item) => item.submittedAt));
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải bài nộp.');
+        setError(reason instanceof ApiError ? reason.message : 'Không thể tải bài nộp.');
       })
       .finally(() => {
         if (active) setLoading(false);

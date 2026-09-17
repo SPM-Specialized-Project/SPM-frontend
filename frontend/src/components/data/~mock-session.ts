@@ -1,5 +1,6 @@
-import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
-import { createBackendDataDriver } from '@/services/json-data-driver';
+import { api } from '@/services/api-client';
+import { createRemoteDataStore } from '@/services/data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { mockCourses } from './~mock-courses';
 import { getRandomMembers } from './~mock-names';
@@ -31,7 +32,7 @@ export type Session = {
 };
 
 export function getSessionMember (sessionId: string, memberId: number): SessionMember | undefined {
-  const session = sessionDriver.getById(sessionId);
+  const session = sessionStore.getById(sessionId);
   return session?.members.find(m => m.id === memberId);
 }
 
@@ -250,36 +251,36 @@ mockSessions.forEach((s) => {
   s.studentNames = s.members?.map((m) => m.name) ?? []
 })
 
-/** Backend driver replacing direct mutations of mockSessions. */
-export const sessionDriver = createBackendDataDriver(mockSessions, {
-  list: async () => (await backendDriver.getSessions(getCurrentViewerContext())).data.items,
-  create: async (record) => (await backendDriver.createSession({
+/** API-backed store replacing direct mutations of mockSessions. */
+export const sessionStore = createRemoteDataStore(mockSessions, {
+  list: async () => (await api.getSessions(getCurrentViewerContext())).data.items,
+  create: async (record) => (await api.createSession({
     ...getCurrentViewerContext(),
     item: { ...record, ownerRole: 'tutor', ownerEmail: record.instructorEmail },
   })).data.item,
-  update: async (id, patch) => (await backendDriver.updateSession({
+  update: async (id, patch) => (await api.updateSession({
     ...getCurrentViewerContext(),
     sessionId: id,
     patch,
   })).data.item,
-  remove: async (id) => (await backendDriver.deleteSession(id, getCurrentViewerContext())).data.deleted,
+  remove: async (id) => (await api.deleteSession(id, getCurrentViewerContext())).data.deleted,
 });
 
 export function getMockSessions(count?: number) {
-  const sessions = sessionDriver.list();
+  const sessions = sessionStore.list();
   if (!count) return sessions;
   return sessions.slice(0, count);
 }
 
 export function getSessionById(id: string) {
-  return sessionDriver.getById(id);
+  return sessionStore.getById(id);
 }
 
 export default mockSessions;
 
 // Update a session by id with a partial patch. Returns the updated session or undefined if not found.
 export function updateSession(id: string, patch: Partial<Session>): Session | undefined {
-  const current = sessionDriver.getById(id)
+  const current = sessionStore.getById(id)
   if (!current) return undefined
   const updated: Session = { ...current, ...patch }
   // Ensure studentNames stay in sync when members changed
@@ -288,13 +289,13 @@ export function updateSession(id: string, patch: Partial<Session>): Session | un
   } else {
     updated.studentNames = updated.members?.map((m) => m.name) ?? []
   }
-  return sessionDriver.upsert(updated)
+  return sessionStore.upsert(updated)
 }
 
 // Save a full session: if id exists replace, otherwise push new session with generated id
 export function saveSession(session: Session): Session {
   const copy = { ...session, studentNames: session.members?.map((m) => m.name) ?? [] }
-  return sessionDriver.upsert(copy)
+  return sessionStore.upsert(copy)
 }
 
 /**
@@ -342,5 +343,5 @@ export function createRequestSession(request: Partial<Session> & {
  * Returns true if session was found and deleted, false otherwise.
  */
 export function deleteSession(id: string): boolean {
-  return sessionDriver.remove(id)
+  return sessionStore.remove(id)
 }
