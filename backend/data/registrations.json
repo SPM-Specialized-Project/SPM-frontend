@@ -35,41 +35,6 @@
     "createdAt": "2025-11-01T10:00:00.000Z"
   },
   {
-    "id": "tutor-reg-1",
-    "registrationType": "tutor",
-    "ownerRole": "tutor",
-    "ownerEmail": "tutor@gmail.com",
-    "Name": "Tutor",
-    "Email": "tutor@gmail.com",
-    "subjects": [
-      {
-        "id": "2",
-        "name": "Database System (79748_CO2013_003184_CLC)"
-      }
-    ],
-    "languages": [
-      {
-        "id": "vi",
-        "name": "Tiếng Việt"
-      }
-    ],
-    "sessionTypes": [
-      {
-        "id": "hybrid",
-        "name": "Học trực tiếp kết hợp trực tuyến"
-      }
-    ],
-    "locations": [
-      {
-        "id": "p3",
-        "name": "Phường 3"
-      }
-    ],
-    "specialRequest": "Chuyên dạy SQL, tối ưu hóa truy vấn và NoSQL.",
-    "status": "Pending",
-    "createdAt": "2025-11-10T11:20:00.000Z"
-  },
-  {
     "id": "tutor-reg-1789460401956",
     "Name": "Tutor",
     "Email": "tutor@tutor.example.com",
@@ -83,5 +48,40 @@
     "ownerRole": "tutor",
     "ownerEmail": "tutor@tutor.example.com",
     "registrationType": "tutor"
+  },
+  {
+    "id": "reg-1789536072704",
+    "Name": "Tutor",
+    "Email": "tutor@gmail.com",
+    "subjects": [
+      {
+        "id": "1",
+        "name": "Computer Network (79748_CO2013_003183_CLC)"
+      }
+    ],
+    "languages": [
+      {
+        "id": "vi",
+        "name": "Tiếng Việt"
+      }
+    ],
+    "sessionTypes": [
+      {
+        "id": "online",
+        "name": "Học trực tuyến"
+      }
+    ],
+    "locations": [
+      {
+        "id": "hybrid",
+        "name": "hybrid"
+      }
+    ],
+    "specialRequest": "",
+    "status": "Pending",
+    "createdAt": "2026-09-16T05:21:12.704Z",
+    "ownerRole": "student",
+    "ownerEmail": "tutor@gmail.com",
+    "registrationType": "student"
   }
 ]
