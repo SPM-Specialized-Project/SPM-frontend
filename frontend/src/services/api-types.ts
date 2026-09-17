@@ -37,6 +37,57 @@ export type CourseDetailResponse = {
   detail: DataCourses;
 };
 
+export type MembershipStatus = 'ACTIVE' | 'REVOKED';
+
+export type Membership = {
+  id: string;
+  classroomId: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  status: MembershipStatus;
+  enrolledAt: string;
+  revokedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProvisionedStudent = {
+  id: string;
+  name: string;
+  email: string;
+};
+
+export type MembershipListResponse = {
+  items: Array<BackendResource<Membership>>;
+  classroomId: string;
+  viewerRole: UserRole;
+  permissions: ResourcePermissions;
+  availableStudents?: ProvisionedStudent[];
+  meta: BackendListResponse<Membership>['meta'];
+};
+
+export type MembershipQuery = {
+  viewerRole: UserRole;
+  viewerEmail?: string;
+};
+
+export type AddMembershipRequest = MembershipQuery & {
+  classroomId: string;
+  studentEmail: string;
+};
+
+export type RevokeMembershipRequest = MembershipQuery & {
+  classroomId: string;
+  membershipId: string;
+};
+
+export type MembershipMutationResponse = {
+  item: BackendResource<Membership>;
+  created?: boolean;
+  reactivated?: boolean;
+};
+
 export type SubmissionQuery = {
   courseId: string;
   assignmentId?: string;
@@ -55,6 +106,7 @@ export type SubmissionListResponse = {
 export type UpdateSubmissionRequest = {
   submissionId: string;
   viewerRole: SubmissionViewerRole;
+  viewerEmail?: string;
   score?: number | null;
   feedback?: string;
   submittedAt?: string | null;
