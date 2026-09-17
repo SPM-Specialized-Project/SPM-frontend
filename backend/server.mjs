@@ -15,6 +15,6 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log('SPM Node.js backend listening at http://localhost:' + PORT);
+  console.log('SPM Node.js backend listening at http://localhost:' + server.address().port);
   console.log('Persistent submission data: ' + SUBMISSIONS_FILE);
 });
