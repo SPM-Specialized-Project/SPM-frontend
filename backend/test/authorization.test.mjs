@@ -79,12 +79,19 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   });
   assert.equal(createdSession.status, 201);
   assert.equal(createdSession.data.item.ownerEmail, 'tutor@gmail.com');
+  assert.equal((await api('/api/sessions', tutor, 'POST', {
+    item: { title: 'Unassigned course', courseId: '3' },
+  })).status, 403);
   const patchedSession = await api(`/api/sessions/${createdSession.data.item.id}`, tutor, 'PATCH', {
     patch: { ownerRole: 'chairman', ownerEmail: 'admin@gmail.com', title: 'Updated' },
   });
   assert.equal(patchedSession.status, 200);
   assert.equal(patchedSession.data.item.ownerEmail, 'tutor@gmail.com');
-  assert.equal((await api('/api/sessions?viewerRole=chairman', student)).data.items.length, 0);
+  const studentSessions = await api('/api/sessions?viewerRole=chairman', student);
+  assert.equal(studentSessions.status, 200);
+  assert.ok(studentSessions.data.items.length > 0);
+  assert.ok(studentSessions.data.items.every((item) => ['1', '2', '3'].includes(item.courseId)));
+  assert.ok(studentSessions.data.items.every((item) => !('tutorNote' in item) && !('members' in item)));
   assert.equal((await api('/api/courses?viewerRole=chairman', student)).data.items[0].students.length, 0);
   assert.equal((await api('/api/courses/2/submissions?viewerRole=tutor', student)).status, 200);
   assert.equal((await api('/api/courses/2/submissions?viewerRole=tutor', student)).data.items.length, 0);

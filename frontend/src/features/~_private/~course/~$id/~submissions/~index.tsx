@@ -6,6 +6,7 @@ import ArrowLeft from '@/components/icons/arrow-left';
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
+import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
 import type { SubmissionView } from '@/types/submission';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
@@ -101,6 +102,7 @@ function RouteComponent() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const navigate = Route.useNavigate();
+  const viewerContext = useMemo(() => getCurrentSubmissionViewerContext(), []);
 
   useEffect(() => {
     let active = true;
@@ -108,7 +110,13 @@ function RouteComponent() {
     setError('');
 
     api
-      .getSubmissions({ courseId: id, viewerRole: 'tutor' })
+      .getSubmissions({
+        courseId: id,
+        viewerRole: viewerContext.viewerRole,
+        studentEmail: viewerContext.viewerRole === 'student'
+          ? viewerContext.studentEmail
+          : undefined,
+      })
       .then((response) => {
         if (active) setSubmissions(response.data.items.filter((item) => item.submittedAt));
       })
@@ -123,7 +131,7 @@ function RouteComponent() {
     return () => {
       active = false;
     };
-  }, [id]);
+  }, [id, viewerContext]);
 
   const displayedSubmissions = useMemo(
     () =>

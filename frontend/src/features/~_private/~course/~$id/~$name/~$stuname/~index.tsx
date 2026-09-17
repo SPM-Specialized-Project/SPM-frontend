@@ -6,7 +6,8 @@ import { courseStore } from '@/components/data/~mock-courses';
 import { ArrowLeft } from '@/components/icons';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
-import type { SubmissionView, SubmissionViewerRole } from '@/types/submission';
+import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
+import type { SubmissionView } from '@/types/submission';
 import filePDF from '/group07_report 02.pdf';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
@@ -47,20 +48,11 @@ const formatDate = (value: string | null) =>
       })
     : 'Chưa nộp';
 
-const getCurrentStudentEmail = () => {
-  const rawUserStore = localStorage.getItem('userStore');
-  try {
-    const userStore = rawUserStore ? JSON.parse(rawUserStore) as { state?: { user?: { email?: string } } } : null;
-    return userStore?.state?.user?.email;
-  } catch {
-    return undefined;
-  }
-};
-
 function RouteComponent() {
   const { id, name, stuname } = Route.useParams();
   const course = courseStore.getById(id);
-  const [viewerRole] = useState<SubmissionViewerRole>(() => localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student');
+  const [viewerContext] = useState(getCurrentSubmissionViewerContext);
+  const { viewerRole } = viewerContext;
   const [matchingEntry, setMatchingEntry] = useState<SubmissionView | null>(null);
   const [activeTab, setActiveTab] = useState<'baiLam' | 'nhanXet'>('baiLam');
   const [comment, setComment] = useState('');
@@ -80,7 +72,7 @@ function RouteComponent() {
         courseId: id,
         assignmentId: name,
         viewerRole,
-        studentEmail: viewerRole === 'student' ? getCurrentStudentEmail() : undefined,
+        studentEmail: viewerRole === 'student' ? viewerContext.studentEmail : undefined,
       })
       .then((response) => {
         if (!active) return;
@@ -104,7 +96,7 @@ function RouteComponent() {
     return () => {
       active = false;
     };
-  }, [id, name, stuname, viewerRole]);
+  }, [id, name, stuname, viewerContext, viewerRole]);
 
   useEffect(() => {
     if (!matchingEntry) return;
@@ -119,6 +111,7 @@ function RouteComponent() {
       const response = await api.updateSubmission({
         submissionId: matchingEntry.id,
         viewerRole,
+        viewerEmail: viewerRole === 'student' ? viewerContext.studentEmail : undefined,
         score,
         feedback: comment,
       });

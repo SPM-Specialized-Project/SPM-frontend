@@ -1,5 +1,5 @@
 import { PORT } from './config.mjs';
-import { USERS } from './data/seeds.mjs';
+import { COURSE_CATALOG, INITIAL_SESSIONS, PROVISIONED_STUDENT_ACCOUNTS, USERS } from './data/seeds.mjs';
 import {
   clone,
   createCourseSubmissionRecords,
@@ -8,7 +8,11 @@ import {
   getCourse,
   getCourseDetail,
   getResourcePermissions,
+  findProvisionedStudent,
+  hasActiveMembership,
+  normalizeEmail,
   toListResponse,
+  toMembershipView,
   toResource,
   toSubmissionView,
 } from './domain/backend-data.mjs';
@@ -21,6 +25,55 @@ import {
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
 import { handleCodePulse } from './codepulse.mjs';
+
+const isMembershipRoute = (parts) =>
+  parts[0] === 'api' &&
+  (parts[1] === 'classrooms' || parts[1] === 'courses') &&
+  parts[2] &&
+  parts[3] === 'memberships';
+
+const getClassroomIdFromParts = (parts) => parts[2];
+
+const isAssignedTutor = (courseId, email) => INITIAL_SESSIONS.some(
+  (session) => session.courseId === courseId && session.ownerEmail === email,
+);
+
+const ensureClassroomExists = (classroomId) => {
+  if (!COURSE_CATALOG[classroomId]) {
+    throw apiError(404, 'CLASSROOM_NOT_FOUND', `Không tìm thấy classroom ${classroomId}.`);
+  }
+};
+
+const assertStudentHasAccess = (memberships, classroomId, viewerRole, viewerEmail) => {
+  if (viewerRole !== 'student') return;
+  if (!hasActiveMembership(memberships, classroomId, viewerEmail)) {
+    throw apiError(
+      403,
+      'MEMBERSHIP_REQUIRED',
+      'Tài khoản không có membership ACTIVE trong classroom này.',
+    );
+  }
+};
+
+const membershipListResponse = (items, classroomId, viewerRole, viewerEmail) => ({
+  items: items.map((item) => toMembershipView(item, viewerRole, viewerEmail)),
+  classroomId,
+  viewerRole,
+  permissions: {
+    canView: true,
+    canEdit: viewerRole === 'tutor',
+    canDelete: viewerRole === 'tutor',
+    canCreate: viewerRole === 'tutor',
+  },
+  availableStudents: viewerRole === 'tutor'
+    ? PROVISIONED_STUDENT_ACCOUNTS
+    : [],
+  meta: {
+    source: 'node-backend',
+    updatedAt: new Date().toISOString(),
+    total: items.length,
+  },
+});
 
 async function handleRequest(request, response) {
   if (request.method === 'OPTIONS') {
@@ -68,6 +121,135 @@ async function handleRequest(request, response) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
   }
 
+  if (isMembershipRoute(parts)) {
+    const classroomId = getClassroomIdFromParts(parts);
+    ensureClassroomExists(classroomId);
+    const membershipId = parts[4];
+    if (viewerRole === 'tutor') {
+      if (!isAssignedTutor(classroomId, viewerEmail)) {
+        throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công classroom này.');
+      }
+    }
+
+    if (request.method === 'GET' && !membershipId) {
+      const records = await readCollection('memberships');
+      if (viewerRole === 'student') {
+        assertStudentHasAccess(records, classroomId, viewerRole, viewerEmail);
+      }
+      const classroomMemberships = records.filter((record) => record.classroomId === classroomId);
+      const visibleMemberships = viewerRole === 'student'
+        ? classroomMemberships.filter(
+          (record) => normalizeEmail(record.studentEmail) === viewerEmail,
+        )
+        : classroomMemberships;
+
+      sendJson(
+        response,
+        200,
+        membershipListResponse(visibleMemberships, classroomId, viewerRole, viewerEmail),
+      );
+      return;
+    }
+
+    if (request.method === 'POST' && !membershipId) {
+      const body = await readRequestBody(request);
+      if (viewerRole !== 'tutor') {
+        throw apiError(403, 'FORBIDDEN', 'Chỉ Lecturer được quản lý membership của classroom.');
+      }
+
+      const studentEmail = normalizeEmail(body.studentEmail ?? body.email);
+      const student = findProvisionedStudent(studentEmail);
+      if (!student) {
+        throw apiError(404, 'STUDENT_NOT_FOUND', 'Không tìm thấy tài khoản student đã được provision.');
+      }
+
+      const records = await readCollection('memberships');
+      const existing = records.find(
+        (record) =>
+          record.classroomId === classroomId &&
+          (record.studentId === student.id || normalizeEmail(record.studentEmail) === studentEmail),
+      );
+
+      if (existing?.status === 'ACTIVE') {
+        sendJson(response, 200, {
+          item: toMembershipView(existing, viewerRole, viewerEmail),
+          created: false,
+          reactivated: false,
+        });
+        return;
+      }
+
+      const now = new Date().toISOString();
+      const membership = existing
+        ? {
+          ...existing,
+          studentId: student.id,
+          studentName: student.name,
+          studentEmail: student.email,
+          status: 'ACTIVE',
+          revokedAt: null,
+          updatedAt: now,
+        }
+        : {
+          id: `membership-${classroomId}-${student.id}`,
+          classroomId,
+          studentId: student.id,
+          studentName: student.name,
+          studentEmail: student.email,
+          status: 'ACTIVE',
+          enrolledAt: now,
+          revokedAt: null,
+          createdAt: now,
+          updatedAt: now,
+        };
+
+      const nextRecords = existing
+        ? records.map((record) => (record.id === existing.id ? membership : record))
+        : [...records, membership];
+      await saveCollection('memberships', nextRecords);
+      sendJson(response, existing ? 200 : 201, {
+        item: toMembershipView(membership, viewerRole, viewerEmail),
+        created: !existing,
+        reactivated: Boolean(existing),
+      });
+      return;
+    }
+
+    if ((request.method === 'PATCH' || request.method === 'DELETE') && membershipId) {
+      const body = await readRequestBody(request);
+      if (viewerRole !== 'tutor') {
+        throw apiError(403, 'FORBIDDEN', 'Chỉ Lecturer được revoke membership của classroom.');
+      }
+
+      const records = await readCollection('memberships');
+      const index = records.findIndex(
+        (record) => record.classroomId === classroomId && record.id === membershipId,
+      );
+      if (index < 0) {
+        throw apiError(404, 'MEMBERSHIP_NOT_FOUND', `Không tìm thấy membership ${membershipId}.`);
+      }
+
+      const requestedStatus = request.method === 'DELETE' ? 'REVOKED' : body.status ?? 'REVOKED';
+      if (!['ACTIVE', 'REVOKED'].includes(requestedStatus)) {
+        throw apiError(400, 'INVALID_MEMBERSHIP_STATUS', 'Membership status phải là ACTIVE hoặc REVOKED.');
+      }
+
+      const now = new Date().toISOString();
+      const updated = {
+        ...records[index],
+        status: requestedStatus,
+        revokedAt: requestedStatus === 'REVOKED' ? now : null,
+        updatedAt: now,
+      };
+      records[index] = updated;
+      await saveCollection('memberships', records);
+      sendJson(response, 200, {
+        item: toMembershipView(updated, viewerRole, viewerEmail),
+      });
+      return;
+    }
+  }
+
   if (request.method === 'GET' && requestUrl.pathname === '/api/courses') {
     const items = Array.from({ length: 12 }, (_, index) => getCourse(String(index + 1)));
     sendJson(response, 200, toListResponse(items, viewerRole, viewerEmail, 'course'));
@@ -76,6 +258,10 @@ async function handleRequest(request, response) {
 
   if (parts[0] === 'api' && parts[1] === 'courses' && parts[3] === 'detail' && request.method === 'GET') {
     const course = getCourse(parts[2]);
+    if (viewerRole === 'student') {
+      const memberships = await readCollection('memberships');
+      assertStudentHasAccess(memberships, parts[2], viewerRole, viewerEmail);
+    }
     sendJson(response, 200, {
       course: toResource(course, viewerRole, viewerEmail, 'course'),
       detail: getCourseDetail(course, viewerRole),
@@ -96,10 +282,13 @@ async function handleRequest(request, response) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền xem bài nộp.');
     }
     if (viewerRole === 'tutor') {
-      const sessions = await readCollection('sessions');
-      if (!sessions.some((item) => item.courseId === course.id && item.ownerEmail === viewerEmail)) {
+      if (!isAssignedTutor(course.id, viewerEmail)) {
         throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
       }
+    }
+    if (viewerRole === 'student') {
+      const memberships = await readCollection('memberships');
+      assertStudentHasAccess(memberships, course.id, viewerRole, viewerEmail);
     }
     let records = await readSubmissions();
     let changed = false;
@@ -165,10 +354,13 @@ async function handleRequest(request, response) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền sửa bài nộp của người khác.');
     }
     if (viewerRole === 'tutor') {
-      const sessions = await readCollection('sessions');
-      if (!sessions.some((item) => item.courseId === current.courseId && item.ownerEmail === viewerEmail)) {
+      if (!isAssignedTutor(current.courseId, viewerEmail)) {
         throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
       }
+    }
+    if (viewerRole === 'student') {
+      const memberships = await readCollection('memberships');
+      assertStudentHasAccess(memberships, current.courseId, viewerRole, viewerEmail);
     }
     const updated = { ...current };
 
@@ -198,7 +390,26 @@ async function handleRequest(request, response) {
   if (parts[0] === 'api' && parts[1] === 'sessions' && request.method === 'GET') {
     const courseId = requestUrl.searchParams.get('courseId');
     const records = await readCollection('sessions');
-    const items = courseId ? records.filter((record) => record.courseId === courseId) : records;
+    let items = courseId ? records.filter((record) => record.courseId === courseId) : records;
+    if (viewerRole === 'student') {
+      const memberships = await readCollection('memberships');
+      if (courseId) {
+        assertStudentHasAccess(memberships, courseId, viewerRole, viewerEmail);
+      } else {
+        const activeClassrooms = new Set(
+          memberships
+            .filter(
+              (membership) =>
+                membership.status === 'ACTIVE' &&
+                normalizeEmail(membership.studentEmail) === normalizeEmail(viewerEmail),
+            )
+            .map((membership) => membership.classroomId),
+        );
+        items = items.filter((record) => activeClassrooms.has(record.courseId));
+      }
+    } else if (viewerRole === 'tutor') {
+      items = items.filter((record) => record.ownerEmail === viewerEmail);
+    }
     sendJson(response, 200, toListResponse(items, viewerRole, viewerEmail, 'session'));
     return;
   }
@@ -207,6 +418,9 @@ async function handleRequest(request, response) {
     const body = await readRequestBody(request);
     if (viewerRole !== 'tutor' && viewerRole !== 'coordinator' && viewerRole !== 'chairman') {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền tạo session.');
+    }
+    if (viewerRole === 'tutor' && body.item?.courseId && !isAssignedTutor(body.item.courseId, viewerEmail)) {
+      throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
     }
     const item = {
       ...clone(body.item ?? {}),
@@ -238,6 +452,9 @@ async function handleRequest(request, response) {
     if (!permissions.canEdit) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền chỉnh sửa session này.');
 
     const { id: ignoredId, ownerRole: ignoredRole, ownerEmail: ignoredEmail, ...patch } = clone(body.patch ?? {});
+    if (viewerRole === 'tutor' && patch.courseId && !isAssignedTutor(patch.courseId, viewerEmail)) {
+      throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
+    }
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
     records[index] = updated;
     await saveCollection('sessions', records);
