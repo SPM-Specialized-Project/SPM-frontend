@@ -1,8 +1,12 @@
 const USERS = [
   { email: 'student@gmail.com', password: 'student123', role: 'student' },
+  { email: 'student2@gmail.com', password: 'student2123', role: 'student' },
   { email: 'tutor@gmail.com', password: 'tutor123', role: 'tutor' },
   { email: 'coordinator@gmail.com', password: 'coordinator123', role: 'coordinator' },
   { email: 'chairman@gmail.com', password: 'chairman123', role: 'chairman' },
+  { email: 'lecturer@gmail.com', password: 'lecturer123', role: 'lecturer' },
+  { email: 'lecturer2@gmail.com', password: 'lecturer2123', role: 'lecturer' },
+  { email: 'admin@gmail.com', password: 'admin123', role: 'admin' },
 ];
 
 const COURSE_2 = {
@@ -120,6 +124,76 @@ const COURSE_CATALOG = {
     ],
   },
 };
+
+const PROVISIONED_STUDENT_ACCOUNTS = [
+  { id: 'student-account-1', name: 'Student User', email: 'student@gmail.com' },
+  ...Object.values(COURSE_CATALOG).flatMap((course) =>
+    course.students.map((student, index) => ({
+      id: `${course.id}-student-${index + 1}`,
+      name: student.name,
+      email: student.email,
+    })),
+  ),
+];
+
+const createMembershipSeed = (id, classroomId, studentId, createdAt = '2025-11-01T10:00:00.000Z') => {
+  const student = PROVISIONED_STUDENT_ACCOUNTS.find((account) => account.id === studentId);
+  return {
+    id,
+    classroomId,
+    studentId,
+    studentName: student?.name ?? 'Unknown student',
+    studentEmail: student?.email ?? '',
+    status: 'ACTIVE',
+    enrolledAt: createdAt,
+    revokedAt: null,
+    createdAt,
+    updatedAt: createdAt,
+  };
+};
+
+const createRevokedMembershipSeed = (
+  id,
+  classroomId,
+  studentId,
+  createdAt = '2025-11-01T10:00:00.000Z',
+  revokedAt = '2026-01-15T10:00:00.000Z',
+) => ({
+  ...createMembershipSeed(id, classroomId, studentId, createdAt),
+  status: 'REVOKED',
+  revokedAt,
+  updatedAt: revokedAt,
+});
+
+const INITIAL_MEMBERSHIPS = [
+  createMembershipSeed('membership-1-student-account-1', '1', 'student-account-1'),
+  createMembershipSeed('membership-1-student-1', '1', '1-student-1'),
+  createMembershipSeed('membership-1-student-2', '1', '1-student-2'),
+  createMembershipSeed('membership-2-student-1', '2', '2-student-1'),
+  createMembershipSeed('membership-2-student-2', '2', '2-student-2'),
+  createMembershipSeed('membership-2-student-account-1', '2', 'student-account-1'),
+  createMembershipSeed('membership-3-student-1', '3', '3-student-1'),
+  createMembershipSeed('membership-3-student-2', '3', '3-student-2'),
+  createMembershipSeed('membership-3-student-3', '3', '3-student-3'),
+  createMembershipSeed('membership-4-student-1', '4', '4-student-1'),
+  createMembershipSeed('membership-4-student-2', '4', '4-student-2'),
+  createMembershipSeed('membership-5-student-1', '5', '5-student-1'),
+  createMembershipSeed('membership-5-student-2', '5', '5-student-2'),
+  createMembershipSeed('membership-6-student-1', '6', '6-student-1'),
+  createMembershipSeed('membership-6-student-2', '6', '6-student-2'),
+  createRevokedMembershipSeed('membership-6-student-account-1', '6', 'student-account-1'),
+  createMembershipSeed('membership-7-student-1', '7', '7-student-1'),
+  createMembershipSeed('membership-7-student-2', '7', '7-student-2'),
+  createMembershipSeed('membership-8-student-1', '8', '8-student-1'),
+  createMembershipSeed('membership-9-student-1', '9', '9-student-1'),
+  createRevokedMembershipSeed('membership-9-student-2', '9', '9-student-2'),
+  createMembershipSeed('membership-10-student-1', '10', '10-student-1'),
+  createMembershipSeed('membership-10-student-2', '10', '10-student-2'),
+  createMembershipSeed('membership-11-student-1', '11', '11-student-1'),
+  createMembershipSeed('membership-11-student-2', '11', '11-student-2'),
+  createMembershipSeed('membership-12-student-1', '12', '12-student-1'),
+  createMembershipSeed('membership-12-student-2', '12', '12-student-2'),
+];
 
 const INITIAL_SUBMISSIONS = [
   {
@@ -303,4 +377,13 @@ const INITIAL_COURSE_REQUESTS = [
   },
 ];
 
-export { USERS, COURSE_CATALOG, INITIAL_SUBMISSIONS, INITIAL_SESSIONS, INITIAL_REGISTRATIONS, INITIAL_COURSE_REQUESTS };
+export {
+  USERS,
+  COURSE_CATALOG,
+  PROVISIONED_STUDENT_ACCOUNTS,
+  INITIAL_MEMBERSHIPS,
+  INITIAL_SUBMISSIONS,
+  INITIAL_SESSIONS,
+  INITIAL_REGISTRATIONS,
+  INITIAL_COURSE_REQUESTS,
+};

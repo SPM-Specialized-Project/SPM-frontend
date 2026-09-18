@@ -1,4 +1,4 @@
-import { COURSE_CATALOG } from '../data/seeds.mjs';
+import { COURSE_CATALOG, PROVISIONED_STUDENT_ACCOUNTS } from '../data/seeds.mjs';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -100,7 +100,46 @@ const getPermissions = (viewerRole, status) => ({
 const normalizeRole = (value) =>
   ['student', 'tutor', 'coordinator', 'chairman'].includes(value) ? value : 'student';
 
+const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
+
 const isManager = (role) => role === 'coordinator' || role === 'chairman';
+
+const getMembershipPermissions = ({ viewerRole, viewerEmail, membership }) => {
+  const role = normalizeRole(viewerRole);
+  const canManage = role === 'tutor';
+  const canViewOwn = role === 'student' && normalizeEmail(viewerEmail) === normalizeEmail(membership?.studentEmail);
+
+  return {
+    canView: canManage || isManager(role) || canViewOwn,
+    canEdit: canManage,
+    canDelete: canManage,
+    canCreate: canManage,
+  };
+};
+
+const toMembershipView = (membership, viewerRole, viewerEmail) => ({
+  ...clone(membership),
+  permissions: getMembershipPermissions({ viewerRole, viewerEmail, membership }),
+  meta: {
+    source: 'node-backend',
+    updatedAt: membership.updatedAt ?? membership.createdAt ?? new Date().toISOString(),
+    viewerRole: normalizeRole(viewerRole),
+  },
+});
+
+const findProvisionedStudent = (email) => {
+  const normalizedEmail = normalizeEmail(email);
+  return PROVISIONED_STUDENT_ACCOUNTS.find(
+    (account) => normalizeEmail(account.email) === normalizedEmail,
+  );
+};
+
+const hasActiveMembership = (memberships, classroomId, studentEmail) => memberships.some(
+  (membership) =>
+    membership.classroomId === classroomId &&
+    normalizeEmail(membership.studentEmail) === normalizeEmail(studentEmail) &&
+    membership.status === 'ACTIVE',
+);
 
 const getResourcePermissions = ({
   viewerRole,
@@ -114,9 +153,8 @@ const getResourcePermissions = ({
     (viewerEmail && ownerEmail && viewerEmail === ownerEmail) ||
       (!viewerEmail && ownerRole && role === ownerRole),
   );
-  const canView = isManager(role) || resourceType === 'course' || resourceType === 'session'
-    ? true
-    : isOwner;
+  const canView = isManager(role) || resourceType === 'course' ||
+    (resourceType === 'session' && role === 'student') || isOwner;
   const canEdit = isManager(role) || (
     resourceType === 'session'
       ? role === 'tutor' && isOwner
@@ -134,7 +172,11 @@ const getResourcePermissions = ({
 };
 
 const toResource = (record, viewerRole, viewerEmail, resourceType = 'generic') => ({
-  ...clone(record),
+  ...clone(resourceType === 'course' && viewerRole === 'student'
+    ? { ...record, students: [] }
+    : resourceType === 'session' && viewerRole === 'student'
+      ? { ...record, tutorNote: undefined, members: undefined, studentNames: undefined }
+      : record),
   permissions: getResourcePermissions({
     viewerRole,
     ownerRole: record.ownerRole,
@@ -167,7 +209,9 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
       canView: true,
       canEdit: isManager(viewerRole),
       canDelete: isManager(viewerRole),
-      canCreate: isManager(viewerRole) || viewerRole === 'student' || viewerRole === 'tutor',
+      canCreate: isManager(viewerRole) ||
+        (resourceType === 'registration' && (viewerRole === 'student' || viewerRole === 'tutor')) ||
+        (resourceType === 'session' && viewerRole === 'tutor'),
     },
     meta: {
       source: 'node-backend',
@@ -248,4 +292,9 @@ export {
   toSubmissionView,
   createCourseSubmissionRecords,
   createUser,
+  normalizeEmail,
+  getMembershipPermissions,
+  toMembershipView,
+  findProvisionedStudent,
+  hasActiveMembership,
 };
