@@ -12,10 +12,11 @@ const REGISTRATIONS_FILE = path.join(DATA_DIRECTORY, 'registrations.json');
 const COURSE_REQUESTS_FILE = path.join(DATA_DIRECTORY, 'course-requests.json');
 
 const USERS = [
-  { email: 'student@gmail.com', password: 'student123', role: 'student' },
-  { email: 'tutor@gmail.com', password: 'tutor123', role: 'tutor' },
-  { email: 'coordinator@gmail.com', password: 'coordinator123', role: 'coordinator' },
-  { email: 'chairman@gmail.com', password: 'chairman123', role: 'chairman' },
+  { email: 'student@gmail.com', password: 'student123', role: 'student', status: 'ACTIVE' },
+  { email: 'tutor@gmail.com', password: 'tutor123', role: 'tutor', status: 'ACTIVE' },
+  { email: 'coordinator@gmail.com', password: 'coordinator123', role: 'coordinator', status: 'ACTIVE' },
+  { email: 'chairman@gmail.com', password: 'chairman123', role: 'chairman', status: 'ACTIVE' },
+  { email: 'locked@gmail.com', password: 'locked123', role: 'student', status: 'LOCKED' },
 ];
 
 const COURSE_2 = {
@@ -648,13 +649,59 @@ async function handleRequest(request, response) {
     );
 
     if (!user) throw apiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng!');
+    if (user.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
 
     sendJson(response, 200, {
-      accessToken: `local-backend-token-${user.role}-${Date.now()}`,
+      accessToken: `local-backend-token-${user.email}-${user.role}-${Date.now()}`,
       user: createUser(user),
       role: user.role,
     });
     return;
+  }
+
+  // SCRUM-22: Auth Middleware for all other API endpoints
+  let authUser = null;
+  if (parts[0] === 'api') {
+    try {
+      const authHeader = request.headers.authorization;
+      if (!authHeader || !authHeader.startsWith('Bearer ')) {
+        throw apiError(401, 'UNAUTHORIZED', 'Vui lòng đăng nhập để tiếp tục.');
+      }
+      
+      const token = authHeader.split(' ')[1];
+      const tokenParts = token.split('-');
+      
+      if (tokenParts.length < 5 || tokenParts[0] !== 'local' || tokenParts[1] !== 'backend' || tokenParts[2] !== 'token') {
+        throw apiError(401, 'INVALID_TOKEN', 'Token không hợp lệ.');
+      }
+      
+      const timestamp = parseInt(tokenParts.pop(), 10);
+      const role = tokenParts.pop();
+      const email = tokenParts.slice(3).join('-');
+      
+      const now = Date.now();
+      // 24 hours expiration
+      if (now - timestamp > 24 * 60 * 60 * 1000) {
+        throw apiError(401, 'EXPIRED_TOKEN', 'Phiên đăng nhập đã hết hạn.');
+      }
+
+      const user = USERS.find(u => u.email === email);
+      if (!user) {
+        throw apiError(401, 'USER_NOT_FOUND', 'Tài khoản không tồn tại.');
+      }
+      if (user.status !== 'ACTIVE') {
+        throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
+      }
+      
+      authUser = { email: user.email, role: user.role };
+      
+      // Override query params to prevent client role tampering (SCRUM-27 TC-06)
+      requestUrl.searchParams.set('viewerRole', authUser.role);
+      requestUrl.searchParams.set('viewerEmail', authUser.email);
+    } catch (error) {
+      sendJson(response, error.status || 401, { message: error.message, code: error.code || 'UNAUTHORIZED' });
+      return;
+    }
   }
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/courses') {
