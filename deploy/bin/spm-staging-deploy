@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: spm-staging-deploy <github-workspace> <release-id>" >&2
+  exit 64
+fi
+
+source_root="$(readlink -f -- "$1")"
+release_id="$2"
+app_root='/opt/spm-frontend-staging'
+release_root="$app_root/releases"
+release_dir="$release_root/$release_id"
+temporary_dir="$release_root/.${release_id}.tmp.$$"
+
+if [[ ! "$release_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
+  echo "Invalid release id" >&2
+  exit 64
+fi
+
+if [[ ! -d "$source_root/frontend/dist" || ! -f "$source_root/backend/server.mjs" ]]; then
+  echo "The workspace does not contain a built frontend and backend/server.mjs" >&2
+  exit 66
+fi
+
+if [[ -e "$release_dir" || -e "$temporary_dir" ]]; then
+  echo "Release already exists: $release_dir" >&2
+  exit 73
+fi
+
+install -d -o root -g spm -m 0755 "$temporary_dir/frontend" "$temporary_dir/backend"
+install -d -o spm -g spm -m 0750 "$app_root/shared/data"
+
+rsync -a --delete "$source_root/frontend/dist/" "$temporary_dir/frontend/"
+rsync -a --delete --exclude='data/*.json' "$source_root/backend/" "$temporary_dir/backend/"
+
+chown -R root:spm "$temporary_dir"
+find "$temporary_dir" -type d -exec chmod 0755 {} +
+find "$temporary_dir" -type f -exec chmod 0644 {} +
+
+mv -T -- "$temporary_dir" "$release_dir"
+ln -sfn -- "$release_dir" "$app_root/current.next"
+mv -Tf -- "$app_root/current.next" "$app_root/current"
+
+systemctl restart spm-staging-backend
+nginx -t
+systemctl reload-or-restart nginx
+
+curl --fail --silent --show-error --retry 10 --retry-delay 1 \
+  http://127.0.0.1:8080/api/health >/dev/null
+curl --fail --silent --show-error --retry 10 --retry-delay 1 \
+  http://127.0.0.1:8080/ >/dev/null
+
+echo "SPM staging deployed: $release_id"

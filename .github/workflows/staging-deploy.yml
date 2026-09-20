@@ -1,0 +1,113 @@
+name: Staging Deploy
+
+on:
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Deploy staging to Debian
+    if: github.ref == 'refs/heads/staging'
+    runs-on: [self-hosted, linux, x64, local-deploy]
+    timeout-minutes: 30
+    outputs:
+      public_url: ${{ steps.public-health.outputs.public_url }}
+    steps:
+      - name: Checkout staging
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build staging frontend
+        env:
+          VITE_BACKEND_URL: /api
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run check-types
+          npm run build
+
+      - name: Test staging backend
+        run: npm run backend:test
+
+      - name: Deploy staging release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
+
+          if [[ ! -x /usr/local/sbin/spm-staging-deploy ]]; then
+            echo '::error::/usr/local/sbin/spm-staging-deploy is missing or not executable on the local runner.'
+            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
+            exit 1
+          fi
+
+          timeout --signal=TERM --kill-after=30s 25m \
+            sudo -n /usr/local/sbin/spm-staging-deploy "$GITHUB_WORKSPACE" "$release_id"
+
+      - name: Verify staging locally
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error --retry 10 --retry-delay 1 \
+            http://127.0.0.1:8080/api/health
+          curl --fail --silent --show-error --retry 10 --retry-delay 1 \
+            http://127.0.0.1:8080/ >/dev/null
+
+      - name: Verify staging public hostname
+        id: public-health
+        shell: bash
+        env:
+          STAGING_PUBLIC_URL: ${{ vars.SPM_STAGING_PUBLIC_URL }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${STAGING_PUBLIC_URL:-}" ]]; then
+            echo '::error::Configure repository variable SPM_STAGING_PUBLIC_URL, for example https://staging.example.com.'
+            exit 1
+          fi
+
+          public_url="${STAGING_PUBLIC_URL%/}"
+          reachable=0
+          for _ in $(seq 1 60); do
+            if curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1; then
+              reachable=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$reachable" != '1' ]]; then
+            echo "::error::Staging public URL is not reachable: $public_url"
+            curl --fail --show-error --max-time 15 "$public_url/" || true
+            curl --fail --show-error --max-time 15 "$public_url/api/health" || true
+            exit 1
+          fi
+
+          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Staging URL::$public_url"
+          {
+            echo '### Staging deployment'
+            echo
+            echo "- Frontend: $public_url/"
+            echo "- Backend health: $public_url/api/health"
+            echo "- Backend service: spm-staging-backend.service"
+          } >> "$GITHUB_STEP_SUMMARY"
