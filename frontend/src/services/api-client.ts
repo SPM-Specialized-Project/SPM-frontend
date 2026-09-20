@@ -40,8 +40,10 @@ type ApiErrorPayload = {
   message?: string;
 };
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL?.trim() || '/api';
+
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL ?? '/api',
+  baseURL: backendUrl,
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });

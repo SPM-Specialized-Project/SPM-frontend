@@ -1,0 +1,13 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+ingress:
+  # Public frontend: Cloudflare -> Nginx -> static SPA + /api proxy.
+  - hostname: app.example.com
+    service: http://127.0.0.1:80
+
+  # Public backend: used by VITE_BACKEND_URL when frontend and API are split.
+  - hostname: api.example.com
+    service: http://127.0.0.1:4000
+
+  - service: http_status:404

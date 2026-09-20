@@ -2,6 +2,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 export const PORT = Number(process.env.BACKEND_PORT ?? 4000);
+export const CORS_ORIGIN =
+  process.env.BACKEND_CORS_ORIGIN?.trim() || 'http://localhost:3000';
 const dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DATA_DIRECTORY = process.env.BACKEND_DATA_DIRECTORY
