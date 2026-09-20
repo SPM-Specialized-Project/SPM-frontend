@@ -9,6 +9,7 @@ import {
 } from '@/components/data/~mock-courses';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 import type { CourseContent } from '@/types/course-content';
 
 import { CoordinatorCourseView } from './components/coordinator-course-view';
@@ -39,7 +40,7 @@ function CourseDetailsComponent() {
     setIsCourseLoading(true);
     setCourseError(null);
     api
-      .getCourseDetail(id)
+      .getCourseDetail(id, getCurrentViewerContext())
       .then(({ data }) => {
         if (disposed) return;
         setCourse(withCoursePresentation(data.course));

@@ -3,12 +3,14 @@ import axios, { type AxiosResponse } from 'axios';
 import type { CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
 import type { PastRegistration } from '@/components/data/~mock-register';
 import type { Session } from '@/components/data/~mock-session';
+import { useAuthStore } from '@/stores/auth.store';
 
 import type {
   ApiListQuery,
   ApiMutationRequest,
   ApiResourceResponse,
   ApiResponse,
+  AddMembershipRequest,
   CourseDetailResponse,
   CourseListResponse,
   CourseRequestListResponse,
@@ -18,6 +20,10 @@ import type {
   CreateSessionRequest,
   LoginRequest,
   LoginResponse,
+  MembershipListResponse,
+  MembershipMutationResponse,
+  MembershipQuery,
+  RevokeMembershipRequest,
   RegistrationListResponse,
   RegistrationQuery,
   SessionListResponse,
@@ -35,16 +41,25 @@ type ApiErrorPayload = {
   message?: string;
 };
 
+const backendUrl = import.meta.env.VITE_BACKEND_URL?.trim() || '/api';
+
 export const apiClient = axios.create({
-  baseURL: import.meta.env.VITE_BACKEND_URL ?? '/api',
+  baseURL: backendUrl,
   withCredentials: true,
   headers: { 'Content-Type': 'application/json' },
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = typeof window === 'undefined' ? null : window.localStorage.getItem('token');
+  const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
+});
+
+apiClient.interceptors.response.use(undefined, (error: unknown) => {
+  if (axios.isAxiosError(error) && error.response?.status === 401) {
+    useAuthStore.getState().logout();
+  }
+  return Promise.reject(error);
 });
 
 export class ApiError extends Error {
@@ -72,7 +87,7 @@ const toApiError = (error: unknown): ApiError => {
   return new ApiError('Không thể kết nối API.', 500, 'API_ERROR');
 };
 
-async function request<T>(send: () => Promise<AxiosResponse<T>>): Promise<ApiResponse<T>> {
+export async function request<T>(send: () => Promise<AxiosResponse<T>>): Promise<ApiResponse<T>> {
   try {
     const response = await send();
     return { status: response.status, data: response.data };
@@ -86,14 +101,56 @@ export const api = {
     return request(() => apiClient.post<LoginResponse>('/auth/login', loginRequest));
   },
 
+  getSession(): Promise<ApiResponse<Pick<LoginResponse, 'user' | 'role'>>> {
+    return request(() => apiClient.get<Pick<LoginResponse, 'user' | 'role'>>('/auth/me'));
+  },
+
   getCourses(query: ApiListQuery): Promise<ApiResponse<CourseListResponse>> {
     return request(() => apiClient.get<CourseListResponse>('/courses', { params: query }));
   },
 
-  getCourseDetail(courseId: string): Promise<ApiResponse<CourseDetailResponse>> {
+  getCourseDetail(
+    courseId: string,
+    query?: MembershipQuery,
+  ): Promise<ApiResponse<CourseDetailResponse>> {
     return request(() =>
       apiClient.get<CourseDetailResponse>(
         `/courses/${encodeURIComponent(courseId)}/detail`,
+        { params: query },
+      ),
+    );
+  },
+
+  getMemberships(
+    classroomId: string,
+    query: MembershipQuery,
+  ): Promise<ApiResponse<MembershipListResponse>> {
+    return request(() =>
+      apiClient.get<MembershipListResponse>(
+        `/classrooms/${encodeURIComponent(classroomId)}/memberships`,
+        { params: query },
+      ),
+    );
+  },
+
+  addMembership(
+    addRequest: AddMembershipRequest,
+  ): Promise<ApiResponse<MembershipMutationResponse>> {
+    return request(() =>
+      apiClient.post<MembershipMutationResponse>(
+        `/classrooms/${encodeURIComponent(addRequest.classroomId)}/memberships`,
+        addRequest,
+      ),
+    );
+  },
+
+  revokeMembership(
+    revokeRequest: RevokeMembershipRequest,
+  ): Promise<ApiResponse<MembershipMutationResponse>> {
+    return request(() =>
+      apiClient.patch<MembershipMutationResponse>(
+        `/classrooms/${encodeURIComponent(revokeRequest.classroomId)}/memberships/${encodeURIComponent(revokeRequest.membershipId)}`,
+        { ...revokeRequest, status: 'REVOKED' },
       ),
     );
   },

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import {
   COURSE_REQUESTS_FILE,
+  MEMBERSHIPS_FILE,
   DATA_DIRECTORY,
   REGISTRATIONS_FILE,
   SESSIONS_FILE,
@@ -9,6 +10,7 @@ import {
 } from '../config.mjs';
 import {
   INITIAL_COURSE_REQUESTS,
+  INITIAL_MEMBERSHIPS,
   INITIAL_REGISTRATIONS,
   INITIAL_SESSIONS,
   INITIAL_SUBMISSIONS,
@@ -23,6 +25,7 @@ const collectionConfig = {
   sessions: { file: SESSIONS_FILE, seed: INITIAL_SESSIONS },
   registrations: { file: REGISTRATIONS_FILE, seed: INITIAL_REGISTRATIONS },
   courseRequests: { file: COURSE_REQUESTS_FILE, seed: INITIAL_COURSE_REQUESTS },
+  memberships: { file: MEMBERSHIPS_FILE, seed: INITIAL_MEMBERSHIPS },
 };
 
 async function readCollection(name) {
