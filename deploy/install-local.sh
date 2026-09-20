@@ -39,6 +39,7 @@ sudo visudo -cf /etc/sudoers.d/spm-deploy
 sudo systemctl daemon-reload
 sudo systemctl enable nginx spm-backend
 sudo nginx -t
+sudo systemctl start nginx
 
 if [[ -e /etc/nginx/sites-enabled/default ]]; then
   echo 'WARNING: /etc/nginx/sites-enabled/default is still enabled.'

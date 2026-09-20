@@ -44,7 +44,7 @@ mv -Tf -- "$app_root/current.next" "$app_root/current"
 
 systemctl restart spm-backend
 nginx -t
-systemctl reload nginx
+systemctl reload-or-restart nginx
 
 curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1/api/health >/dev/null
 curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1/ >/dev/null
