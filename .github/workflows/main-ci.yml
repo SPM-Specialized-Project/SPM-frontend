@@ -63,7 +63,7 @@ jobs:
       - frontend-quality
       - backend-quality
     runs-on: [self-hosted, linux, x64, local-deploy]
-    timeout-minutes: 20
+    timeout-minutes: 30
     concurrency:
       group: local-deploy
       cancel-in-progress: false
@@ -91,7 +91,19 @@ jobs:
         run: |
           set -euo pipefail
           release_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
-          sudo /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
+
+          if [[ ! -x /usr/local/sbin/spm-deploy ]]; then
+            echo '::error::/usr/local/sbin/spm-deploy is missing or not executable on the local runner.'
+            exit 1
+          fi
+
+          if ! sudo -n true; then
+            echo '::error::sudo is not configured non-interactively for the GitHub Actions runner.'
+            exit 1
+          fi
+
+          timeout --signal=TERM --kill-after=30s 25m \
+            sudo -n /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
 
       - name: Verify local deployment
         shell: bash
