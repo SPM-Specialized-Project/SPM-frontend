@@ -103,11 +103,6 @@ jobs:
             exit 1
           fi
 
-          if ! sudo -n -l -- /usr/local/sbin/spm-deploy >/dev/null 2>&1; then
-            echo '::error::sudo is not configured non-interactively for /usr/local/sbin/spm-deploy.'
-            exit 1
-          fi
-
           timeout --signal=TERM --kill-after=30s 25m \
             sudo -n /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
 
@@ -135,23 +130,16 @@ jobs:
             exit 1
           fi
 
-          systemd_run_path="$(command -v systemd-run)"
-          systemctl_path="$(command -v systemctl)"
-          journalctl_path="$(command -v journalctl)"
-          if ! sudo -n -l -- "$systemd_run_path" >/dev/null 2>&1 || \
-             ! sudo -n -l -- "$systemctl_path" >/dev/null 2>&1 || \
-             ! sudo -n -l -- "$journalctl_path" >/dev/null 2>&1; then
-            echo '::error::sudo must allow systemd-run, systemctl, and journalctl non-interactively for the local-deploy runner.'
-            exit 1
-          fi
-
           sudo -n systemctl stop spm-quick-tunnel.service 2>/dev/null || true
           sudo -n systemctl reset-failed spm-quick-tunnel.service 2>/dev/null || true
-          sudo -n systemd-run \
+          if ! sudo -n systemd-run \
             --unit=spm-quick-tunnel \
             --property=Restart=on-failure \
             --property=RestartSec=5s \
-            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:80
+            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:80; then
+            echo '::error::sudo must allow systemd-run non-interactively for the local-deploy runner.'
+            exit 1
+          fi
 
           public_url=""
           for _ in $(seq 1 30); do
