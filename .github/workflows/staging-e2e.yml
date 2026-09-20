@@ -24,7 +24,9 @@ concurrency:
 jobs:
   promotion-source:
     name: Promotion source (staging only)
-    if: github.event_name == 'pull_request'
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     env:
       HEAD_REF: ${{ github.event.pull_request.head.ref }}
@@ -46,7 +48,11 @@ jobs:
     name: E2E (test-E2E runner)
     if: >-
       github.event_name != 'pull_request' ||
-      github.event.pull_request.head.ref == 'staging'
+      (
+        github.event.pull_request.base.ref == 'main' &&
+        github.event.pull_request.head.ref == 'staging' &&
+        github.event.pull_request.head.repo.full_name == github.repository
+      )
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
