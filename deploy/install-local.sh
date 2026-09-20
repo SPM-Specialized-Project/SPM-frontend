@@ -36,6 +36,18 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/spm-deploy *\n' "$runner_user" \
 sudo chmod 0440 /etc/sudoers.d/spm-deploy
 sudo visudo -cf /etc/sudoers.d/spm-deploy
 
+systemd_run_path="$(command -v systemd-run)"
+systemctl_path="$(command -v systemctl)"
+journalctl_path="$(command -v journalctl)"
+sudo tee /etc/sudoers.d/spm-quick-tunnel >/dev/null <<EOF
+$runner_user ALL=(root) NOPASSWD: $systemd_run_path *
+$runner_user ALL=(root) NOPASSWD: $systemctl_path stop spm-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $systemctl_path reset-failed spm-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $journalctl_path -u spm-quick-tunnel.service *
+EOF
+sudo chmod 0440 /etc/sudoers.d/spm-quick-tunnel
+sudo visudo -cf /etc/sudoers.d/spm-quick-tunnel
+
 sudo systemctl daemon-reload
 sudo systemctl enable nginx spm-backend
 sudo nginx -t
