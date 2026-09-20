@@ -195,6 +195,26 @@ const INITIAL_MEMBERSHIPS = [
   createMembershipSeed('membership-12-student-2', '12', '12-student-2'),
 ];
 
+const createClassroomOwnershipSeed = (
+  id,
+  classroomId,
+  ownerEmail,
+  assignedAt = '2025-11-01T09:00:00.000Z',
+) => ({
+  id,
+  classroomId,
+  ownerRole: 'tutor',
+  ownerEmail,
+  status: 'ACTIVE',
+  assignedAt,
+});
+
+const INITIAL_CLASSROOM_OWNERSHIPS = [
+  createClassroomOwnershipSeed('classroom-ownership-1', '1', 'tutor@gmail.com'),
+  createClassroomOwnershipSeed('classroom-ownership-2', '2', 'tutor@gmail.com'),
+  createClassroomOwnershipSeed('classroom-ownership-3', '3', 'tutor@gmail.com'),
+];
+
 const INITIAL_SUBMISSIONS = [
   {
     id: '2-2-submission-1',
@@ -382,6 +402,7 @@ export {
   COURSE_CATALOG,
   PROVISIONED_STUDENT_ACCOUNTS,
   INITIAL_MEMBERSHIPS,
+  INITIAL_CLASSROOM_OWNERSHIPS,
   INITIAL_SUBMISSIONS,
   INITIAL_SESSIONS,
   INITIAL_REGISTRATIONS,
