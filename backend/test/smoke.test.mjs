@@ -48,7 +48,9 @@ test('serves health, authentication, and course catalog endpoints', async (t) =>
   assert.equal(login.role, 'student');
   assert.ok(login.accessToken);
 
-  const coursesResponse = await fetch(`${baseUrl}/api/courses?viewerRole=coordinator`);
+  const coursesResponse = await fetch(`${baseUrl}/api/courses?viewerRole=coordinator`, {
+    headers: { Authorization: `Bearer ${login.accessToken}` },
+  });
   const courses = await coursesResponse.json();
   assert.equal(coursesResponse.status, 200);
   assert.equal(courses.items.length, 12);

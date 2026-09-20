@@ -3,6 +3,7 @@ import axios, { type AxiosResponse } from 'axios';
 import type { CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
 import type { PastRegistration } from '@/components/data/~mock-register';
 import type { Session } from '@/components/data/~mock-session';
+import { useAuthStore } from '@/stores/auth.store';
 
 import type {
   ApiListQuery,
@@ -49,9 +50,16 @@ export const apiClient = axios.create({
 });
 
 apiClient.interceptors.request.use((config) => {
-  const token = typeof window === 'undefined' ? null : window.localStorage.getItem('token');
+  const token = useAuthStore.getState().token;
   if (token) config.headers.Authorization = `Bearer ${token}`;
   return config;
+});
+
+apiClient.interceptors.response.use(undefined, (error: unknown) => {
+  if (axios.isAxiosError(error) && error.response?.status === 401) {
+    useAuthStore.getState().logout();
+  }
+  return Promise.reject(error);
 });
 
 export class ApiError extends Error {
@@ -79,7 +87,7 @@ const toApiError = (error: unknown): ApiError => {
   return new ApiError('Không thể kết nối API.', 500, 'API_ERROR');
 };
 
-async function request<T>(send: () => Promise<AxiosResponse<T>>): Promise<ApiResponse<T>> {
+export async function request<T>(send: () => Promise<AxiosResponse<T>>): Promise<ApiResponse<T>> {
   try {
     const response = await send();
     return { status: response.status, data: response.data };
@@ -91,6 +99,10 @@ async function request<T>(send: () => Promise<AxiosResponse<T>>): Promise<ApiRes
 export const api = {
   login(loginRequest: LoginRequest): Promise<ApiResponse<LoginResponse>> {
     return request(() => apiClient.post<LoginResponse>('/auth/login', loginRequest));
+  },
+
+  getSession(): Promise<ApiResponse<Pick<LoginResponse, 'user' | 'role'>>> {
+    return request(() => apiClient.get<Pick<LoginResponse, 'user' | 'role'>>('/auth/me'));
   },
 
   getCourses(query: ApiListQuery): Promise<ApiResponse<CourseListResponse>> {

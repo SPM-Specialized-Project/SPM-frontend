@@ -24,7 +24,7 @@ export type LoginRequest = {
 export type LoginResponse = {
   accessToken: string;
   user: User;
-  role: UserRole;
+  role: UserRole | 'lecturer' | 'admin';
 };
 
 // The Node API does not own frontend-only presentation fields such as images.

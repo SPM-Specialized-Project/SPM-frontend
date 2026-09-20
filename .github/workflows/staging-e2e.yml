@@ -59,7 +59,7 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           PUSH_SHA: ${{ github.sha }}
-          PR_MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
         run: |
           set -euo pipefail
@@ -70,8 +70,8 @@ jobs:
           fi
 
           app_sha="$PUSH_SHA"
-          if [[ "$EVENT_NAME" == 'pull_request' && -n "$PR_MERGE_SHA" && "$PR_MERGE_SHA" != 'null' ]]; then
-            app_sha="$PR_MERGE_SHA"
+          if [[ "$EVENT_NAME" == 'pull_request' && -n "$PR_HEAD_SHA" && "$PR_HEAD_SHA" != 'null' ]]; then
+            app_sha="$PR_HEAD_SHA"
           fi
 
           correlation_id="${GITHUB_REPOSITORY//\//-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
