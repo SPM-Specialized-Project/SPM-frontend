@@ -1,3 +1,5 @@
+import { CORS_ORIGIN } from './config.mjs';
+
 const readRequestBody = async (request) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
@@ -13,7 +15,7 @@ const sendJson = (response, status, payload) => {
     'Access-Control-Allow-Credentials': 'true',
     'Access-Control-Allow-Headers': 'Content-Type, Authorization',
     'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-    'Access-Control-Allow-Origin': 'http://localhost:3000',
+    'Access-Control-Allow-Origin': CORS_ORIGIN,
     'Content-Type': 'application/json; charset=utf-8',
   });
   response.end(JSON.stringify(payload));
