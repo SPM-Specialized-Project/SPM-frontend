@@ -86,7 +86,7 @@ jobs:
 
       - name: Build production frontend
         env:
-          VITE_BACKEND_URL: ${{ vars.SPM_BACKEND_URL }}
+          VITE_BACKEND_URL: /api
         run: |
           npm ci
           npm run build

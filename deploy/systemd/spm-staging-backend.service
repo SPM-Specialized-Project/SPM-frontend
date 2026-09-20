@@ -1,0 +1,25 @@
+[Unit]
+Description=SPM Node.js staging backend
+After=network.target
+
+[Service]
+Type=simple
+User=spm
+Group=spm
+WorkingDirectory=/opt/spm-frontend-staging/current/backend
+Environment=NODE_ENV=staging
+EnvironmentFile=-/etc/spm-frontend/staging.env
+Environment=BACKEND_PORT=4011
+Environment=BACKEND_DATA_DIRECTORY=/opt/spm-frontend-staging/shared/data
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/spm-frontend-staging/shared/data
+
+[Install]
+WantedBy=multi-user.target

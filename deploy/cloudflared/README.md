@@ -1,12 +1,21 @@
 # Cloudflare Tunnel for the Debian self-host
 
-This repository uses one named Cloudflare Tunnel with two hostnames:
+This repository contains an optional named-tunnel example with two hostnames:
 
 - `https://app.example.com` -> Nginx on `127.0.0.1:80`
 - `https://api.example.com` -> Node backend on `127.0.0.1:4000`
 
-Replace both hostnames with DNS names in a Cloudflare-managed zone. Do not put
-the tunnel credentials in Git.
+Replace both hostnames with DNS names in a Cloudflare-managed zone if you later
+own a domain. Do not put the tunnel credentials in Git.
+
+The default `main` and `staging` GitHub Actions flows do not require this named
+tunnel. They use two independent Cloudflare Quick Tunnels instead:
+
+- `main` -> Nginx on `127.0.0.1:80`
+- `staging` -> Nginx on `127.0.0.1:8080`
+
+Quick Tunnel links are random `trycloudflare.com` URLs and can change when a
+tunnel restarts. They are for staging/testing, not stable production hosting.
 
 ## One-time setup on Debian 13
 
@@ -32,26 +41,20 @@ sudo systemctl enable --now cloudflared
 sudo systemctl status cloudflared --no-pager
 ```
 
-## Production environment
+## Same-origin API mode used by the workflows
 
-Create `/etc/spm-frontend/backend.env` on Debian:
-
-```dotenv
-BACKEND_CORS_ORIGIN=https://app.example.com
-```
-
-The `spm-backend.service` unit reads this file. The GitHub repository variable
-`SPM_BACKEND_URL` must be:
+The current workflows build the frontend with:
 
 ```text
-https://api.example.com/api
+/api
 ```
 
-`main-ci.yml` passes that variable as `VITE_BACKEND_URL` while building the
-frontend. If the variable is empty, the frontend safely falls back to the
-same-origin `/api` path through Nginx.
+`main-ci.yml` and `staging-deploy.yml` pass `/api` as `VITE_BACKEND_URL`.
+Nginx then proxies `/api/*` to the correct local backend for each environment.
+No `SPM_BACKEND_URL` or `SPM_STAGING_PUBLIC_URL` repository variable is needed
+for Quick Tunnel mode.
 
-## Verify both links
+## Verify a named tunnel later
 
 ```bash
 curl --fail https://api.example.com/api/health
