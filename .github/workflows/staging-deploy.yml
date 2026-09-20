@@ -20,7 +20,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
     outputs:
-      public_url: ${{ steps.public-health.outputs.public_url }}
+      public_url: ${{ steps.cloudflare.outputs.public_url }}
     steps:
       - name: Checkout staging
         uses: actions/checkout@v4
@@ -69,20 +69,52 @@ jobs:
           curl --fail --silent --show-error --retry 10 --retry-delay 1 \
             http://127.0.0.1:8080/ >/dev/null
 
-      - name: Verify staging public hostname
-        id: public-health
+      - name: Start staging Cloudflare Quick Tunnel
+        id: cloudflare
         shell: bash
-        env:
-          STAGING_PUBLIC_URL: ${{ vars.SPM_STAGING_PUBLIC_URL }}
         run: |
           set -euo pipefail
 
-          if [[ -z "${STAGING_PUBLIC_URL:-}" ]]; then
-            echo '::error::Configure repository variable SPM_STAGING_PUBLIC_URL, for example https://staging.example.com.'
+          cloudflared_path="$(command -v cloudflared || true)"
+          if [[ -z "$cloudflared_path" ]]; then
+            echo '::error::cloudflared is not installed on the local-deploy runner.'
             exit 1
           fi
 
-          public_url="${STAGING_PUBLIC_URL%/}"
+          if ! command -v systemd-run >/dev/null 2>&1; then
+            echo '::error::systemd-run is required to keep the staging Quick Tunnel alive after the Actions step ends.'
+            exit 1
+          fi
+
+          sudo -n systemctl stop spm-staging-quick-tunnel.service 2>/dev/null || true
+          sudo -n systemctl reset-failed spm-staging-quick-tunnel.service 2>/dev/null || true
+          started_at="$(date -u --iso-8601=seconds)"
+          if ! sudo -n systemd-run \
+            --unit=spm-staging-quick-tunnel \
+            --property=Restart=on-failure \
+            --property=RestartSec=5s \
+            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:8080; then
+            echo '::error::sudo must allow systemd-run for the staging Quick Tunnel.'
+            exit 1
+          fi
+
+          public_url=""
+          for _ in $(seq 1 30); do
+            public_url="$(sudo -n journalctl -u spm-staging-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
+              | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              | tail -n 1 || true)"
+            if [[ -n "$public_url" ]]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ -z "$public_url" ]]; then
+            echo '::error::Staging Cloudflare Quick Tunnel did not return a public URL.'
+            sudo -n journalctl -u spm-staging-quick-tunnel.service --no-pager -n 100 || true
+            exit 1
+          fi
+
           reachable=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error --retry 1 --retry-all-errors \
@@ -96,7 +128,7 @@ jobs:
           done
 
           if [[ "$reachable" != '1' ]]; then
-            echo "::error::Staging public URL is not reachable: $public_url"
+            echo "::error::Staging Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
             exit 1
@@ -109,5 +141,6 @@ jobs:
             echo
             echo "- Frontend: $public_url/"
             echo "- Backend health: $public_url/api/health"
+            echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
             echo "- Backend service: spm-staging-backend.service"
           } >> "$GITHUB_STEP_SUMMARY"
