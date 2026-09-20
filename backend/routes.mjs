@@ -1,5 +1,11 @@
 import { PORT } from './config.mjs';
-import { COURSE_CATALOG, INITIAL_SESSIONS, PROVISIONED_STUDENT_ACCOUNTS, USERS } from './data/seeds.mjs';
+import {
+  COURSE_CATALOG,
+  INITIAL_CLASSROOM_OWNERSHIPS,
+  INITIAL_SESSIONS,
+  PROVISIONED_STUDENT_ACCOUNTS,
+  USERS,
+} from './data/seeds.mjs';
 import {
   clone,
   createCourseSubmissionRecords,
@@ -34,9 +40,17 @@ const isMembershipRoute = (parts) =>
 
 const getClassroomIdFromParts = (parts) => parts[2];
 
-const isAssignedTutor = (courseId, email) => INITIAL_SESSIONS.some(
-  (session) => session.courseId === courseId && session.ownerEmail === email,
-);
+const isAssignedTutor = (courseId, email) =>
+  INITIAL_CLASSROOM_OWNERSHIPS.some(
+    (ownership) =>
+      ownership.classroomId === courseId &&
+      ownership.status === 'ACTIVE' &&
+      normalizeEmail(ownership.ownerEmail) === normalizeEmail(email),
+  ) || INITIAL_SESSIONS.some(
+    (session) =>
+      session.courseId === courseId &&
+      normalizeEmail(session.ownerEmail) === normalizeEmail(email),
+  );
 
 const ensureClassroomExists = (classroomId) => {
   if (!COURSE_CATALOG[classroomId]) {
