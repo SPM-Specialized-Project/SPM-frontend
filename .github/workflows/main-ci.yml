@@ -132,6 +132,7 @@ jobs:
 
           sudo -n systemctl stop spm-quick-tunnel.service 2>/dev/null || true
           sudo -n systemctl reset-failed spm-quick-tunnel.service 2>/dev/null || true
+          started_at="$(date -u --iso-8601=seconds)"
           if ! sudo -n systemd-run \
             --unit=spm-quick-tunnel \
             --property=Restart=on-failure \
@@ -143,7 +144,7 @@ jobs:
 
           public_url=""
           for _ in $(seq 1 30); do
-            public_url="$(sudo -n journalctl -u spm-quick-tunnel.service --no-pager -n 100 2>/dev/null \
+            public_url="$(sudo -n journalctl -u spm-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
               | tail -n 1 || true)"
             if [[ -n "$public_url" ]]; then
@@ -158,8 +159,24 @@ jobs:
             exit 1
           fi
 
-          curl --fail --silent --show-error "$public_url/" >/dev/null
-          curl --fail --silent --show-error "$public_url/api/health" >/dev/null
+          reachable=0
+          for _ in $(seq 1 30); do
+            if curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1; then
+              reachable=1
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ "$reachable" != '1' ]]; then
+            echo "::error::Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
+            curl --fail --show-error --max-time 15 "$public_url/" || true
+            curl --fail --show-error --max-time 15 "$public_url/api/health" || true
+            exit 1
+          fi
 
           echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
           echo "::notice title=Public deployment URL::$public_url"

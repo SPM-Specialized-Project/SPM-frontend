@@ -43,7 +43,7 @@ sudo tee /etc/sudoers.d/spm-quick-tunnel >/dev/null <<EOF
 $runner_user ALL=(root) NOPASSWD: $systemd_run_path *
 $runner_user ALL=(root) NOPASSWD: $systemctl_path stop spm-quick-tunnel.service
 $runner_user ALL=(root) NOPASSWD: $systemctl_path reset-failed spm-quick-tunnel.service
-$runner_user ALL=(root) NOPASSWD: $journalctl_path -u spm-quick-tunnel.service --no-pager -n 100
+$runner_user ALL=(root) NOPASSWD: $journalctl_path -u spm-quick-tunnel.service *
 EOF
 sudo chmod 0440 /etc/sudoers.d/spm-quick-tunnel
 sudo visudo -cf /etc/sudoers.d/spm-quick-tunnel
