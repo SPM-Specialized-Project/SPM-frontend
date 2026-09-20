@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +16,7 @@ concurrency:
 jobs:
   frontend-quality:
     name: Frontend Quality
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -44,6 +46,7 @@ jobs:
 
   backend-quality:
     name: Backend Quality
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -59,11 +62,14 @@ jobs:
 
   deploy-local:
     name: Deploy local Debian
+    if: github.ref == 'refs/heads/main'
     needs:
       - frontend-quality
       - backend-quality
     runs-on: [self-hosted, linux, x64, local-deploy]
-    timeout-minutes: 20
+    timeout-minutes: 30
+    outputs:
+      public_url: ${{ steps.cloudflare.outputs.public_url }}
     concurrency:
       group: local-deploy
       cancel-in-progress: false
@@ -91,7 +97,14 @@ jobs:
         run: |
           set -euo pipefail
           release_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
-          sudo /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
+
+          if [[ ! -x /usr/local/sbin/spm-deploy ]]; then
+            echo '::error::/usr/local/sbin/spm-deploy is missing or not executable on the local runner.'
+            exit 1
+          fi
+
+          timeout --signal=TERM --kill-after=30s 25m \
+            sudo -n /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
 
       - name: Verify local deployment
         shell: bash
@@ -99,3 +112,60 @@ jobs:
           set -euo pipefail
           curl --fail --silent --show-error http://127.0.0.1/api/health
           curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
+
+      - name: Start one Cloudflare Quick Tunnel
+        id: cloudflare
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          cloudflared_path="$(command -v cloudflared || true)"
+          if [[ -z "$cloudflared_path" ]]; then
+            echo '::error::cloudflared is not installed on the local-deploy runner.'
+            exit 1
+          fi
+
+          if ! command -v systemd-run >/dev/null 2>&1; then
+            echo '::error::systemd-run is required to keep the Quick Tunnel alive after the Actions step ends.'
+            exit 1
+          fi
+
+          sudo -n systemctl stop spm-quick-tunnel.service 2>/dev/null || true
+          sudo -n systemctl reset-failed spm-quick-tunnel.service 2>/dev/null || true
+          if ! sudo -n systemd-run \
+            --unit=spm-quick-tunnel \
+            --property=Restart=on-failure \
+            --property=RestartSec=5s \
+            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:80; then
+            echo '::error::sudo must allow systemd-run non-interactively for the local-deploy runner.'
+            exit 1
+          fi
+
+          public_url=""
+          for _ in $(seq 1 30); do
+            public_url="$(sudo -n journalctl -u spm-quick-tunnel.service --no-pager -n 100 2>/dev/null \
+              | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              | tail -n 1 || true)"
+            if [[ -n "$public_url" ]]; then
+              break
+            fi
+            sleep 2
+          done
+
+          if [[ -z "$public_url" ]]; then
+            echo '::error::Cloudflare Quick Tunnel did not return a public URL.'
+            sudo -n journalctl -u spm-quick-tunnel.service --no-pager -n 100 || true
+            exit 1
+          fi
+
+          curl --fail --silent --show-error "$public_url/" >/dev/null
+          curl --fail --silent --show-error "$public_url/api/health" >/dev/null
+
+          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Public deployment URL::$public_url"
+          {
+            echo '### Public deployment URL'
+            echo
+            echo "- Frontend: $public_url/"
+            echo "- Backend health: $public_url/api/health"
+          } >> "$GITHUB_STEP_SUMMARY"
