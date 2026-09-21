@@ -35,6 +35,9 @@ function RouteComponent() {
   const [loading, setLoading] = useState(false);
   const [viewPassword, setViewPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [globalError, setGlobalError] = useState('');
   void loading;
 
   // Load remembered email from localStorage on mount
@@ -186,7 +189,7 @@ function RouteComponent() {
           Nền tảng học tập, hỗ trợ học sinh mạnh mẽ
         </h3> */}
         <form onSubmit={handleEmailLogin} className="flex flex-col items-center gap-y-3" noValidate>
-          <div className='font-bold flex flex-col'>
+          <div className='flex flex-col font-bold'>
             <h4>Nhập email của bạn</h4>
             <label htmlFor="email" className="sr-only">
               Email
@@ -204,11 +207,11 @@ function RouteComponent() {
               className={`w-72 rounded border px-3 py-2 text-sm shadow-sm ${emailError ? 'border-red-500' : ''}`}
             />
             {emailError && (
-              <p className="mt-1 text-xs text-red-600 font-normal">{emailError}</p>
+              <p className="mt-1 text-xs font-normal text-red-600">{emailError}</p>
             )}
           </div>
 
-          <div className='font-bold flex flex-col'>
+          <div className='flex flex-col font-bold'>
             <h4>Mật khẩu</h4>
 
             <div className="relative">
@@ -231,13 +234,13 @@ function RouteComponent() {
               <ViewPassworIcon className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer" />
             </div>
             {passwordError && (
-              <p className="mt-1 text-xs text-red-600 font-normal">{passwordError}</p>
+              <p className="mt-1 text-xs font-normal text-red-600">{passwordError}</p>
             )}
 
           </div>
 
           {globalError && (
-             <p className="w-72 mt-1 text-sm text-red-600 font-bold text-center">{globalError}</p>
+             <p className="mt-1 w-72 text-center text-sm font-bold text-red-600">{globalError}</p>
           )}
           {/* checkbox remember this device and forgot password link */}
           <div className="flex w-72 items-center justify-between text-sm">
