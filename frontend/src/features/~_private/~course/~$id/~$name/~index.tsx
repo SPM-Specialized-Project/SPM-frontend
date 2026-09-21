@@ -1,11 +1,12 @@
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useState, type SVGProps } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import StudyLayout from '@/components/study-layout';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
-import type { SubmissionView, SubmissionViewerRole } from '@/types/submission';
+import { ApiError, api } from '@/services/api-client';
+import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
+import type { SubmissionView } from '@/types/submission';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -86,32 +87,20 @@ function SubmissionRow({ entry }: { entry: SubmissionView }) {
   );
 }
 
-function getViewerContext() {
-  const viewerRole: SubmissionViewerRole = localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student';
-  const rawUserStore = localStorage.getItem('userStore');
-
-  try {
-    const userStore = rawUserStore ? JSON.parse(rawUserStore) as { state?: { user?: { email?: string } } } : null;
-    return { viewerRole, studentEmail: userStore?.state?.user?.email };
-  } catch {
-    return { viewerRole, studentEmail: undefined };
-  }
-}
-
 function RouteComponent() {
   const { id, name } = Route.useParams();
-  const course = courseDriver.getById(id);
+  const course = courseStore.getById(id);
   const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [viewerContext] = useState(getViewerContext);
+  const [viewerContext] = useState(getCurrentSubmissionViewerContext);
 
   useEffect(() => {
     let active = true;
     setLoading(true);
     setError('');
 
-    backendDriver
+    api
       .getSubmissions({
         courseId: id,
         assignmentId: name,
@@ -123,7 +112,7 @@ function RouteComponent() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải dữ liệu bài nộp.');
+        setError(reason instanceof ApiError ? reason.message : 'Không thể tải dữ liệu bài nộp.');
       })
       .finally(() => {
         if (active) setLoading(false);

@@ -11,7 +11,7 @@
     },
     "status": "graded",
     "score": 1,
-    "feedback": "Bài làm đạt yêu cầu trong backend driver.",
+    "feedback": "Bài làm đạt yêu cầu trong Node.js backend.",
     "submittedAt": "2025-01-10T09:00:00.000Z",
     "fileUrl": "/group07_report 02.pdf"
   },
@@ -29,6 +29,54 @@
     "score": null,
     "feedback": "",
     "submittedAt": "2025-01-10T09:15:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "3-3-submission-1",
+    "courseId": "3",
+    "assignmentId": "3-submission",
+    "student": {
+      "id": "3-student-1",
+      "memberId": 1,
+      "name": "Võ Văn F",
+      "email": "vovanf@student.hcmut.edu.vn"
+    },
+    "status": "graded",
+    "score": 8.5,
+    "feedback": "Bài làm đạt yêu cầu trong Node.js backend.",
+    "submittedAt": "2025-01-10T09:00:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "3-3-submission-2",
+    "courseId": "3",
+    "assignmentId": "3-submission",
+    "student": {
+      "id": "3-student-2",
+      "memberId": 2,
+      "name": "Đặng Thị G",
+      "email": "dangthig@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:15:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "3-3-submission-3",
+    "courseId": "3",
+    "assignmentId": "3-submission",
+    "student": {
+      "id": "3-student-3",
+      "memberId": 3,
+      "name": "Bùi Minh H",
+      "email": "buiminhh@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:30:00.000Z",
     "fileUrl": "/group07_report 02.pdf"
   }
 ]

@@ -1,0 +1,25 @@
+[Unit]
+Description=SPM Node.js backend
+After=network.target
+
+[Service]
+Type=simple
+User=spm
+Group=spm
+WorkingDirectory=/opt/spm-frontend/current/backend
+Environment=NODE_ENV=production
+EnvironmentFile=-/etc/spm-frontend/backend.env
+Environment=BACKEND_PORT=4000
+Environment=BACKEND_DATA_DIRECTORY=/opt/spm-frontend/shared/data
+Environment=PATH=/usr/local/bin:/usr/bin:/bin
+ExecStart=/usr/bin/env node server.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/spm-frontend/shared/data
+
+[Install]
+WantedBy=multi-user.target

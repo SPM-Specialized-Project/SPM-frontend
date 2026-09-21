@@ -4,14 +4,14 @@ import { createFileRoute, useNavigate, Link } from '@tanstack/react-router';
 import React, { useState } from 'react';
 
 import boxSvg from '@/assets/box.svg';
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import ChevronLeft from '@/components/icons/arrow-left';
 import ChevronRight from '@/components/icons/arrow-right';
 import ChevronDown from '@/components/icons/chevron';
 // replaced local double-chevron icons with Heroicons to fix rendering issues
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 
 export const Route = createFileRoute('/statistical/' as any)({
@@ -99,7 +99,7 @@ const Select: React.FC<React.SelectHTMLAttributes<HTMLSelectElement>> = ({
 
 
 function RouteComponent() {
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const courseData = toCourseStats(courses);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(8);

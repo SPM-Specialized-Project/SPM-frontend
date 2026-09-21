@@ -8,9 +8,12 @@ import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 import viteTsconfigPaths from 'vite-tsconfig-paths';
 
+const frontendPort = Number(process.env.VITE_FRONTEND_PORT ?? 3000);
+const backendProxyTarget = process.env.VITE_BACKEND_PROXY_TARGET ?? 'http://127.0.0.1:4000';
+
 const backendProxy = {
   '/api': {
-    target: 'http://127.0.0.1:4000',
+    target: backendProxyTarget,
     changeOrigin: true,
   },
 };
@@ -26,12 +29,12 @@ export default defineConfig({
     viteTsconfigPaths(),
   ],
   server: {
-    port: 3000,
+    port: frontendPort,
     allowedHosts: [],
     proxy: backendProxy,
   },
   preview: {
-    port: 3000,
+    port: frontendPort,
     allowedHosts: [],
     proxy: backendProxy,
   },

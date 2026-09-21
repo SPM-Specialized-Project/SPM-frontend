@@ -1,0 +1,10 @@
+# Copy this file to /etc/cloudflared/spm-staging.yml on Debian.
+# Keep the tunnel credentials JSON outside Git.
+tunnel: REPLACE_WITH_STAGING_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_STAGING_TUNNEL_UUID.json
+
+ingress:
+  # One stable staging hostname: Cloudflare -> Nginx -> frontend + /api proxy.
+  - hostname: staging.example.com
+    service: http://127.0.0.1:8080
+  - service: http_status:404

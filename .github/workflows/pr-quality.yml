@@ -4,6 +4,12 @@ on:
   pull_request:
     branches:
       - main
+      - staging
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
 
 permissions:
   contents: read
@@ -41,3 +47,18 @@ jobs:
 
       - name: Build
         run: npm run build
+
+  backend-quality:
+    name: Backend Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Test Node.js backend
+        run: npm run backend:test

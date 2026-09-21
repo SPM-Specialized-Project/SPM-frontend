@@ -1,7 +1,7 @@
-import { createJsonDataDriver } from '@/services/json-data-driver';
+import { createDataStore } from '@/services/data-store';
 import type { SubmissionRecord } from '@/types/submission';
 
-import { courseDriver } from './~mock-courses';
+import { courseStore } from './~mock-courses';
 
 type SubmissionSeed = {
   assignmentId: string;
@@ -12,7 +12,7 @@ type SubmissionSeed = {
 };
 
 const getStudent = (courseId: string, memberId: number) => {
-  const course = courseDriver.getById(courseId);
+  const course = courseStore.getById(courseId);
   const courseStudent = course?.students[memberId - 1];
 
   return {
@@ -66,8 +66,8 @@ const initialData: SubmissionSeed[] = [
   { assignmentId: 's3', memberId: 10, score: 7.5, feedback: 'Tốt, nhưng thiếu một số chi tiết.', submittedAt: '2024-12-01T12:45:00' },
 ];
 
-/** Canonical in-memory JSON driver for submission records. */
-export const submissionDriver = createJsonDataDriver(
+/** Canonical in-memory data store for submission records. */
+export const submissionStore = createDataStore(
   initialData.map((seed) => toRecord(seed)),
 );
 
@@ -75,19 +75,19 @@ export function getSubmissionKey(assignmentId: string, memberId: number): string
   return `4-${assignmentId}-${memberId}`;
 }
 
-/** Compatibility helper for older screens; all reads now go through the driver. */
+/** Compatibility helper for older screens; all reads now go through the store. */
 export function getSubmission(
   assignmentId: string,
   memberId: number,
 ): SubmissionRecord | undefined {
-  return submissionDriver.getById(getSubmissionKey(assignmentId, memberId));
+  return submissionStore.getById(getSubmissionKey(assignmentId, memberId));
 }
 
 export function getSubmissionSubmissions(assignmentId: string): SubmissionRecord[] {
-  return submissionDriver.list().filter((item) => item.assignmentId === assignmentId);
+  return submissionStore.list().filter((item) => item.assignmentId === assignmentId);
 }
 
-/** Compatibility helper for older screens; updates are persisted by the driver. */
+/** Compatibility helper for older screens; updates are persisted by the store. */
 export function updateSubmission(
   assignmentId: string,
   memberId: number,
@@ -96,7 +96,7 @@ export function updateSubmission(
   },
 ): SubmissionRecord {
   const id = getSubmissionKey(assignmentId, memberId);
-  const current = submissionDriver.getById(id) ?? toRecord({ assignmentId, memberId });
+  const current = submissionStore.getById(id) ?? toRecord({ assignmentId, memberId });
   const score = updates.score !== undefined ? updates.score : current.score;
   const submittedAt = updates.submittedAt !== undefined ? updates.submittedAt : current.submittedAt;
   const updated: SubmissionRecord = {
@@ -108,11 +108,11 @@ export function updateSubmission(
     status: submittedAt ? (score === null ? 'submitted' : 'graded') : 'not-submitted',
   };
 
-  return submissionDriver.upsert(updated);
+  return submissionStore.upsert(updated);
 }
 
 export function getAllSubmissions(): SubmissionRecord[] {
-  return submissionDriver.list();
+  return submissionStore.list();
 }
 
 export const getSubmissionBySubmissionId = (assignmentId: string): SubmissionRecord[] =>

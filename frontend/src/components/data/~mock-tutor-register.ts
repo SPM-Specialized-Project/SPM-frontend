@@ -1,5 +1,6 @@
-import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
-import { createBackendDataDriver } from '@/services/json-data-driver';
+import { api } from '@/services/api-client';
+import { createRemoteDataStore } from '@/services/data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { mockCourses } from './~mock-courses';
 import { mockLanguages, mockLocations , PastRegistration} from './~mock-register';
@@ -76,26 +77,26 @@ export const mockTutorRegistrations: PastRegistration[] = [
   },
 ];
 
-/** Backend driver replacing direct writes to mockTutorRegistrations. */
-export const tutorRegistrationDriver = createBackendDataDriver(
+/** API-backed store for tutor registrations. */
+export const tutorRegistrationStore = createRemoteDataStore(
   mockTutorRegistrations,
   {
-    list: async () => (await backendDriver.getRegistrations({ ...getCurrentViewerContext(), registrationType: 'tutor' })).data.items,
-    create: async (record) => (await backendDriver.createRegistration({
+    list: async () => (await api.getRegistrations({ ...getCurrentViewerContext(), registrationType: 'tutor' })).data.items,
+    create: async (record) => (await api.createRegistration({
       ...getCurrentViewerContext(),
       registrationType: 'tutor',
       item: { ...record, ownerRole: 'tutor', ownerEmail: record.Email },
     })).data.item,
-    update: async (id, patch) => (await backendDriver.updateRegistration({
+    update: async (id, patch) => (await api.updateRegistration({
       ...getCurrentViewerContext(),
       registrationType: 'tutor',
       registrationId: id,
       patch,
     })).data.item,
-    remove: async (id) => (await backendDriver.deleteRegistration(id, getCurrentViewerContext())).data.deleted,
+    remove: async (id) => (await api.deleteRegistration(id, getCurrentViewerContext())).data.deleted,
   },
 );
 
 export function deleteTutorRegistration(id: string): boolean {
-  return tutorRegistrationDriver.remove(id);
+  return tutorRegistrationStore.remove(id);
 }

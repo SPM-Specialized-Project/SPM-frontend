@@ -8,7 +8,7 @@ export type ResourcePermissions = {
 };
 
 export type ResourceMeta = {
-  source: 'local-backend';
+  source: 'node-backend';
   updatedAt: string;
   viewerRole: UserRole;
   ownerRole?: string;
@@ -25,7 +25,7 @@ export type BackendListResponse<T> = {
   viewerRole: UserRole;
   permissions: ResourcePermissions;
   meta: {
-    source: 'local-backend';
+    source: 'node-backend';
     updatedAt: string;
     total: number;
   };

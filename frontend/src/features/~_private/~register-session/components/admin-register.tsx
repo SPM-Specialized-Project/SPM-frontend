@@ -1,14 +1,14 @@
 import { useState } from 'react';
 
-import { courseCreationRequestDriver, type CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
-import { useJsonData } from '@/services/use-json-data';
+import { courseCreationRequestStore, type CourseCreationRequest } from '@/components/data/~mock-coordinator-requests';
+import { useDataStore } from '@/services/use-data-store';
 
 import { AdminRequestCard } from './admin-request-card';
 
 type DropdownOption = { id: string; name: string };
 
 export function AdminRegister() {
-  const requests = useJsonData(courseCreationRequestDriver);
+  const requests = useDataStore(courseCreationRequestStore);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<CourseCreationRequest>>({});
 
@@ -36,7 +36,7 @@ export function AdminRegister() {
   };
   const handleSave = () => {
     if (!editingId) return;
-    courseCreationRequestDriver.update(editingId, { ...editForm, updatedAt: new Date().toISOString() });
+    courseCreationRequestStore.update(editingId, { ...editForm, updatedAt: new Date().toISOString() });
     setEditingId(null);
     setEditForm({});
   };

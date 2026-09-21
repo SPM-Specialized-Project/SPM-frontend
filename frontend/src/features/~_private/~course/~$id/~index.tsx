@@ -1,9 +1,15 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 
-import { courseDriver, type Course, type DataCourses } from '@/components/data/~mock-courses';
+import {
+  courseStore,
+  type Course,
+  type DataCourses,
+  withCoursePresentation,
+} from '@/components/data/~mock-courses';
 import StudyLayout from '@/components/study-layout';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import { ApiError, api } from '@/services/api-client';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 import type { CourseContent } from '@/types/course-content';
 
 import { CoordinatorCourseView } from './components/coordinator-course-view';
@@ -20,7 +26,7 @@ export const Route = createFileRoute('/_private/course/$id/')({
 function CourseDetailsComponent() {
   const { id } = Route.useParams();
   const navigate = useNavigate();
-  const [course, setCourse] = useState<Course | undefined>(() => courseDriver.getById(id));
+  const [course, setCourse] = useState<Course | undefined>(() => courseStore.getById(id));
   const [courseDetail, setCourseDetail] = useState<DataCourses | undefined>();
   const [isCourseLoading, setIsCourseLoading] = useState(true);
   const [courseError, setCourseError] = useState<string | null>(null);
@@ -33,18 +39,18 @@ function CourseDetailsComponent() {
 
     setIsCourseLoading(true);
     setCourseError(null);
-    backendDriver
-      .getCourseDetail(id)
+    api
+      .getCourseDetail(id, getCurrentViewerContext())
       .then(({ data }) => {
         if (disposed) return;
-        setCourse(data.course);
+        setCourse(withCoursePresentation(data.course));
         setCourseDetail(data.detail);
       })
       .catch((error: unknown) => {
         if (disposed) return;
         setCourseDetail(undefined);
         setCourseError(
-          error instanceof BackendDriverError
+          error instanceof ApiError
             ? error.message
             : 'Không thể tải dữ liệu khóa học.',
         );

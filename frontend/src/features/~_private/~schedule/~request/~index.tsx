@@ -3,11 +3,11 @@ import { createFileRoute, Link, useNavigate, useSearch } from '@tanstack/react-r
 import { useEffect, useState, type FormEvent } from 'react';
 import { toast } from 'react-toastify';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import { getAllNames } from '@/components/data/~mock-names';
 import { saveSession, type SessionMember } from '@/components/data/~mock-session';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import {
   BasicInfoSection,
@@ -37,7 +37,7 @@ export const Route = createFileRoute('/_private/schedule/request/')({
 function RouteComponent() {
   const navigate = useNavigate();
   const searchParams = useSearch({ from: '/_private/schedule/request/' });
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const allNames = getAllNames();
 
   const [title, setTitle] = useState(searchParams.title || '');

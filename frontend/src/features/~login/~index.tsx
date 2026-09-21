@@ -5,7 +5,7 @@ import { toast } from 'react-toastify';
 
 // import CustomGoogleButton from '@/components/button/google-button';
 import handleAxiosError from '@/helpers/handle-axios-error';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
+import { ApiError, api } from '@/services/api-client';
 import { useAuthStore, useUserStore } from '@/stores';
 
 // import overseaStudent from '../../assets/animations/Uy24MEqryK.json';
@@ -30,16 +30,12 @@ function RouteComponent() {
   const navigate = useNavigate();
   const setToken = useAuthStore((s) => s.setToken);
   const setUser = useUserStore((s) => s.setUser);
-  
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [viewPassword, setViewPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
-  
-  const [emailError, setEmailError] = useState('');
-  const [passwordError, setPasswordError] = useState('');
-  const [globalError, setGlobalError] = useState('');
+  void loading;
 
   // Load remembered email from localStorage on mount
   useEffect(() => {
@@ -53,6 +49,32 @@ function RouteComponent() {
       // ignore
     }
   }, []);
+  // const loginWithGoogle = async (credentialResponse: string) => {
+  //   try {
+  //     setLoading(true);
+  // const loginWithGoogle = useGoogleLogin({
+  //   flow: 'auth-code',
+  //   onSuccess: async (codeResponse) => {
+  //     try {
+  //       setLoading(true);
+  //       // const response = await api.googleLogin(codeResponse.code);
+  //       // const { accessToken, role, user } = response.data;
+  //       // setToken(accessToken);
+  //       // setUser(user);
+  //       // toast.success(`Đăng nhập thành công với vai trò ${role}!`);
+  //       // navigate({ to: '/dashboard' });
+  //     } catch (error: unknown) {
+  //       handleAxiosError(error, (message: string) => {
+  //         toast.error(message);
+  //       });
+  //     } finally {
+  //       setLoading(false);
+  //     }
+  //   },
+  //   onError: (errorResponse) => {
+  //     toast.error(errorResponse.error_description || 'Đăng nhập Google thất bại');
+  //   },
+  // });
 
   const ViewPassworIcon = ({ className }: { className?: string }) => {
     return (
@@ -69,35 +91,37 @@ function RouteComponent() {
       >
         <path d="M11 0C6 0 1.73 3.11 0 7.5C1.73 11.89 6 15 11 15C16 15 20.27 11.89 22 7.5C20.27 3.11 16 0 11 0ZM11 12.5C8.24 12.5 6 10.26 6 7.5C6 4.74 8.24 2.5 11 2.5C13.76 2.5 16 4.74 16 7.5C16 10.26 13.76 12.5 11 12.5ZM11 4.5C9.34 4.5 8 5.84 8 7.5C8 9.16 9.34 10.5 11 10.5C12.66 10.5 14 9.16 14 7.5C14 5.84 12.66 4.5 11 4.5Z" fill="#3D4863" />
       </svg>
+
     )
   }
-
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
     setEmailError('');
     setPasswordError('');
     setGlobalError('');
 
-    let valid = true;
+    // Client-side validation
+    let hasError = false;
     if (!email) {
       setEmailError('Vui lòng nhập email');
-      valid = false;
+      hasError = true;
     } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       setEmailError('Email không hợp lệ');
-      valid = false;
+      hasError = true;
     }
 
     if (!password) {
       setPasswordError('Vui lòng nhập mật khẩu');
-      valid = false;
+      hasError = true;
     }
 
-    if (!valid) return;
+    if (hasError) return;
 
     try {
       setLoading(true);
 
-      const response = await backendDriver.login({ email, password });
+      const response = await api.login({ email, password });
       const { accessToken, role, user } = response.data;
 
       // Set token in auth store (this also sets isAuthenticated = true)
@@ -117,7 +141,7 @@ function RouteComponent() {
       toast.success(`Đăng nhập thành công với vai trò ${role}!`);
       navigate({ to: '/dashboard' });
     } catch (error: unknown) {
-      if (error instanceof BackendDriverError) {
+      if (error instanceof ApiError) {
         setGlobalError(error.message);
       } else {
         handleAxiosError(error, (message: string) => {
@@ -215,9 +239,8 @@ function RouteComponent() {
           {globalError && (
              <p className="w-72 mt-1 text-sm text-red-600 font-bold text-center">{globalError}</p>
           )}
-
           {/* checkbox remember this device and forgot password link */}
-          <div className="flex w-72 items-center justify-between text-sm mt-2">
+          <div className="flex w-72 items-center justify-between text-sm">
             <label className="inline-flex items-center gap-2">
               <input
                 id="rememberMe"
@@ -237,13 +260,30 @@ function RouteComponent() {
           </div>
           <button
             type="submit"
-            className="w-72 mt-2 rounded bg-[#0329E9] px-4 py-2 text-white hover:bg-primary-700 disabled:opacity-60"
+            className="w-72 rounded bg-[#0329E9] px-4 py-2 text-white hover:bg-primary-700 disabled:opacity-60"
             disabled={loading}
           >
             {loading ? 'Đang đăng nhập...' : 'Đăng nhập'}
           </button>
         </form>
 
+        {/* <div className="">Hoặc</div>
+        <CustomGoogleButton
+          onSuccess={async (credentialResponse) => {
+            if (!credentialResponse.credential) {
+              toast.error(
+                'Có lỗi xảy ra khi đăng nhập bằng tài khoản Google. Vui lòng thử lại!',
+              );
+              return;
+            }
+            await loginWithGoogle(credentialResponse.credential);
+          }}
+          onError={() => {
+            toast.error(
+              'Có lỗi xảy ra khi đăng nhập bằng tài khoản Google. Vui lòng thử lại!',
+            );
+          }}
+        /> */}
       </div>
       <div className="bg-primary"></div>
       <div className="absolute right-0 top-0 max-h-44 w-1/2 rotate-180 xs:w-1/3 md:max-h-52 lg:hidden">

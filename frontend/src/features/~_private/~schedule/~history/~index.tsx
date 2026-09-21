@@ -3,9 +3,9 @@ import { UserCircleIcon, ChevronLeftIcon, ChevronRightIcon, ChevronDoubleLeftIco
 import { createFileRoute, Link } from '@tanstack/react-router'
 import React, { useMemo, useState } from 'react'
 
-import { sessionDriver } from '@/components/data/~mock-session'
+import { sessionStore } from '@/components/data/~mock-session'
 import StudyLayout from '@/components/study-layout'
-import { useJsonData } from '@/services/use-json-data'
+import { useDataStore } from '@/services/use-data-store'
 
 export const Route = createFileRoute('/_private/schedule/history/')({
   beforeLoad: async () => {
@@ -26,7 +26,7 @@ function formatPretty(dt?: string) {
 }
 
 function RouteComponent() {
-  const all = useJsonData(sessionDriver)
+  const all = useDataStore(sessionStore)
   const [qTitle, setQTitle] = useState('')
   const [qCode, setQCode] = useState('')
   const [page, setPage] = useState(1)

@@ -2,11 +2,12 @@ import { ArrowDownTrayIcon, ArrowLeftIcon } from '@heroicons/react/24/outline';
 import { createFileRoute, Link } from '@tanstack/react-router';
 import { useEffect, useState, type SVGProps } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import { ArrowLeft } from '@/components/icons';
 import StudyLayout from '@/components/study-layout';
-import { BackendDriverError, backendDriver } from '@/services/backend-driver';
-import type { SubmissionView, SubmissionViewerRole } from '@/types/submission';
+import { ApiError, api } from '@/services/api-client';
+import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
+import type { SubmissionView } from '@/types/submission';
 import filePDF from '/group07_report 02.pdf';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
@@ -47,20 +48,11 @@ const formatDate = (value: string | null) =>
       })
     : 'Chưa nộp';
 
-const getCurrentStudentEmail = () => {
-  const rawUserStore = localStorage.getItem('userStore');
-  try {
-    const userStore = rawUserStore ? JSON.parse(rawUserStore) as { state?: { user?: { email?: string } } } : null;
-    return userStore?.state?.user?.email;
-  } catch {
-    return undefined;
-  }
-};
-
 function RouteComponent() {
   const { id, name, stuname } = Route.useParams();
-  const course = courseDriver.getById(id);
-  const [viewerRole] = useState<SubmissionViewerRole>(() => localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student');
+  const course = courseStore.getById(id);
+  const [viewerContext] = useState(getCurrentSubmissionViewerContext);
+  const { viewerRole } = viewerContext;
   const [matchingEntry, setMatchingEntry] = useState<SubmissionView | null>(null);
   const [activeTab, setActiveTab] = useState<'baiLam' | 'nhanXet'>('baiLam');
   const [comment, setComment] = useState('');
@@ -75,12 +67,12 @@ function RouteComponent() {
     setLoading(true);
     setError('');
 
-    backendDriver
+    api
       .getSubmissions({
         courseId: id,
         assignmentId: name,
         viewerRole,
-        studentEmail: viewerRole === 'student' ? getCurrentStudentEmail() : undefined,
+        studentEmail: viewerRole === 'student' ? viewerContext.studentEmail : undefined,
       })
       .then((response) => {
         if (!active) return;
@@ -94,7 +86,7 @@ function RouteComponent() {
       })
       .catch((reason: unknown) => {
         if (!active) return;
-        setError(reason instanceof BackendDriverError ? reason.message : 'Không thể tải bài nộp.');
+        setError(reason instanceof ApiError ? reason.message : 'Không thể tải bài nộp.');
         setMatchingEntry(null);
       })
       .finally(() => {
@@ -104,7 +96,7 @@ function RouteComponent() {
     return () => {
       active = false;
     };
-  }, [id, name, stuname, viewerRole]);
+  }, [id, name, stuname, viewerContext, viewerRole]);
 
   useEffect(() => {
     if (!matchingEntry) return;
@@ -116,9 +108,10 @@ function RouteComponent() {
 
     setSaving(true);
     try {
-      const response = await backendDriver.updateSubmission({
+      const response = await api.updateSubmission({
         submissionId: matchingEntry.id,
         viewerRole,
+        viewerEmail: viewerRole === 'student' ? viewerContext.studentEmail : undefined,
         score,
         feedback: comment,
       });
@@ -128,7 +121,7 @@ function RouteComponent() {
       setHasChanges(false);
       alert('Đã lưu thành công!');
     } catch (reason: unknown) {
-      setError(reason instanceof BackendDriverError ? reason.message : 'Không thể lưu bài nộp.');
+      setError(reason instanceof ApiError ? reason.message : 'Không thể lưu bài nộp.');
     } finally {
       setSaving(false);
     }

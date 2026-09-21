@@ -5,14 +5,14 @@ import { useCallback, useState, useEffect, SVGProps } from 'react';
 import {
   type PastRegistration,
   deletePastRegistration,
-  pastRegistrationDriver,
+  pastRegistrationStore,
 } from '@/components/data/~mock-register';
 import {
   deleteTutorRegistration,
-  tutorRegistrationDriver,
+  tutorRegistrationStore,
 } from '@/components/data/~mock-tutor-register';
 import StudyLayout from '@/components/study-layout';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 // [THÊM] Định nghĩa kiểu dữ liệu cho user
 interface UserProfile {
@@ -45,8 +45,8 @@ export const Route = createFileRoute('/_private/registration-history/')({
 });
 
 function RouteComponent() {
-  const studentRegistrations = useJsonData(pastRegistrationDriver);
-  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
+  const studentRegistrations = useDataStore(pastRegistrationStore);
+  const tutorRegistrations = useDataStore(tutorRegistrationStore);
 
   // [SỬA] Dùng useState để lưu user, tránh lỗi khi render
   const [user, setUser] = useState<UserProfile | null>(null);

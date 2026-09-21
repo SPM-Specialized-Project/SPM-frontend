@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
 
-import { mockLanguages, mockLocations, pastRegistrationDriver, type PastRegistration } from '@/components/data/~mock-register';
-import { tutorRegistrationDriver } from '@/components/data/~mock-tutor-register';
+import { mockLanguages, mockLocations, pastRegistrationStore, type PastRegistration } from '@/components/data/~mock-register';
+import { tutorRegistrationStore } from '@/components/data/~mock-tutor-register';
 import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
-import { useJsonData } from '@/services/use-json-data';
+import { useDataStore } from '@/services/use-data-store';
 
 import { DataFilters } from './data-filters';
 import { DataRequestTable } from './data-request-table';
@@ -14,8 +14,8 @@ import type { UnifiedRegistration } from './result-types';
 const ITEMS_PER_PAGE = 10;
 
 export function DataTab() {
-  const studentRegistrations = useJsonData(pastRegistrationDriver);
-  const tutorRegistrations = useJsonData(tutorRegistrationDriver);
+  const studentRegistrations = useDataStore(pastRegistrationStore);
+  const tutorRegistrations = useDataStore(tutorRegistrationStore);
   const [searchName, setSearchName] = useState('');
   const [searchSubject, setSearchSubject] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
@@ -98,8 +98,8 @@ export function DataTab() {
   };
   const handleMatch = (personId: string) => {
     if (!selectedRegistration) return;
-    const driver = selectedRegistration.role === 'Student' ? pastRegistrationDriver : tutorRegistrationDriver;
-    driver.update(selectedRegistration.id, { status: 'Approved' });
+    const store = selectedRegistration.role === 'Student' ? pastRegistrationStore : tutorRegistrationStore;
+    store.update(selectedRegistration.id, { status: 'Approved' });
     console.log('Assigned person id:', personId, 'for registration:', selectedRegistration.id);
     alert('Đã phân công thành công!');
     closeAssignPopup();

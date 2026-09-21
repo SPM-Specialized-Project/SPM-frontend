@@ -1,5 +1,6 @@
-import { backendDriver, getCurrentViewerContext } from '@/services/backend-driver';
-import { createBackendDataDriver } from '@/services/json-data-driver';
+import { api } from '@/services/api-client';
+import { createRemoteDataStore } from '@/services/data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { mockLanguages, mockLocations } from './~mock-register';
 
@@ -121,20 +122,20 @@ export const mockCourseCreationRequests: CourseCreationRequest[] = [
   },
 ];
 
-/** Backend driver for course creation requests. */
-export const courseCreationRequestDriver = createBackendDataDriver(
+/** API-backed course creation request store. */
+export const courseCreationRequestStore = createRemoteDataStore(
   mockCourseCreationRequests,
   {
-    list: async () => (await backendDriver.getCourseCreationRequests(getCurrentViewerContext())).data.items,
-    create: async (record) => (await backendDriver.createCourseCreationRequest({
+    list: async () => (await api.getCourseCreationRequests(getCurrentViewerContext())).data.items,
+    create: async (record) => (await api.createCourseCreationRequest({
       ...getCurrentViewerContext(),
       item: { ...record, ownerRole: 'coordinator', ownerEmail: record.coordinatorEmail },
     })).data.item,
-    update: async (id, patch) => (await backendDriver.updateCourseCreationRequest({
+    update: async (id, patch) => (await api.updateCourseCreationRequest({
       ...getCurrentViewerContext(),
       requestId: id,
       patch,
     })).data.item,
-    remove: async (id) => (await backendDriver.deleteCourseCreationRequest(id, getCurrentViewerContext())).data.deleted,
+    remove: async (id) => (await api.deleteCourseCreationRequest(id, getCurrentViewerContext())).data.deleted,
   },
 );

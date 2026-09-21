@@ -2,10 +2,10 @@ import { createFileRoute, useNavigate, useParams } from '@tanstack/react-router'
 import { useEffect, useState } from 'react'
 import { toast } from 'react-toastify'
 
-import { courseDriver } from '@/components/data/~mock-courses'
+import { courseStore } from '@/components/data/~mock-courses'
 import { getAllNames } from '@/components/data/~mock-names'
-import { deleteSession, sessionDriver, type Session, updateSession } from '@/components/data/~mock-session'
-import { useJsonData } from '@/services/use-json-data'
+import { deleteSession, sessionStore, type Session, updateSession } from '@/components/data/~mock-session'
+import { useDataStore } from '@/services/use-data-store'
 
 import { ManagerSessionView } from './manager-session-view'
 import type { AttendanceState } from './schedule-detail-components'
@@ -26,10 +26,10 @@ function RouteComponent() {
   // Lấy ID từ URL
   const { id } = useParams({ from: Route.id })
   const navigate = useNavigate()
-  const sessions = useJsonData(sessionDriver)
-  const courses = useJsonData(courseDriver)
+  const sessions = useDataStore(sessionStore)
+  const courses = useDataStore(courseStore)
 
-  // load session from backend-backed driver
+  // load session from the API-backed store
   const session = id ? sessions.find((item) => item.id === id) : undefined
   // Build a shared mock members fallback (synchronized across components)
   const mockMembers = getAllNames().map((m) => ({ id: String(m.id), name: m.name }))

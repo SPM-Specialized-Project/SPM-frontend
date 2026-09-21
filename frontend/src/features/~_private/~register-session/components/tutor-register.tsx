@@ -1,17 +1,17 @@
 import { useNavigate } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 
-import { courseDriver } from '@/components/data/~mock-courses';
+import { courseStore } from '@/components/data/~mock-courses';
 import type { PastRegistration as TutorReg } from '@/components/data/~mock-register';
 import { mockLanguages, mockLocations } from '@/components/data/~mock-register';
-import { tutorRegistrationDriver } from '@/components/data/~mock-tutor-register';
-import { useJsonData } from '@/services/use-json-data';
+import { tutorRegistrationStore } from '@/components/data/~mock-tutor-register';
+import { useDataStore } from '@/services/use-data-store';
 
 import { TutorRegisterFields, tutorSessionTypeOptions } from './tutor-register-fields';
 import type { DropdownOption } from './tutor-register-form';
 
 export function TutorRegister() {
-  const courses = useJsonData(courseDriver);
+  const courses = useDataStore(courseStore);
   const courseOptions: DropdownOption[] = courses.map((course) => ({
     id: course.id,
     name: course.title + ' (' + course.code + ')',
@@ -87,7 +87,7 @@ export function TutorRegister() {
       createdAt: new Date().toISOString(),
     };
 
-    tutorRegistrationDriver.create(newRegistration);
+    tutorRegistrationStore.create(newRegistration);
     setTimeout(() => navigate({ to: '/registration-history' }), 1500);
   };
 

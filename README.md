@@ -1,9 +1,8 @@
 # SOFTWARE-ENGINEER-BTL
 
 [![React](https://img.shields.io/badge/React-19.0.0-61DAFB?style=flat&logo=react)](https://reactjs.org/)
-[![NestJS](https://img.shields.io/badge/NestJS-10.x-E0234E?style=flat&logo=nestjs)](https://nestjs.com/)
+[![Node.js](https://img.shields.io/badge/Node.js-20+-339933?style=flat&logo=node.js)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178C6?style=flat&logo=typescript)](https://www.typescriptlang.org/)
-[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-14+-336791?style=flat&logo=postgresql)](https://www.postgresql.org/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 > 🎓 A modern full-stack web application for HCMUT Software Engineering course management system
@@ -813,51 +812,15 @@ SOFTWARE-ENGINEER-BTL/
 │   ├── package.json
 │   └── README.md
 │
-├── backend/                           # NestJS Backend (to be implemented)
-│   ├── src/
-│   │   ├── main.ts                   # Application entry point
-│   │   ├── app.module.ts             # Root module
-│   │   ├── auth/                     # Authentication module
-│   │   │   ├── auth.controller.ts
-│   │   │   ├── auth.service.ts
-│   │   │   ├── auth.module.ts
-│   │   │   ├── guards/
-│   │   │   │   └── jwt-auth.guard.ts
-│   │   │   ├── strategies/
-│   │   │   │   └── jwt.strategy.ts
-│   │   │   └── dto/
-│   │   │       ├── login.dto.ts
-│   │   │       └── register.dto.ts
-│   │   ├── users/                    # Users module
-│   │   │   ├── users.controller.ts
-│   │   │   ├── users.service.ts
-│   │   │   ├── users.module.ts
-│   │   │   ├── entities/
-│   │   │   │   └── user.entity.ts
-│   │   │   └── dto/
-│   │   │       ├── create-user.dto.ts
-│   │   │       └── update-user.dto.ts
-│   │   ├── courses/                  # Courses module
-│   │   │   ├── courses.controller.ts
-│   │   │   ├── courses.service.ts
-│   │   │   ├── courses.module.ts
-│   │   │   └── entities/
-│   │   │       └── course.entity.ts
-│   │   ├── common/                   # Shared resources
-│   │   │   ├── decorators/
-│   │   │   ├── filters/
-│   │   │   ├── guards/
-│   │   │   ├── interceptors/
-│   │   │   └── pipes/
-│   │   ├── config/                   # Configuration
-│   │   │   ├── database.config.ts
-│   │   │   └── jwt.config.ts
-│   │   └── database/                 # Database related
-│   │       ├── migrations/
-│   │       └── seeds/
-│   ├── test/                         # E2E tests
-│   ├── nest-cli.json
-│   ├── tsconfig.json
+├── backend/                           # Node.js API backend
+│   ├── server.mjs                    # HTTP server entry point
+│   ├── routes.mjs                    # REST route handlers
+│   ├── http.mjs                      # JSON response/request helpers
+│   ├── config.mjs                    # Port and persistence paths
+│   ├── domain/backend-data.mjs       # Domain mapping and permissions
+│   ├── data/storage.mjs              # Serialized JSON persistence
+│   ├── data/seeds.mjs                # Initial users and domain data
+│   ├── data/*.json                   # Runtime data files
 │   └── package.json
 │
 ├── docker-compose.yml                # Docker services configuration
@@ -874,9 +837,8 @@ SOFTWARE-ENGINEER-BTL/
 
 Ensure you have the following installed on your system:
 
-- **Node.js**: v18.x or v20.x ([Download](https://nodejs.org/))
+- **Node.js**: v20.x or later ([Download](https://nodejs.org/))
 - **Yarn**: v1.22.x or later ([Install](https://yarnpkg.com/))
-- **PostgreSQL**: v14.x or later ([Download](https://www.postgresql.org/download/))
 - **Git**: Latest version ([Download](https://git-scm.com/))
 
 Optional:
@@ -910,9 +872,8 @@ yarn install
 Create a `.env` file in the `frontend` directory:
 
 ```env
-# API Configuration
-VITE_API_BASE_URL=http://localhost:3001
-VITE_API_TIMEOUT=30000
+# API Configuration (Vite proxies /api to the Node backend on port 4000)
+VITE_BACKEND_URL=/api
 
 # Google OAuth
 VITE_GOOGLE_CLIENT_ID=your_google_client_id_here
@@ -959,183 +920,32 @@ yarn codegen
 
 ### ⚙️ Backend Setup
 
-#### 1. Navigate to backend directory
+The backend is a dependency-free Node.js HTTP API. It stores mutable demo data in `backend/data/*.json` so the frontend can be developed without an external database.
+
+#### 1. Start the backend
 
 ```bash
-cd backend
+npm run backend
 ```
 
-#### 2. Install dependencies
+For watch mode:
 
 ```bash
-npm install
-# or
-yarn install
+npm run backend:watch
 ```
 
-#### 3. Environment Configuration
+The API listens at **http://127.0.0.1:4000** by default. Set `BACKEND_PORT` to use another port.
 
-Create a `.env` file in the `backend` directory:
+#### 2. Run backend tests
 
-```env
-# Application
-NODE_ENV=development
-PORT=3001
-
-# Database
-DB_HOST=localhost
-DB_PORT=5432
-DB_USERNAME=postgres
-DB_PASSWORD=your_password
-DB_DATABASE=software_engineer_btl
-
-# JWT
-JWT_SECRET=your_super_secret_jwt_key_change_in_production
-JWT_EXPIRES_IN=7d
-JWT_REFRESH_SECRET=your_refresh_token_secret
-JWT_REFRESH_EXPIRES_IN=30d
-
-# Google OAuth
-GOOGLE_CLIENT_ID=your_google_client_id
-GOOGLE_CLIENT_SECRET=your_google_client_secret
-GOOGLE_CALLBACK_URL=http://localhost:3001/api/auth/google/callback
-
-# CORS
-CORS_ORIGIN=http://localhost:80
-
-# File Upload
-MAX_FILE_SIZE=10485760  # 10MB
-UPLOAD_DIRECTORY=./uploads
-
-# Email (Optional)
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email@gmail.com
-SMTP_PASSWORD=your_app_password
-```
-
-#### 4. Database Setup
-
-```bash
-# Run migrations
-npm run migration:run
-
-# Seed database (optional)
-npm run seed
-```
-
-#### 5. Start development server
-
-```bash
-npm run start:dev
-```
-
-The backend API will be available at: **http://localhost:3001**
-
-API Documentation (Swagger): **http://localhost:3001/api/docs**
-
-#### 6. Build for production
-
-```bash
-npm run build
-```
-
-#### 7. Start production server
-
-```bash
-npm run start:prod
-```
-
-#### Other useful commands
-
-```bash
-# Run tests
-npm run test
-
-# E2E tests
-npm run test:e2e
-
-# Test coverage
-npm run test:cov
-
-# Create a new migration
-npm run migration:create -- -n MigrationName
-
-# Revert last migration
-npm run migration:revert
+npm run backend:test
 ```
 
 ---
 
 ### 🗄️ Database Setup
 
-#### Option 1: Local PostgreSQL Installation
-
-1. **Install PostgreSQL** from [official website](https://www.postgresql.org/download/)
-
-2. **Create database**:
-
-```bash
-psql -U postgres
-```
-
-```sql
-CREATE DATABASE software_engineer_btl;
-CREATE USER app_user WITH ENCRYPTED PASSWORD 'your_password';
-GRANT ALL PRIVILEGES ON DATABASE software_engineer_btl TO app_user;
-\q
-```
-
-3. **Update backend `.env`** with your database credentials
-
-#### Option 2: Docker (Recommended)
-
-Create a `docker-compose.yml` file in the root directory:
-
-```yaml
-version: '3.8'
-
-services:
-  postgres:
-    image: postgres:14-alpine
-    container_name: btl_postgres
-    restart: always
-    ports:
-      - '5432:5432'
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: software_engineer_btl
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - btl_network
-
-  redis:
-    image: redis:7-alpine
-    container_name: btl_redis
-    restart: always
-    ports:
-      - '6379:6379'
-    volumes:
-      - redis_data:/data
-    networks:
-      - btl_network
-
-volumes:
-  postgres_data:
-  redis_data:
-
-networks:
-  btl_network:
-    driver: bridge
-```
-
-Start services:
-
-```bash
-docker-compose up -d
-```
+No external database is required for this development backend. The JSON collections in `backend/data/` are created from `backend/data/seeds.mjs` when missing and updated by the API.
 
 ---
 
@@ -1274,47 +1084,37 @@ docker-compose -f docker-compose.prod.yml up -d
 ### Base URL
 
 ```
-Development: http://localhost:3001/api
-Production: https://your-domain.com/api
+Development: http://127.0.0.1:4000/api
+Production: configure the deployed API URL with VITE_BACKEND_URL
 ```
 
 ### Authentication Endpoints
 
 ```http
-POST /api/auth/register
 POST /api/auth/login
-POST /api/auth/refresh
-POST /api/auth/logout
-GET  /api/auth/me
 ```
 
-### Users Endpoints
+### Health Endpoint
 
 ```http
-GET    /api/users
-GET    /api/users/:id
-POST   /api/users
-PATCH  /api/users/:id
-DELETE /api/users/:id
+GET    /api/health
 ```
 
 ### Courses Endpoints
 
 ```http
 GET    /api/courses
-GET    /api/courses/:id
-POST   /api/courses
-PATCH  /api/courses/:id
-DELETE /api/courses/:id
-POST   /api/courses/:id/enroll
+GET    /api/courses/:id/detail
+GET    /api/courses/:id/submissions
+PATCH  /api/submissions/:id
+GET/POST /api/sessions
+PATCH/DELETE /api/sessions/:id
+GET/POST /api/registrations
+PATCH/DELETE /api/registrations/:id
+GET/POST /api/course-requests
+PATCH/DELETE /api/course-requests/:id
 ```
 
-### Swagger Documentation
-
-When backend is running, visit:
-```
-http://localhost:3001/api/docs
-```
 
 ---
 
