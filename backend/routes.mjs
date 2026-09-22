@@ -110,6 +110,7 @@ async function handleRequest(request, response) {
     );
 
     if (!user) throw apiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng!');
+    if (user.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
 
     sendJson(response, 200, {
       accessToken: createSession(user),
@@ -121,6 +122,7 @@ async function handleRequest(request, response) {
 
   const currentUser = getSessionUser(request, USERS);
   if (!currentUser) throw apiError(401, 'UNAUTHORIZED', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');
+  if (currentUser.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
   if (request.method === 'GET' && requestUrl.pathname === '/api/auth/me') {
     sendJson(response, 200, { user: createUser(currentUser), role: currentUser.role });
     return;

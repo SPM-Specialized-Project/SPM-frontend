@@ -35,8 +35,10 @@ function RouteComponent() {
   const [loading, setLoading] = useState(false);
   const [viewPassword, setViewPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(false);
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
+  const [globalError, setGlobalError] = useState('');
   void loading;
-  const [wrongCredentials, setWrongCredentials] = useState(false);
 
   // Load remembered email from localStorage on mount
   useEffect(() => {
@@ -53,22 +55,29 @@ function RouteComponent() {
   // const loginWithGoogle = async (credentialResponse: string) => {
   //   try {
   //     setLoading(true);
-  //     // const { accessToken } = (
-  //     //   await AuthService.loginWithGoogle(credentialResponse)
-  //     // ).data;
-  //     console.log('credentialResponse', credentialResponse);
-  //     const accessToken = 'hehe123'; // temp data
-  //     // Persist token via the auth store (zustand + persist)
-  //     setToken(accessToken);
-  //     navigate({ to: '/dashboard' });
-  //   } catch (error: unknown) {
-  //     handleAxiosError(error, (message: string) => {
-  //       toast.error(message);
-  //     });
-  //   } finally {
-  //     setLoading(false);
-  //   }
-  // };
+  // const loginWithGoogle = useGoogleLogin({
+  //   flow: 'auth-code',
+  //   onSuccess: async (codeResponse) => {
+  //     try {
+  //       setLoading(true);
+  //       // const response = await api.googleLogin(codeResponse.code);
+  //       // const { accessToken, role, user } = response.data;
+  //       // setToken(accessToken);
+  //       // setUser(user);
+  //       // toast.success(`Đăng nhập thành công với vai trò ${role}!`);
+  //       // navigate({ to: '/dashboard' });
+  //     } catch (error: unknown) {
+  //       handleAxiosError(error, (message: string) => {
+  //         toast.error(message);
+  //       });
+  //     } finally {
+  //       setLoading(false);
+  //     }
+  //   },
+  //   onError: (errorResponse) => {
+  //     toast.error(errorResponse.error_description || 'Đăng nhập Google thất bại');
+  //   },
+  // });
 
   const ViewPassworIcon = ({ className }: { className?: string }) => {
     return (
@@ -90,6 +99,28 @@ function RouteComponent() {
   }
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    setEmailError('');
+    setPasswordError('');
+    setGlobalError('');
+
+    // Client-side validation
+    let hasError = false;
+    if (!email) {
+      setEmailError('Vui lòng nhập email');
+      hasError = true;
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      setEmailError('Email không hợp lệ');
+      hasError = true;
+    }
+
+    if (!password) {
+      setPasswordError('Vui lòng nhập mật khẩu');
+      hasError = true;
+    }
+
+    if (hasError) return;
+
     try {
       setLoading(true);
 
@@ -109,17 +140,15 @@ function RouteComponent() {
 
       setUser(user);
       localStorage.setItem('role', role);
-      setWrongCredentials(false);
 
       toast.success(`Đăng nhập thành công với vai trò ${role}!`);
       navigate({ to: '/dashboard' });
     } catch (error: unknown) {
       if (error instanceof ApiError) {
-        setWrongCredentials(error.code === 'INVALID_CREDENTIALS');
-        toast.error(error.message);
+        setGlobalError(error.message);
       } else {
         handleAxiosError(error, (message: string) => {
-          toast.error(message);
+          setGlobalError(message);
         });
       }
     } finally {
@@ -159,8 +188,8 @@ function RouteComponent() {
           <br />
           Nền tảng học tập, hỗ trợ học sinh mạnh mẽ
         </h3> */}
-        <form onSubmit={handleEmailLogin} className="flex flex-col items-center gap-y-3">
-          <div className='font-bold'>
+        <form onSubmit={handleEmailLogin} className="flex flex-col items-center gap-y-3" noValidate>
+          <div className='flex flex-col font-bold'>
             <h4>Nhập email của bạn</h4>
             <label htmlFor="email" className="sr-only">
               Email
@@ -169,17 +198,20 @@ function RouteComponent() {
               id="email"
               type="email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value);
+                if (emailError) setEmailError('');
+                if (globalError) setGlobalError('');
+              }}
               placeholder="Email"
-              className={`w-72 rounded border px-3 py-2 text-sm shadow-sm ${wrongCredentials ? 'border-red-500' : ''}`}
-              required
+              className={`w-72 rounded border px-3 py-2 text-sm shadow-sm ${emailError ? 'border-red-500' : ''}`}
             />
-            {wrongCredentials && (
-              <p className="mt-1 text-xs text-red-600">sai tên người dùng</p>
+            {emailError && (
+              <p className="mt-1 text-xs font-normal text-red-600">{emailError}</p>
             )}
           </div>
 
-          <div className='font-bold'>
+          <div className='flex flex-col font-bold'>
             <h4>Mật khẩu</h4>
 
             <div className="relative">
@@ -191,18 +223,25 @@ function RouteComponent() {
                 id="password"
                 type={viewPassword && password ? 'text' : 'password'}
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => {
+                  setPassword(e.target.value);
+                  if (passwordError) setPasswordError('');
+                  if (globalError) setGlobalError('');
+                }}
                 placeholder="Password"
-                className={`w-72 rounded border py-2 pl-3 pr-10 text-sm shadow-sm ${wrongCredentials ? 'border-red-500' : ''}`}
-                required
+                className={`w-72 rounded border py-2 pl-3 pr-10 text-sm shadow-sm ${passwordError ? 'border-red-500' : ''}`}
               />
               <ViewPassworIcon className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer" />
             </div>
-            {wrongCredentials && (
-              <p className="mt-1 text-xs text-red-600">sai mật khẩu</p>
+            {passwordError && (
+              <p className="mt-1 text-xs font-normal text-red-600">{passwordError}</p>
             )}
 
           </div>
+
+          {globalError && (
+             <p className="mt-1 w-72 text-center text-sm font-bold text-red-600">{globalError}</p>
+          )}
           {/* checkbox remember this device and forgot password link */}
           <div className="flex w-72 items-center justify-between text-sm">
             <label className="inline-flex items-center gap-2">
