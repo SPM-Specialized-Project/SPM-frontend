@@ -111,6 +111,7 @@ jobs:
           for _ in $(seq 1 30); do
             public_url="$(sudo -n journalctl -u spm-staging-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              | grep -vE '^https://api\.trycloudflare\.com$' \
               | tail -n 1 || true)"
             if [[ -n "$public_url" ]]; then
               break
