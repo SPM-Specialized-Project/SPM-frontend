@@ -1,82 +1,40 @@
-name: Staging E2E Gate
+name: Staging E2E Smoke (push)
 
 on:
-  pull_request:
+  push:
     branches:
-      - main
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+      - staging
+  workflow_dispatch:
+
 permissions:
   contents: read
 
 concurrency:
-  group: staging-e2e-${{ github.event.pull_request.number || github.ref }}
+  group: staging-e2e-push-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  promotion-source:
-    name: Promotion source (staging only)
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.base.ref == 'main'
-    runs-on: ubuntu-latest
-    env:
-      HEAD_REF: ${{ github.event.pull_request.head.ref }}
-      HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
-      BASE_REPOSITORY: ${{ github.repository }}
-    steps:
-      - name: Enforce staging promotion path
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          if [[ "$HEAD_REF" != "staging" || "$HEAD_REPOSITORY" != "$BASE_REPOSITORY" ]]; then
-            echo "Only the repository's staging branch may be promoted into main."
-            echo "Received: ${HEAD_REPOSITORY}:${HEAD_REF}"
-            exit 1
-          fi
-
   deploy-staging:
-    name: Deploy staging for PR E2E
-    if: >-
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'staging' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+    name: Deploy staging for push E2E
+    if: github.ref == 'refs/heads/staging'
     uses: ./.github/workflows/staging-deploy.yml
     with:
-      app_ref: ${{ github.event.pull_request.head.sha }}
+      app_ref: ${{ github.sha }}
     secrets: inherit
 
   e2e-remote:
-    name: E2E (test-E2E runner)
-    needs:
-      - promotion-source
-      - deploy-staging
-    if: >-
-      always() &&
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.head.ref == 'staging' &&
-      github.event.pull_request.head.repo.full_name == github.repository
+    name: E2E (test-E2E runner, push)
+    needs: deploy-staging
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       E2E_REPOSITORY: SPM-Specialized-Project/test-E2E
       E2E_DISPATCH_TOKEN: ${{ secrets.E2E_DISPATCH_TOKEN }}
-      PROMOTION_RESULT: ${{ needs.promotion-source.result }}
-      DEPLOY_RESULT: ${{ needs.deploy-staging.result }}
+      STAGING_BASE_URL: ${{ needs.deploy-staging.outputs.public_url }}
     steps:
       - name: Prepare dispatch payload
         id: payload
         shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_SHA: ${{ github.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_NUMBER: ${{ github.event.pull_request.number || '' }}
-          STAGING_BASE_URL: ${{ needs.deploy-staging.outputs.public_url }}
         run: |
           set -euo pipefail
 
@@ -85,36 +43,25 @@ jobs:
             exit 1
           fi
 
-          if [[ "$PROMOTION_RESULT" != 'success' || "$DEPLOY_RESULT" != 'success' ]]; then
-            echo "::error::Promotion or staging deployment failed (promotion=$PROMOTION_RESULT, deploy=$DEPLOY_RESULT)."
-            exit 1
-          fi
-
           if [[ -z "${STAGING_BASE_URL:-}" ]]; then
             echo '::error::The staging deployment did not return a public URL.'
             exit 1
           fi
 
-          app_sha="$PUSH_SHA"
-          if [[ "$EVENT_NAME" == 'pull_request' && -n "$PR_HEAD_SHA" && "$PR_HEAD_SHA" != 'null' ]]; then
-            app_sha="$PR_HEAD_SHA"
-          fi
-
           correlation_id="${GITHUB_REPOSITORY//\//-}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           jq -n \
-            --arg app_sha "$app_sha" \
+            --arg app_sha "$GITHUB_SHA" \
             --arg correlation_id "$correlation_id" \
             --arg repository "$GITHUB_REPOSITORY" \
             --arg workflow_run_id "$GITHUB_RUN_ID" \
-            --arg pr_number "$PR_NUMBER" \
             --arg base_url "$STAGING_BASE_URL" \
-            --arg check_kind 'pull_request' \
+            --arg check_kind 'push' \
             '{event_type: "spm-staging-e2e", client_payload: {
               app_sha: $app_sha,
               correlation_id: $correlation_id,
               app_repository: $repository,
               source_workflow_run_id: $workflow_run_id,
-              pull_request_number: $pr_number,
+              pull_request_number: "",
               base_url: $base_url,
               check_kind: $check_kind
             }}' > dispatch.json
@@ -128,7 +75,6 @@ jobs:
             --header 'Content-Type: application/json' \
             --data @dispatch.json
 
-          echo "app_sha=$app_sha" >> "$GITHUB_OUTPUT"
           echo "correlation_id=$correlation_id" >> "$GITHUB_OUTPUT"
 
       - name: Find dispatched test-E2E run
@@ -157,7 +103,7 @@ jobs:
             sleep 2
           done
 
-          echo "::error::The test-E2E workflow did not start."
+          echo '::error::The test-E2E workflow did not start.'
           exit 1
 
       - name: Wait for test-E2E local runner

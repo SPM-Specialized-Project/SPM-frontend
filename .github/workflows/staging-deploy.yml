@@ -1,9 +1,16 @@
 name: Staging Deploy
 
 on:
-  push:
-    branches:
-      - staging
+  workflow_call:
+    inputs:
+      app_ref:
+        description: Git ref or commit to deploy
+        required: false
+        type: string
+    outputs:
+      public_url:
+        description: Public URL of the deployed staging application
+        value: ${{ jobs.deploy-staging.outputs.public_url }}
   workflow_dispatch:
 
 permissions:
@@ -16,7 +23,7 @@ concurrency:
 jobs:
   deploy-staging:
     name: Deploy staging to Debian
-    if: github.ref == 'refs/heads/staging'
+    if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
     outputs:
@@ -24,6 +31,8 @@ jobs:
     steps:
       - name: Checkout staging
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.app_ref || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
