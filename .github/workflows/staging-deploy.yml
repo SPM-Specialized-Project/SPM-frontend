@@ -146,11 +146,27 @@ jobs:
 
           echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
           echo "::notice title=Staging URL::$public_url"
+
+      - name: Publish staging URL to job summary
+        if: ${{ success() && steps.cloudflare.outputs.public_url != '' }}
+        shell: bash
+        env:
+          STAGING_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: |
+          set -euo pipefail
+
           {
-            echo '### Staging deployment'
+            echo '## Staging deployment ready'
             echo
-            echo "- Frontend: $public_url/"
-            echo "- Backend health: $public_url/api/health"
+            echo "### Open staging: [$STAGING_URL/]($STAGING_URL/)"
+            echo
+            echo '**Staging URL (copy):**'
+            echo
+            echo '```text'
+            echo "$STAGING_URL"
+            echo '```'
+            echo
+            echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
             echo "- Backend service: spm-staging-backend.service"
           } >> "$GITHUB_STEP_SUMMARY"
