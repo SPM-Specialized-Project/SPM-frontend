@@ -124,6 +124,12 @@ const COURSE_CATALOG = {
       { name: 'Nghiêm Thị DD', email: 'nghiemthidd@student.hcmut.edu.vn' },
     ],
   },
+  '13': {
+    id: '13', code: 'DSA-LAB', title: 'DSA LAB',
+    instructor: 'Somebody', stats: { documents: 0, links: 0, assignments: 0 },
+    numberTotalSessions: 0, sessionsOrganized: 0,
+    students: [],
+  },
 };
 
 const PROVISIONED_STUDENT_ACCOUNTS = [
