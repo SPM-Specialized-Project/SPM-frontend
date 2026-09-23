@@ -2,9 +2,22 @@ import { apiClient, request } from './api-client';
 
 export type CodePulseClassroom = {
   id: string;
-  term: string;
+  courseId: string;
+  termId: string;
+  term: CodePulseTerm;
   name: string;
+  description: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
   lecturerEmail: string;
+};
+
+export type CodePulseTerm = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  resetDate: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
 };
 
 export type CodePulseWorkspace = {
@@ -24,6 +37,19 @@ export type CodePulseProblem = {
 };
 
 export const codePulseApi = {
+  listTerms: (courseId = '13') => request(() => apiClient.get<{ items: CodePulseTerm[] }>('/codepulse/terms', { params: { courseId } })),
+  createTerm: (item: Omit<CodePulseTerm, 'id' | 'status'>) => request(() =>
+    apiClient.post<{ item: CodePulseTerm }>('/codepulse/terms', item)),
+  updateTerm: (id: string, patch: Partial<CodePulseTerm>) => request(() =>
+    apiClient.patch<{ item: CodePulseTerm }>(`/codepulse/terms/${encodeURIComponent(id)}`, { patch })),
+  listClassrooms: (courseId = '13') => request(() =>
+    apiClient.get<{ items: CodePulseClassroom[] }>('/codepulse/classrooms', { params: { courseId } })),
+  createClassroom: (item: { name: string; description: string; termId: string; courseId: string; lecturerEmail?: string }) => request(() =>
+    apiClient.post<{ item: CodePulseClassroom }>('/codepulse/classrooms', item)),
+  updateClassroom: (id: string, patch: Partial<Pick<CodePulseClassroom, 'name' | 'description' | 'termId' | 'status' | 'lecturerEmail'>>) => request(() =>
+    apiClient.patch<{ item: CodePulseClassroom }>(`/codepulse/classrooms/${encodeURIComponent(id)}`, { patch })),
+  deleteClassroom: (id: string) => request(() =>
+    apiClient.delete<{ deleted: boolean }>(`/codepulse/classrooms/${encodeURIComponent(id)}`)),
   getClassroom: (id: string) => request(() =>
     apiClient.get<{ item: CodePulseClassroom }>(`/codepulse/classrooms/${encodeURIComponent(id)}`)),
   getDashboard: (id: string) => request(() =>
