@@ -15,6 +15,7 @@ import type { CourseContent } from '@/types/course-content';
 import { CoordinatorCourseView } from './components/coordinator-course-view';
 import { CourseContentRenderer } from './components/course-content-renderer';
 import { CourseDetailView } from './components/course-detail-view';
+import { DsaLabManagement } from './components/dsa-lab-management';
 
 export const Route = createFileRoute('/_private/course/$id/')({
   beforeLoad: async () => {
@@ -190,6 +191,7 @@ function CourseDetailsComponent() {
           onRate={() => navigate({ to: `/course/${id}/rating` })}
           renderSectionContent={renderSectionContent}
         />
+        {id === '13' && <DsaLabManagement courseId={id} />}
       </StudyLayout>
     );
   }
