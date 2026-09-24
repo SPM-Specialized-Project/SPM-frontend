@@ -133,7 +133,9 @@ async function handleRequest(request, response) {
     await handleCodePulse({ request, response, requestUrl, user: currentUser, sendJson, readRequestBody, apiError });
     return;
   }
-  if (viewerRole === 'lecturer' || viewerRole === 'admin') {
+  const isDsaLabCatalogRoute = requestUrl.pathname === '/api/courses'
+    || requestUrl.pathname === '/api/courses/13/detail';
+  if ((viewerRole === 'lecturer' || viewerRole === 'admin') && !isDsaLabCatalogRoute) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
   }
 
@@ -276,7 +278,9 @@ async function handleRequest(request, response) {
     const course = getCourse(parts[2]);
     if (viewerRole === 'student') {
       const memberships = await readCollection('memberships');
-      assertStudentHasAccess(memberships, parts[2], viewerRole, viewerEmail);
+      if (parts[2] !== '13') {
+        assertStudentHasAccess(memberships, parts[2], viewerRole, viewerEmail);
+      }
     }
     sendJson(response, 200, {
       course: toResource(course, viewerRole, viewerEmail, 'course'),

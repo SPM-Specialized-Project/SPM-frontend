@@ -124,6 +124,12 @@ const COURSE_CATALOG = {
       { name: 'Nghiêm Thị DD', email: 'nghiemthidd@student.hcmut.edu.vn' },
     ],
   },
+  '13': {
+    id: '13', code: 'DSA-LAB', title: 'DSA LAB',
+    instructor: 'Somebody', stats: { documents: 0, links: 0, assignments: 0 },
+    numberTotalSessions: 0, sessionsOrganized: 0,
+    students: [],
+  },
 };
 
 const PROVISIONED_STUDENT_ACCOUNTS = [
@@ -172,7 +178,6 @@ const INITIAL_MEMBERSHIPS = [
   createMembershipSeed('membership-1-student-2', '1', '1-student-2'),
   createMembershipSeed('membership-2-student-1', '2', '2-student-1'),
   createMembershipSeed('membership-2-student-2', '2', '2-student-2'),
-  createMembershipSeed('membership-2-student-account-1', '2', 'student-account-1'),
   createMembershipSeed('membership-3-student-1', '3', '3-student-1'),
   createMembershipSeed('membership-3-student-2', '3', '3-student-2'),
   createMembershipSeed('membership-3-student-3', '3', '3-student-3'),
