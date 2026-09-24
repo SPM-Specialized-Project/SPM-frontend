@@ -178,7 +178,6 @@ const INITIAL_MEMBERSHIPS = [
   createMembershipSeed('membership-1-student-2', '1', '1-student-2'),
   createMembershipSeed('membership-2-student-1', '2', '2-student-1'),
   createMembershipSeed('membership-2-student-2', '2', '2-student-2'),
-  createMembershipSeed('membership-2-student-account-1', '2', 'student-account-1'),
   createMembershipSeed('membership-3-student-1', '3', '3-student-1'),
   createMembershipSeed('membership-3-student-2', '3', '3-student-2'),
   createMembershipSeed('membership-3-student-3', '3', '3-student-3'),

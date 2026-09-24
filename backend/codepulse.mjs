@@ -226,6 +226,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   }
 
   if (parts[2] === 'workspaces' && parts[3] && (request.method === 'GET' || request.method === 'PATCH')) {
+    if (user.role === 'admin') deny();
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
     const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
     const item = classroom(workspace.classroomId);
