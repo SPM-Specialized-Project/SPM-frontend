@@ -121,10 +121,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   if (parts[2] === 'memberships' && parts[3] && request.method === 'PATCH') {
     if (user.role !== 'admin') deny();
     const body = await readRequestBody(request);
-    if (body.status !== 'revoked') throw apiError(400, 'INVALID_INPUT', 'Chỉ hỗ trợ thu hồi membership.');
+    if (!['active', 'revoked'].includes(body.status)) {
+      throw apiError(400, 'INVALID_INPUT', 'Membership status phải là active hoặc revoked.');
+    }
     const updated = await mutate(membershipFile, initialMemberships, (records) => {
       const current = records.find((record) => record.id === parts[3]) ?? notFound();
-      current.status = 'revoked';
+      current.status = body.status;
       current.updatedAt = new Date().toISOString();
       return current;
     });
