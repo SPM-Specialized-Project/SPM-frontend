@@ -269,7 +269,7 @@ async function handleRequest(request, response) {
   }
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/courses') {
-    const items = Array.from({ length: 12 }, (_, index) => getCourse(String(index + 1)));
+    const items = Object.keys(COURSE_CATALOG).map((courseId) => getCourse(courseId));
     sendJson(response, 200, toListResponse(items, viewerRole, viewerEmail, 'course'));
     return;
   }
