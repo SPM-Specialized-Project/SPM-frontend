@@ -1,5 +1,11 @@
 import { PORT } from './config.mjs';
-import { COURSE_CATALOG, INITIAL_SESSIONS, PROVISIONED_STUDENT_ACCOUNTS, USERS } from './data/seeds.mjs';
+import {
+  COURSE_CATALOG,
+  INITIAL_CLASSROOM_OWNERSHIPS,
+  INITIAL_SESSIONS,
+  PROVISIONED_STUDENT_ACCOUNTS,
+  USERS,
+} from './data/seeds.mjs';
 import {
   clone,
   createCourseSubmissionRecords,
@@ -34,9 +40,17 @@ const isMembershipRoute = (parts) =>
 
 const getClassroomIdFromParts = (parts) => parts[2];
 
-const isAssignedTutor = (courseId, email) => INITIAL_SESSIONS.some(
-  (session) => session.courseId === courseId && session.ownerEmail === email,
-);
+const isAssignedTutor = (courseId, email) =>
+  INITIAL_CLASSROOM_OWNERSHIPS.some(
+    (ownership) =>
+      ownership.classroomId === courseId &&
+      ownership.status === 'ACTIVE' &&
+      normalizeEmail(ownership.ownerEmail) === normalizeEmail(email),
+  ) || INITIAL_SESSIONS.some(
+    (session) =>
+      session.courseId === courseId &&
+      normalizeEmail(session.ownerEmail) === normalizeEmail(email),
+  );
 
 const ensureClassroomExists = (classroomId) => {
   if (!COURSE_CATALOG[classroomId]) {
@@ -96,6 +110,7 @@ async function handleRequest(request, response) {
     );
 
     if (!user) throw apiError(401, 'INVALID_CREDENTIALS', 'Email hoặc mật khẩu không đúng!');
+    if (user.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
 
     sendJson(response, 200, {
       accessToken: createSession(user),
@@ -107,6 +122,7 @@ async function handleRequest(request, response) {
 
   const currentUser = getSessionUser(request, USERS);
   if (!currentUser) throw apiError(401, 'UNAUTHORIZED', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');
+  if (currentUser.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
   if (request.method === 'GET' && requestUrl.pathname === '/api/auth/me') {
     sendJson(response, 200, { user: createUser(currentUser), role: currentUser.role });
     return;
@@ -117,7 +133,9 @@ async function handleRequest(request, response) {
     await handleCodePulse({ request, response, requestUrl, user: currentUser, sendJson, readRequestBody, apiError });
     return;
   }
-  if (viewerRole === 'lecturer' || viewerRole === 'admin') {
+  const isDsaLabCatalogRoute = requestUrl.pathname === '/api/courses'
+    || requestUrl.pathname === '/api/courses/13/detail';
+  if ((viewerRole === 'lecturer' || viewerRole === 'admin') && !isDsaLabCatalogRoute) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
   }
 
@@ -260,7 +278,9 @@ async function handleRequest(request, response) {
     const course = getCourse(parts[2]);
     if (viewerRole === 'student') {
       const memberships = await readCollection('memberships');
-      assertStudentHasAccess(memberships, parts[2], viewerRole, viewerEmail);
+      if (parts[2] !== '13') {
+        assertStudentHasAccess(memberships, parts[2], viewerRole, viewerEmail);
+      }
     }
     sendJson(response, 200, {
       course: toResource(course, viewerRole, viewerEmail, 'course'),

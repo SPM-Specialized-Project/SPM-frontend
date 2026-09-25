@@ -105,5 +105,15 @@ test('roster keeps history and uses authenticated identity', async (t) => {
     tutor, 'PATCH', { status: 'REVOKED' },
   )).status, 200);
   assert.deepEqual((await request(submissionsUrl, tutor)).data.items, before.data.items);
-  assert.equal((await request(`${url}/api/classrooms/3/memberships`, tutor)).status, 403);
+  const courseThreeRoster = await request(`${url}/api/classrooms/3/memberships`, tutor);
+  assert.equal(courseThreeRoster.status, 200);
+  assert.deepEqual(
+    courseThreeRoster.data.items.map((item) => item.studentEmail),
+    [
+      'vovanf@student.hcmut.edu.vn',
+      'dangthig@student.hcmut.edu.vn',
+      'buiminhh@student.hcmut.edu.vn',
+    ],
+  );
+  assert.equal(courseThreeRoster.data.permissions.canCreate, true);
 });

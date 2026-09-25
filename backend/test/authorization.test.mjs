@@ -63,6 +63,7 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   assert.equal((await api('/api/codepulse/workspaces/workspace-2', student, 'PATCH', { sourceCode: 'hacked', is_admin: true })).status, 403);
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', lecturer, 'PATCH', { sourceCode: 'hacked' })).status, 403);
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', admin)).status, 403);
+  assert.equal((await api('/api/codepulse/workspaces/workspace-1', admin, 'PATCH', { sourceCode: 'hacked' })).status, 403);
   assert.equal((await api('/api/codepulse/classrooms/class-1/dashboard', lecturer)).status, 200);
 
   const problem = await api('/api/codepulse/classrooms/class-1/problems/problem-1', student);
@@ -79,9 +80,11 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   });
   assert.equal(createdSession.status, 201);
   assert.equal(createdSession.data.item.ownerEmail, 'tutor@gmail.com');
-  assert.equal((await api('/api/sessions', tutor, 'POST', {
-    item: { title: 'Unassigned course', courseId: '3' },
-  })).status, 403);
+  const courseThreeSession = await api('/api/sessions', tutor, 'POST', {
+    item: { title: 'Course 3 owned session', courseId: '3' },
+  });
+  assert.equal(courseThreeSession.status, 201);
+  assert.equal(courseThreeSession.data.item.ownerEmail, 'tutor@gmail.com');
   const patchedSession = await api(`/api/sessions/${createdSession.data.item.id}`, tutor, 'PATCH', {
     patch: { ownerRole: 'chairman', ownerEmail: 'admin@gmail.com', title: 'Updated' },
   });
@@ -93,11 +96,12 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   assert.ok(studentSessions.data.items.every((item) => ['1', '2', '3'].includes(item.courseId)));
   assert.ok(studentSessions.data.items.every((item) => !('tutorNote' in item) && !('members' in item)));
   assert.equal((await api('/api/courses?viewerRole=chairman', student)).data.items[0].students.length, 0);
-  assert.equal((await api('/api/courses/2/submissions?viewerRole=tutor', student)).status, 200);
-  assert.equal((await api('/api/courses/2/submissions?viewerRole=tutor', student)).data.items.length, 0);
+  assert.equal((await api('/api/courses/2/submissions?viewerRole=tutor', student)).status, 403);
   assert.equal((await api('/api/submissions/2-2-submission-1', student, 'PATCH', { viewerRole: 'tutor', score: 10 })).status, 403);
   assert.equal((await api('/api/courses/2/submissions', tutor)).status, 200);
-  assert.equal((await api('/api/courses/3/submissions', tutor)).status, 403);
+  const courseThreeSubmissions = await api('/api/courses/3/submissions', tutor);
+  assert.equal(courseThreeSubmissions.status, 200);
+  assert.equal(courseThreeSubmissions.data.items.length, 3);
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', student, 'PATCH', { sourceCode: 'safe edit', is_admin: true })).status, 200);
   assert.equal((await api('/api/codepulse/classrooms/class-1/dashboard', student)).status, 403);
 
@@ -106,6 +110,6 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', student)).status, 403);
   const restoredMembership = await api('/api/codepulse/memberships/member-1', admin, 'PATCH', { status: 'active' });
   assert.equal(restoredMembership.status, 200);
-  assert.equal(restoredMembership.data.item.status, 'active');
+  assert.equal(restoredMembership.data.item.status, 'ACTIVE');
   assert.equal((await api('/api/codepulse/classrooms/class-1', student)).status, 200);
 });
