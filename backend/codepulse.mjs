@@ -1,12 +1,13 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { 
-  DATA_DIRECTORY, 
-  MEMBERSHIPS_FILE, 
-  TERMS_FILE, 
-  CLASSROOMS_FILE, 
-  WORKSPACES_FILE } from './config.mjs';
+import {
+  DATA_DIRECTORY,
+  MEMBERSHIPS_FILE,
+  TERMS_FILE,
+  CLASSROOMS_FILE,
+  WORKSPACES_FILE,
+} from './config.mjs';
 import { INITIAL_MEMBERSHIPS, USERS } from './data/seeds.mjs';
 
 const directory = DATA_DIRECTORY;
@@ -258,16 +259,20 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   if (parts[2] === 'memberships' && parts[3] && request.method === 'PATCH') {
     if (user.role !== 'admin') deny();
     const body = await readRequestBody(request);
-    if (body.status !== 'revoked') throw apiError(400, 'INVALID_INPUT', 'Chỉ hỗ trợ thu hồi membership.');
+    const requestedStatus = String(body.status ?? '').toLowerCase();
+    if (!['active', 'revoked'].includes(requestedStatus)) {
+      throw apiError(400, 'INVALID_INPUT', 'Membership status phải là active hoặc revoked.');
+    }
     const codepulseMembershipIds = { 'member-1': 'student-account-1', 'member-2': '2-student-1' };
     const current = memberships.find((record) =>
       record.id === parts[3] || record.studentId === codepulseMembershipIds[parts[3]]);
     if (!current) notFound();
     const updated = await mutate(membershipFile, [], (records) => {
       const stored = records.find((record) => record.id === current.id) ?? notFound();
-      stored.status = 'REVOKED';
-      stored.revokedAt = new Date().toISOString();
-      stored.updatedAt = stored.revokedAt;
+      const timestamp = new Date().toISOString();
+      stored.status = requestedStatus.toUpperCase();
+      stored.revokedAt = requestedStatus === 'revoked' ? timestamp : null;
+      stored.updatedAt = timestamp;
       return stored;
     });
     sendJson(response, 200, { item: updated });

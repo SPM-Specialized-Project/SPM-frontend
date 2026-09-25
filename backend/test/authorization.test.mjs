@@ -108,4 +108,8 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   assert.equal((await api('/api/codepulse/memberships/member-1', admin, 'PATCH', { status: 'revoked' })).status, 200);
   assert.equal((await api('/api/codepulse/classrooms/class-1', student)).status, 403);
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', student)).status, 403);
+  const restoredMembership = await api('/api/codepulse/memberships/member-1', admin, 'PATCH', { status: 'active' });
+  assert.equal(restoredMembership.status, 200);
+  assert.equal(restoredMembership.data.item.status, 'ACTIVE');
+  assert.equal((await api('/api/codepulse/classrooms/class-1', student)).status, 200);
 });
