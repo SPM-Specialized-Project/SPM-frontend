@@ -15,7 +15,7 @@ CodePulse demo users: `student@gmail.com` / `student123`, `student2@gmail.com` /
 | `GET /api/codepulse/classrooms/:id/problems/:problemId` | Active student member or assigned lecturer; student response omits hidden cases and runner trace |
 | `GET /api/codepulse/workspaces/:id` | Active student owner or assigned lecturer; admin denied |
 | `PATCH /api/codepulse/workspaces/:id` | Active student owner only; accepts `sourceCode` |
-| `PATCH /api/codepulse/memberships/:id` | Admin only; accepts `{ "status": "revoked" }` |
+| `PATCH /api/codepulse/memberships/:id` | Admin only; accepts `{ "status": "active" }` or `{ "status": "revoked" }` |
 
 The demo domain is isolated from legacy course data. Classroom and problem fixtures are in `codepulse.mjs`; memberships and workspaces are persisted in `data/codepulse-*.json` on first access. Every request re-reads membership status, so revocation affects the next API request.
 

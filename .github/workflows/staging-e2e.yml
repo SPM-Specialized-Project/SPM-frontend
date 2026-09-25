@@ -1,9 +1,6 @@
 name: Staging E2E Gate
 
 on:
-  push:
-    branches:
-      - staging
   pull_request:
     branches:
       - main
@@ -12,8 +9,6 @@ on:
       - synchronize
       - reopened
       - ready_for_review
-  workflow_dispatch:
-
 permissions:
   contents: read
 
@@ -44,20 +39,34 @@ jobs:
             exit 1
           fi
 
+  deploy-staging:
+    name: Deploy staging for PR E2E
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'staging' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/staging-deploy.yml
+    with:
+      app_ref: ${{ github.event.pull_request.head.sha }}
+    secrets: inherit
+
   e2e-remote:
     name: E2E (test-E2E runner)
+    needs:
+      - promotion-source
+      - deploy-staging
     if: >-
-      github.event_name != 'pull_request' ||
-      (
-        github.event.pull_request.base.ref == 'main' &&
-        github.event.pull_request.head.ref == 'staging' &&
-        github.event.pull_request.head.repo.full_name == github.repository
-      )
+      always() &&
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.head.ref == 'staging' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     timeout-minutes: 40
     env:
       E2E_REPOSITORY: SPM-Specialized-Project/test-E2E
       E2E_DISPATCH_TOKEN: ${{ secrets.E2E_DISPATCH_TOKEN }}
+      PROMOTION_RESULT: ${{ needs.promotion-source.result }}
+      DEPLOY_RESULT: ${{ needs.deploy-staging.result }}
     steps:
       - name: Prepare dispatch payload
         id: payload
@@ -67,11 +76,22 @@ jobs:
           PUSH_SHA: ${{ github.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PR_NUMBER: ${{ github.event.pull_request.number || '' }}
+          STAGING_BASE_URL: ${{ needs.deploy-staging.outputs.public_url }}
         run: |
           set -euo pipefail
 
           if [[ -z "${E2E_DISPATCH_TOKEN:-}" ]]; then
             echo '::error::Configure the E2E_DISPATCH_TOKEN secret in SPM-frontend.'
+            exit 1
+          fi
+
+          if [[ "$PROMOTION_RESULT" != 'success' || "$DEPLOY_RESULT" != 'success' ]]; then
+            echo "::error::Promotion or staging deployment failed (promotion=$PROMOTION_RESULT, deploy=$DEPLOY_RESULT)."
+            exit 1
+          fi
+
+          if [[ -z "${STAGING_BASE_URL:-}" ]]; then
+            echo '::error::The staging deployment did not return a public URL.'
             exit 1
           fi
 
@@ -87,12 +107,16 @@ jobs:
             --arg repository "$GITHUB_REPOSITORY" \
             --arg workflow_run_id "$GITHUB_RUN_ID" \
             --arg pr_number "$PR_NUMBER" \
+            --arg base_url "$STAGING_BASE_URL" \
+            --arg check_kind 'pull_request' \
             '{event_type: "spm-staging-e2e", client_payload: {
               app_sha: $app_sha,
               correlation_id: $correlation_id,
               app_repository: $repository,
               source_workflow_run_id: $workflow_run_id,
-              pull_request_number: $pr_number
+              pull_request_number: $pr_number,
+              base_url: $base_url,
+              check_kind: $check_kind
             }}' > dispatch.json
 
           curl --fail --silent --show-error \

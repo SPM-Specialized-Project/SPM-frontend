@@ -1,9 +1,16 @@
 name: Staging Deploy
 
 on:
-  push:
-    branches:
-      - staging
+  workflow_call:
+    inputs:
+      app_ref:
+        description: Git ref or commit to deploy
+        required: false
+        type: string
+    outputs:
+      public_url:
+        description: Public URL of the deployed staging application
+        value: ${{ jobs.deploy-staging.outputs.public_url }}
   workflow_dispatch:
 
 permissions:
@@ -16,7 +23,7 @@ concurrency:
 jobs:
   deploy-staging:
     name: Deploy staging to Debian
-    if: github.ref == 'refs/heads/staging'
+    if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
     outputs:
@@ -24,6 +31,8 @@ jobs:
     steps:
       - name: Checkout staging
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.app_ref || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -102,6 +111,7 @@ jobs:
           for _ in $(seq 1 30); do
             public_url="$(sudo -n journalctl -u spm-staging-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              | grep -vE '^https://api\.trycloudflare\.com$' \
               | tail -n 1 || true)"
             if [[ -n "$public_url" ]]; then
               break
@@ -136,11 +146,27 @@ jobs:
 
           echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
           echo "::notice title=Staging URL::$public_url"
+
+      - name: Publish staging URL to job summary
+        if: ${{ success() && steps.cloudflare.outputs.public_url != '' }}
+        shell: bash
+        env:
+          STAGING_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: |
+          set -euo pipefail
+
           {
-            echo '### Staging deployment'
+            echo '## Staging deployment ready'
             echo
-            echo "- Frontend: $public_url/"
-            echo "- Backend health: $public_url/api/health"
+            echo "### Open staging: [$STAGING_URL/]($STAGING_URL/)"
+            echo
+            echo '**Staging URL (copy):**'
+            echo
+            echo '```text'
+            echo "$STAGING_URL"
+            echo '```'
+            echo
+            echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
             echo "- Backend service: spm-staging-backend.service"
           } >> "$GITHUB_STEP_SUMMARY"
