@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { api } from '@/services/api-client';
 import { codePulseApi, type CodePulseClassroom, type CodePulseTerm } from '@/services/codepulse-api';
@@ -21,7 +21,7 @@ export function DsaLabManagement({ courseId }: DsaLabManagementProps) {
   const [termReset, setTermReset] = useState('');
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>();
 
-  const load = async () => {
+  const load = useCallback(async () => {
     const [sessionResult, classroomResult, termResult] = await Promise.all([
       api.getSession(),
       codePulseApi.listClassrooms(courseId),
@@ -31,9 +31,9 @@ export function DsaLabManagement({ courseId }: DsaLabManagementProps) {
     setClassrooms(classroomResult.data.items);
     setTerms(termResult.data.items);
     setTermId((current) => current || termResult.data.items[0]?.id || '');
-  };
+  }, [courseId]);
 
-  useEffect(() => { void load(); }, [courseId]);
+  useEffect(() => { void load(); }, [load]);
 
   const createClassroom = async (event: React.FormEvent) => {
     event.preventDefault();

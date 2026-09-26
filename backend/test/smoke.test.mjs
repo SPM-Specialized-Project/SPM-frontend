@@ -53,5 +53,5 @@ test('serves health, authentication, and course catalog endpoints', async (t) =>
   });
   const courses = await coursesResponse.json();
   assert.equal(coursesResponse.status, 200);
-  assert.equal(courses.items.length, 12);
+  assert.equal(courses.items.length, 13);
 });
