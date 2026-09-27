@@ -14,7 +14,7 @@ export function DsaLabManagement({ courseId }: DsaLabManagementProps) {
   const [termId, setTermId] = useState('');
   const [message, setMessage] = useState('');
   const [role, setRole] = useState<string>();
-  const canManage = role === 'admin' || role === 'lecturer';
+  const canManage = role === 'admin';
   const [termName, setTermName] = useState('');
   const [termStart, setTermStart] = useState('');
   const [termEnd, setTermEnd] = useState('');
@@ -22,12 +22,14 @@ export function DsaLabManagement({ courseId }: DsaLabManagementProps) {
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>();
 
   const load = useCallback(async () => {
-    const [sessionResult, classroomResult, termResult] = await Promise.all([
-      api.getSession(),
+    const sessionResult = await api.getSession();
+    setRole(sessionResult.data.role);
+    if (sessionResult.data.role !== 'admin') return;
+
+    const [classroomResult, termResult] = await Promise.all([
       codePulseApi.listClassrooms(courseId),
       codePulseApi.listTerms(courseId),
     ]);
-    setRole(sessionResult.data.role);
     setClassrooms(classroomResult.data.items);
     setTerms(termResult.data.items);
     setTermId((current) => current || termResult.data.items[0]?.id || '');
@@ -106,6 +108,8 @@ export function DsaLabManagement({ courseId }: DsaLabManagementProps) {
       setMessage(error instanceof Error ? error.message : 'Không thể cập nhật lớp học.');
     }
   };
+
+  if (role !== 'admin') return null;
 
   return (
     <section className="border-t border-gray-200 bg-slate-50 px-6 py-8">
