@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type ReactNode } from 'react';
+import { toast } from 'react-toastify';
 
 import { ApiError } from '@/services/api-client';
 import {
@@ -65,8 +66,6 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   const [form, setForm] = useState<AssignmentForm>(() => emptyForm());
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState('');
-  const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
   const selectedAssignment = useMemo(
@@ -82,7 +81,6 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
     }
 
     setLoading(true);
-    setError('');
     try {
       const response = await codePulseApi.listAssignments(classroomId);
       setAssignments(response.data.items);
@@ -90,7 +88,7 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
         ? current
         : response.data.items[0]?.id);
     } catch (reason: unknown) {
-      setError(reason instanceof ApiError ? reason.message : 'Không thể tải assignment.');
+      toast.error(reason instanceof ApiError ? reason.message : 'Không thể tải assignment.');
     } finally {
       setLoading(false);
     }
@@ -127,10 +125,10 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
 
   const applyApiError = (reason: unknown, fallback: string) => {
     if (reason instanceof ApiError) {
-      setError(reason.message);
       setFieldErrors(reason.errors);
+      toast.error(reason.message);
     } else {
-      setError(fallback);
+      toast.error(fallback);
     }
   };
 
@@ -150,12 +148,10 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
 
   const saveDraft = async () => {
     setSaving(true);
-    setError('');
-    setMessage('');
     setFieldErrors({});
     try {
       await persist();
-      setMessage('Đã lưu assignment dưới dạng draft.');
+      toast.success('Đã lưu assignment dưới dạng draft.');
     } catch (reason: unknown) {
       applyApiError(reason, 'Không thể lưu assignment.');
     } finally {
@@ -166,15 +162,13 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   const verify = async () => {
     if (!classroomId) return;
     setSaving(true);
-    setError('');
-    setMessage('');
     setFieldErrors({});
     try {
       const saved = await persist();
       const response = await codePulseApi.verifyAssignment(classroomId, saved.id, form.referenceSolution);
       setAssignments((current) => current.map((item) => item.id === saved.id ? response.data.item : item));
       setForm(toForm(response.data.item));
-      setMessage(`Đã verify ${response.data.verification.testCaseCount} test case bằng reference solution.`);
+      toast.success(`Đã verify ${response.data.verification.testCaseCount} test case bằng reference solution.`);
     } catch (reason: unknown) {
       applyApiError(reason, 'Không thể verify assignment.');
     } finally {
@@ -185,15 +179,13 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   const publish = async () => {
     if (!classroomId) return;
     setSaving(true);
-    setError('');
-    setMessage('');
     setFieldErrors({});
     try {
       const saved = await persist();
       const response = await codePulseApi.publishAssignment(classroomId, saved.id);
       setAssignments((current) => current.map((item) => item.id === saved.id ? response.data.item : item));
       setForm(toForm(response.data.item));
-      setMessage('Assignment đã được publish.');
+      toast.success('Assignment đã được publish.');
     } catch (reason: unknown) {
       applyApiError(reason, 'Không thể publish assignment.');
     } finally {
@@ -204,13 +196,12 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   const remove = async () => {
     if (!classroomId || !form.id || !window.confirm('Xóa assignment draft này?')) return;
     setSaving(true);
-    setError('');
     try {
       await codePulseApi.deleteAssignment(classroomId, form.id);
       setAssignments((current) => current.filter((item) => item.id !== form.id));
       setSelectedId(undefined);
       setForm(emptyForm());
-      setMessage('Đã xóa assignment.');
+      toast.success('Đã xóa assignment.');
     } catch (reason: unknown) {
       applyApiError(reason, 'Không thể xóa assignment.');
     } finally {
@@ -233,11 +224,9 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
           <h3 className="mt-1 text-xl font-bold text-gray-900">{classroom?.name ?? 'Selected classroom'}</h3>
           <p className="mt-1 text-sm text-gray-600">Drafts are private until a lecturer publishes them.</p>
         </div>
-        {canEdit && <button type="button" onClick={() => { setSelectedId(undefined); setForm(emptyForm()); setFieldErrors({}); setMessage(''); setError(''); }} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white">New assignment</button>}
+        {canEdit && <button type="button" onClick={() => { setSelectedId(undefined); setForm(emptyForm()); setFieldErrors({}); }} className="rounded bg-blue-700 px-4 py-2 text-sm font-semibold text-white">New assignment</button>}
       </div>
 
-      {message && <p className="mb-4 rounded border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800">{message}</p>}
-      {error && <p className="mb-4 rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">{error}</p>}
       {loading && <p className="py-6 text-sm text-gray-500">Đang tải assignment...</p>}
       {!loading && assignments.length === 0 && !canEdit && <p className="rounded border border-dashed border-gray-300 p-6 text-sm text-gray-500">Chưa có assignment trong classroom này.</p>}
 
