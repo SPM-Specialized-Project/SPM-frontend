@@ -9,6 +9,8 @@ import {
   type CodePulseTestCase,
 } from '@/services/codepulse-api';
 
+import { MonacoCodeEditor } from './monaco-code-editor';
+
 type AssignmentEditorProps = {
   classroomId?: string;
   classroom?: CodePulseClassroom;
@@ -284,9 +286,14 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                 </Field>
               </div>
 
-              <Field label="Reference solution" error={fieldErrors.referenceSolution ?? fieldErrors.verification}>
-                <textarea value={form.referenceSolution} onChange={(event) => updateField('referenceSolution', event.target.value)} className={`${editorInputClass} min-h-32 font-mono text-sm`} placeholder="Paste the standard solution used to verify test cases." />
-              </Field>
+              <MonacoCodeEditor
+                label="Reference solution"
+                language={form.runtime === 'CPP' ? 'cpp' : 'python'}
+                value={form.referenceSolution}
+                onChange={(value) => updateField('referenceSolution', value)}
+                error={fieldErrors.referenceSolution ?? fieldErrors.verification}
+                height="280px"
+              />
 
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
@@ -308,12 +315,22 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                         </div>
                       </div>
                       <div className="grid gap-3 md:grid-cols-2">
-                        <Field label="Input" error={fieldErrors[`testCases.${index}.input`]}>
-                          <textarea value={test.input} onChange={(event) => updateTestCase(index, 'input', event.target.value)} className={`${editorInputClass} min-h-20 font-mono text-sm`} />
-                        </Field>
-                        <Field label="Expected output" error={fieldErrors[`testCases.${index}.expectedOutput`] ?? fieldErrors[`testCases.${index}.verified`]}>
-                          <textarea value={test.expectedOutput} onChange={(event) => updateTestCase(index, 'expectedOutput', event.target.value)} className={`${editorInputClass} min-h-20 font-mono text-sm`} />
-                        </Field>
+                        <MonacoCodeEditor
+                          label="Input"
+                          language="plaintext"
+                          value={test.input}
+                          onChange={(value) => updateTestCase(index, 'input', value)}
+                          error={fieldErrors[`testCases.${index}.input`]}
+                          height="150px"
+                        />
+                        <MonacoCodeEditor
+                          label="Expected output"
+                          language="plaintext"
+                          value={test.expectedOutput}
+                          onChange={(value) => updateTestCase(index, 'expectedOutput', value)}
+                          error={fieldErrors[`testCases.${index}.expectedOutput`] ?? fieldErrors[`testCases.${index}.verified`]}
+                          height="150px"
+                        />
                       </div>
                     </div>
                   ))}
