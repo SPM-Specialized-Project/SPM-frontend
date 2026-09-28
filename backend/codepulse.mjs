@@ -9,7 +9,7 @@ import {
   ASSIGNMENTS_FILE,
   WORKSPACES_FILE,
 } from './config.mjs';
-import { INITIAL_MEMBERSHIPS, USERS } from './data/seeds.mjs';
+import { DSA_MANAGER_EMAILS, INITIAL_MEMBERSHIPS, USERS } from './data/seeds.mjs';
 
 const directory = DATA_DIRECTORY;
 const termFile = TERMS_FILE;
@@ -27,8 +27,8 @@ const initialTerms = [
   { id: 'term-2027-1', courseId: '13', name: '2027 Semester 1', startDate: '2027-01-02', endDate: '2027-06-01', resetDate: '2027-06-02', status: 'DRAFT' },
 ];
 const initialClassrooms = [
-  { id: 'class-1', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Demo', description: 'DSA practice classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer@gmail.com' },
-  { id: 'class-2', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Other Term', description: 'Second demonstration classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer2@gmail.com' },
+  { id: 'class-1', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Demo', description: 'DSA practice classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer@gmail.com', managerEmails: DSA_MANAGER_EMAILS },
+  { id: 'class-2', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Other Term', description: 'Second demonstration classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer2@gmail.com', managerEmails: DSA_MANAGER_EMAILS },
 ];
 const initialAssignments = [{
   id: 'problem-1', classroomId: 'class-1', title: 'Hello World',
@@ -207,19 +207,23 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     belongsToClassroom(item, classroomId) &&
     (item.studentEmail ?? item.userEmail) === user.email &&
     isActiveMembership(item));
-  const isLecturer = (item) => user.role === 'lecturer' && item.lecturerEmail === user.email;
+  const isDsaManager = (item) => (user.role === 'lecturer' && item.lecturerEmail === user.email)
+    || (user.role === 'tutor' && item.courseId === '13' && (
+      item.managerEmails?.includes(user.email) || DSA_MANAGER_EMAILS.includes(user.email)
+    ));
   const lecturerEmail = (value) => {
     if (value === undefined || value === null || value === '') return null;
     const lecturer = USERS.find((candidate) =>
-      candidate.role === 'lecturer' && candidate.email === String(value).trim());
+      (candidate.role === 'lecturer' || (candidate.role === 'tutor' && DSA_MANAGER_EMAILS.includes(candidate.email)))
+      && candidate.email === String(value).trim());
     if (!lecturer) throw apiError(400, 'INVALID_LECTURER', 'Email phải thuộc một tài khoản lecturer.');
     return lecturer.email;
   };
   const canAccessClass = (item) => user.role === 'admin'
-    || (user.role === 'lecturer' && isLecturer(item))
+    || isDsaManager(item)
     || (user.role === 'student' && item.status === 'ACTIVE' && isMember(item.id));
-  const canManageClass = (item) => user.role === 'admin' || isLecturer(item);
-  const canManageAssignment = (item) => user.role === 'lecturer' && isLecturer(item);
+  const canManageClass = (item) => user.role === 'admin' || isDsaManager(item);
+  const canManageAssignment = (item) => isDsaManager(item);
   const activeTerm = (item) => new Date(item.endDate).getTime() > Date.now();
 
   if (parts[2] === 'terms' && request.method === 'GET') {
@@ -260,7 +264,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   if (parts[2] === 'classrooms' && !parts[3] && request.method === 'GET') {
     const items = user.role === 'admin'
       ? classrooms
-      : classrooms.filter((item) => item.courseId === requestedCourseId && (user.role === 'lecturer' ? isLecturer(item) : canAccessClass(item)));
+      : classrooms.filter((item) => item.courseId === requestedCourseId && canAccessClass(item));
     const scopedItems = user.role === 'admin' ? items.filter((item) => item.courseId === requestedCourseId) : items;
     sendJson(response, 200, { items: scopedItems.map((item) => ({ ...item, term: term(item.termId) })) });
     return;
@@ -334,7 +338,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
 
   if (parts[2] === 'classrooms' && parts[4] === 'dashboard' && request.method === 'GET') {
     const item = classroom(parts[3]);
-    if (!isLecturer(item)) deny();
+    if (!isDsaManager(item)) deny();
     sendJson(response, 200, { classroom: item, activeMembers: memberships.filter((member) =>
       belongsToClassroom(member, item.id) && isActiveMembership(member)).length });
     return;
@@ -469,7 +473,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const item = classroom(workspace.classroomId);
     if (workspace.termId !== item.termId) deny();
     const isOwner = user.role === 'student' && workspace.ownerEmail === user.email && isMember(item.id);
-    const lecturerCanRead = isLecturer(item) && memberships.some((member) =>
+    const lecturerCanRead = isDsaManager(item) && memberships.some((member) =>
       belongsToClassroom(member, item.id) &&
       (member.studentEmail ?? member.userEmail) === workspace.ownerEmail &&
       isActiveMembership(member));

@@ -10,6 +10,9 @@ const USERS = [
   { email: 'locked@gmail.com', password: 'locked123', role: 'student', status: 'LOCKED' },
 ];
 
+// DSA LAB is managed by the seeded tutor account in addition to classroom lecturers.
+const DSA_MANAGER_EMAILS = ['tutor@gmail.com'];
+
 const COURSE_2 = {
   id: '2',
   code: '79748_CO2013_003184_CLC',
@@ -405,6 +408,7 @@ const INITIAL_COURSE_REQUESTS = [
 
 export {
   USERS,
+  DSA_MANAGER_EMAILS,
   COURSE_CATALOG,
   PROVISIONED_STUDENT_ACCOUNTS,
   INITIAL_MEMBERSHIPS,

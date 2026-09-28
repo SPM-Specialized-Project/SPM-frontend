@@ -51,7 +51,17 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
 
   const student = await login('student@gmail.com', 'student123');
   const lecturer = await login('lecturer@gmail.com', 'lecturer123');
+  const tutor = await login('tutor@gmail.com', 'tutor123');
   const admin = await login('admin@gmail.com', 'admin123');
+
+  const tutorClassrooms = await api('/api/codepulse/classrooms?courseId=13', tutor);
+  assert.equal(tutorClassrooms.status, 200);
+  assert.equal(tutorClassrooms.data.items.length, 2);
+  const tutorDraft = await api('/api/codepulse/classrooms/class-1/assignments', tutor, 'POST', {
+    title: 'Tutor-managed draft',
+  });
+  assert.equal(tutorDraft.status, 201);
+  assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${tutorDraft.data.item.id}`, tutor, 'DELETE')).status, 200);
 
   const draft = await api('/api/codepulse/classrooms/class-1/assignments', lecturer, 'POST', {
     title: 'Partial draft',
