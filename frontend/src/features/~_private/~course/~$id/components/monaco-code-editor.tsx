@@ -85,7 +85,7 @@ export function MonacoCodeEditor({
   }, [language]);
 
   return (
-    <label className="block text-sm text-gray-700">
+    <div className="block text-sm text-gray-700">
       <span className="mb-1 flex items-center justify-between gap-3">
         <span className="font-medium">{label}</span>
         {language !== 'plaintext' && <span className="text-xs text-gray-500">Ctrl+Space để xem gợi ý</span>}
@@ -117,6 +117,6 @@ export function MonacoCodeEditor({
         />
       </div>
       {error && <span className="mt-1 block text-xs text-red-600">{error}</span>}
-    </label>
+    </div>
   );
 }

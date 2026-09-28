@@ -78,6 +78,17 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.ok(studentAssignmentsBeforePublish.data.items.every((item) => item.status === 'PUBLISHED'));
   assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, student)).status, 404);
 
+  const incompletePublish = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(incompletePublish.status, 422);
+  assert.match(incompletePublish.data.errors.description, /bắt buộc/);
+  assert.match(incompletePublish.data.errors.constraints, /bắt buộc/);
+  assert.match(incompletePublish.data.errors.inputFormat, /bắt buộc/);
+  assert.match(incompletePublish.data.errors.outputFormat, /bắt buộc/);
+  assert.match(incompletePublish.data.errors.referenceSolution, /bắt buộc/);
+  assert.match(incompletePublish.data.errors.cpuTimeLimitMs, /lớn hơn 0/);
+  assert.match(incompletePublish.data.errors.memoryLimitMb, /lớn hơn 0/);
+  assert.match(incompletePublish.data.errors.testCases, /ít nhất một test case/);
+
   const completeDraft = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
     patch: {
       title: 'Sum two numbers',
@@ -105,26 +116,82 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.match(invalidPublish.data.errors.cpuTimeLimitMs, /lớn hơn 0/);
   assert.match(invalidPublish.data.errors.memoryLimitMb, /lớn hơn 0/);
 
+  const blockedByNonPositiveLimits = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(blockedByNonPositiveLimits.status, 422);
+  assert.match(blockedByNonPositiveLimits.data.errors.cpuTimeLimitMs, /lớn hơn 0/);
+  assert.match(blockedByNonPositiveLimits.data.errors.memoryLimitMb, /lớn hơn 0/);
+
+  const edgeDraft = await api('/api/codepulse/classrooms/class-1/assignments', lecturer, 'POST', {
+    title: 'Edge validation draft',
+    description: 'Check publish boundary values.',
+    constraints: 'Input is bounded.',
+    inputFormat: 'One integer.',
+    outputFormat: 'Print the integer.',
+    cpuTimeLimitMs: 10_001,
+    memoryLimitMb: 1_025,
+    runtime: 'JAVA',
+    testCases: [{ id: 'edge-case', input: '1', expectedOutput: '1' }],
+  });
+  assert.equal(edgeDraft.status, 201);
+  const edgeVerify = await api(`/api/codepulse/classrooms/class-1/assignments/${edgeDraft.data.item.id}/verify`, lecturer, 'POST');
+  assert.equal(edgeVerify.status, 422);
+  assert.match(edgeVerify.data.errors.referenceSolution, /bắt buộc/);
+  const edgePublish = await api(`/api/codepulse/classrooms/class-1/assignments/${edgeDraft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(edgePublish.status, 422);
+  assert.match(edgePublish.data.errors.cpuTimeLimitMs, /10000/);
+  assert.match(edgePublish.data.errors.memoryLimitMb, /1024/);
+  assert.match(edgePublish.data.errors.runtime, /PYTHON hoặc CPP/);
+  assert.match(edgePublish.data.errors.referenceSolution, /bắt buộc/);
+  assert.match(edgePublish.data.errors.verification, /verify assignment/);
+  const edgeBoundary = await api(`/api/codepulse/classrooms/class-1/assignments/${edgeDraft.data.item.id}`, lecturer, 'PATCH', {
+    patch: {
+      cpuTimeLimitMs: 10_000,
+      memoryLimitMb: 1_024,
+      runtime: 'PYTHON',
+      referenceSolution: 'print(input())',
+    },
+  });
+  assert.equal(edgeBoundary.status, 200);
+  const edgeBoundaryVerify = await api(`/api/codepulse/classrooms/class-1/assignments/${edgeDraft.data.item.id}/verify`, lecturer, 'POST');
+  assert.equal(edgeBoundaryVerify.status, 200);
+  const edgeBoundaryPublish = await api(`/api/codepulse/classrooms/class-1/assignments/${edgeDraft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(edgeBoundaryPublish.status, 200);
+  assert.equal(edgeBoundaryPublish.data.item.status, 'PUBLISHED');
+
   const updated = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
     patch: { cpuTimeLimitMs: 1000, memoryLimitMb: 128 },
   });
   assert.equal(updated.status, 200);
   assert.equal(updated.data.item.verificationStatus, 'UNVERIFIED');
 
+  const blockedAfterContentChange = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(blockedAfterContentChange.status, 422);
+  assert.match(blockedAfterContentChange.data.errors.verification, /verify assignment/);
+  assert.match(blockedAfterContentChange.data.errors['testCases.0.verified'], /chưa được verify/);
+
   const reverified = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/verify`, lecturer, 'POST');
   assert.equal(reverified.status, 200);
+  const changedTestCases = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
+    patch: { testCases: [{ id: 'case-1', input: '2 3', expectedOutput: '5', hidden: false, verified: true }] },
+  });
+  assert.equal(changedTestCases.status, 200);
+  assert.equal(changedTestCases.data.item.verificationStatus, 'UNVERIFIED');
+  assert.equal(changedTestCases.data.item.testCases[0].verified, false);
+
+  const reverifiedAfterTestChange = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/verify`, lecturer, 'POST');
+  assert.equal(reverifiedAfterTestChange.status, 200);
   const noOpPersist = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
     patch: {
-      title: reverified.data.item.title,
-      description: reverified.data.item.description,
-      constraints: reverified.data.item.constraints,
-      inputFormat: reverified.data.item.inputFormat,
-      outputFormat: reverified.data.item.outputFormat,
-      cpuTimeLimitMs: reverified.data.item.cpuTimeLimitMs,
-      memoryLimitMb: reverified.data.item.memoryLimitMb,
-      runtime: reverified.data.item.runtime,
-      referenceSolution: reverified.data.item.referenceSolution,
-      testCases: reverified.data.item.testCases,
+      title: reverifiedAfterTestChange.data.item.title,
+      description: reverifiedAfterTestChange.data.item.description,
+      constraints: reverifiedAfterTestChange.data.item.constraints,
+      inputFormat: reverifiedAfterTestChange.data.item.inputFormat,
+      outputFormat: reverifiedAfterTestChange.data.item.outputFormat,
+      cpuTimeLimitMs: reverifiedAfterTestChange.data.item.cpuTimeLimitMs,
+      memoryLimitMb: reverifiedAfterTestChange.data.item.memoryLimitMb,
+      runtime: reverifiedAfterTestChange.data.item.runtime,
+      referenceSolution: reverifiedAfterTestChange.data.item.referenceSolution,
+      testCases: reverifiedAfterTestChange.data.item.testCases,
     },
   });
   assert.equal(noOpPersist.status, 200);
