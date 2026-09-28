@@ -112,6 +112,13 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.equal(studentPublished.data.item.testCases.length, 1);
   assert.equal('referenceSolution' in studentPublished.data.item, false);
 
+  const editedPublished = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
+    patch: { description: 'Updated after publication.' },
+  });
+  assert.equal(editedPublished.status, 200);
+  assert.equal(editedPublished.data.item.status, 'DRAFT');
+  assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, student)).status, 404);
+
   assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, admin, 'PATCH', { patch: { title: 'admin edit' } })).status, 403);
   assert.equal((await api('/api/codepulse/classrooms/class-1/assignments', admin)).status, 200);
 });
