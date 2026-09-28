@@ -428,7 +428,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const body = await readRequestBody(request);
     const patch = normalizeAssignmentPatch(body.patch ?? body);
     const updated = { ...current, ...patch, classroomId: current.classroomId, status: current.status };
-    if (Object.keys(patch).length > 0) {
+    const contentChanged = Object.keys(patch).some((field) =>
+      JSON.stringify(current[field]) !== JSON.stringify(patch[field]));
+    if (contentChanged) {
       updated.status = 'DRAFT';
       updated.verificationStatus = 'UNVERIFIED';
       updated.verifiedAt = null;

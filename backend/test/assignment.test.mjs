@@ -113,6 +113,22 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
 
   const reverified = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/verify`, lecturer, 'POST');
   assert.equal(reverified.status, 200);
+  const noOpPersist = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
+    patch: {
+      title: reverified.data.item.title,
+      description: reverified.data.item.description,
+      constraints: reverified.data.item.constraints,
+      inputFormat: reverified.data.item.inputFormat,
+      outputFormat: reverified.data.item.outputFormat,
+      cpuTimeLimitMs: reverified.data.item.cpuTimeLimitMs,
+      memoryLimitMb: reverified.data.item.memoryLimitMb,
+      runtime: reverified.data.item.runtime,
+      referenceSolution: reverified.data.item.referenceSolution,
+      testCases: reverified.data.item.testCases,
+    },
+  });
+  assert.equal(noOpPersist.status, 200);
+  assert.equal(noOpPersist.data.item.verificationStatus, 'VERIFIED');
   const published = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
   assert.equal(published.status, 200);
   assert.equal(published.data.item.status, 'PUBLISHED');
