@@ -98,7 +98,7 @@ const getPermissions = (viewerRole, status) => ({
 });
 
 const normalizeRole = (value) =>
-  ['student', 'tutor', 'coordinator', 'chairman'].includes(value) ? value : 'student';
+  ['student', 'tutor', 'coordinator', 'chairman', 'lecturer', 'admin'].includes(value) ? value : 'student';
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
 
@@ -259,6 +259,7 @@ const createUser = (seedUser) => ({
   googleId: '',
   appleId: null,
   email: seedUser.email,
+  role: seedUser.role,
   firstName: seedUser.role.charAt(0).toUpperCase() + seedUser.role.slice(1),
   lastName: 'User',
   picture: null,

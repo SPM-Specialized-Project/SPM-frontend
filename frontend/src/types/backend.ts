@@ -1,4 +1,4 @@
-export type UserRole = 'student' | 'tutor' | 'coordinator' | 'chairman';
+export type UserRole = 'student' | 'tutor' | 'coordinator' | 'chairman' | 'lecturer' | 'admin';
 
 export type ResourcePermissions = {
   canView: boolean;

@@ -10,8 +10,31 @@ const USERS = [
   { email: 'locked@gmail.com', password: 'locked123', role: 'student', status: 'LOCKED' },
 ];
 
+const DSA_COURSE_ID = '13';
 // DSA LAB is managed by the seeded tutor account in addition to classroom lecturers.
 const DSA_MANAGER_EMAILS = ['tutor@gmail.com'];
+const DSA_CLASSROOM_ASSIGNMENTS = [
+  {
+    id: 'class-1',
+    courseId: DSA_COURSE_ID,
+    termId: 'term-2026-1',
+    name: 'CodePulse Demo',
+    description: 'DSA practice classroom.',
+    status: 'ACTIVE',
+    lecturerEmail: 'lecturer@gmail.com',
+    managerEmails: DSA_MANAGER_EMAILS,
+  },
+  {
+    id: 'class-2',
+    courseId: DSA_COURSE_ID,
+    termId: 'term-2026-1',
+    name: 'CodePulse Other Term',
+    description: 'Second demonstration classroom.',
+    status: 'ACTIVE',
+    lecturerEmail: 'lecturer2@gmail.com',
+    managerEmails: DSA_MANAGER_EMAILS,
+  },
+];
 
 const COURSE_2 = {
   id: '2',
@@ -408,7 +431,9 @@ const INITIAL_COURSE_REQUESTS = [
 
 export {
   USERS,
+  DSA_COURSE_ID,
   DSA_MANAGER_EMAILS,
+  DSA_CLASSROOM_ASSIGNMENTS,
   COURSE_CATALOG,
   PROVISIONED_STUDENT_ACCOUNTS,
   INITIAL_MEMBERSHIPS,

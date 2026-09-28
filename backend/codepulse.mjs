@@ -9,7 +9,13 @@ import {
   ASSIGNMENTS_FILE,
   WORKSPACES_FILE,
 } from './config.mjs';
-import { DSA_MANAGER_EMAILS, INITIAL_MEMBERSHIPS, USERS } from './data/seeds.mjs';
+import {
+  DSA_CLASSROOM_ASSIGNMENTS,
+  DSA_COURSE_ID,
+  DSA_MANAGER_EMAILS,
+  INITIAL_MEMBERSHIPS,
+  USERS,
+} from './data/seeds.mjs';
 
 const directory = DATA_DIRECTORY;
 const termFile = TERMS_FILE;
@@ -26,10 +32,7 @@ const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
   { id: 'term-2027-1', courseId: '13', name: '2027 Semester 1', startDate: '2027-01-02', endDate: '2027-06-01', resetDate: '2027-06-02', status: 'DRAFT' },
 ];
-const initialClassrooms = [
-  { id: 'class-1', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Demo', description: 'DSA practice classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer@gmail.com', managerEmails: DSA_MANAGER_EMAILS },
-  { id: 'class-2', courseId: '13', termId: 'term-2026-1', name: 'CodePulse Other Term', description: 'Second demonstration classroom.', status: 'ACTIVE', lecturerEmail: 'lecturer2@gmail.com', managerEmails: DSA_MANAGER_EMAILS },
-];
+const initialClassrooms = DSA_CLASSROOM_ASSIGNMENTS;
 const initialAssignments = [{
   id: 'problem-1', classroomId: 'class-1', title: 'Hello World',
   description: 'Read one line and print it unchanged.',
@@ -188,9 +191,13 @@ const publicAssignment = (assignment, viewerRole) => {
   };
 };
 
+export async function getCodePulseClassrooms() {
+  return readRecords(classroomFile, initialClassrooms);
+}
+
 export async function handleCodePulse({ request, response, requestUrl, user, sendJson, readRequestBody, apiError }) {
   const parts = requestUrl.pathname.split('/').filter(Boolean);
-  const requestedCourseId = requestUrl.searchParams.get('courseId') ?? '13';
+  const requestedCourseId = requestUrl.searchParams.get('courseId') ?? DSA_COURSE_ID;
   const deny = () => { throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập tài nguyên này.'); };
   const notFound = () => { throw apiError(404, 'NOT_FOUND', 'Không tìm thấy tài nguyên.'); };
   const terms = await readRecords(termFile, initialTerms);
@@ -208,7 +215,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     (item.studentEmail ?? item.userEmail) === user.email &&
     isActiveMembership(item));
   const isDsaManager = (item) => (user.role === 'lecturer' && item.lecturerEmail === user.email)
-    || (user.role === 'tutor' && item.courseId === '13' && (
+    || (user.role === 'tutor' && item.courseId === DSA_COURSE_ID && (
       item.managerEmails?.includes(user.email) || DSA_MANAGER_EMAILS.includes(user.email)
     ));
   const lecturerEmail = (value) => {

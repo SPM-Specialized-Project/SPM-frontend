@@ -54,6 +54,28 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   const admin = await login('admin@gmail.com', 'admin123');
   const tutor = await login('tutor@gmail.com', 'tutor123');
 
+  const tutorCourses = await api('/api/courses?viewerRole=coordinator', tutor);
+  assert.equal(tutorCourses.status, 200);
+  assert.deepEqual(
+    tutorCourses.data.items.map((item) => item.id),
+    ['1', '2', '3', '13'],
+  );
+  assert.equal(tutorCourses.data.items[0].meta.viewerRole, 'tutor');
+  assert.equal((await api('/api/courses/4/detail?viewerRole=coordinator', tutor)).status, 403);
+
+  const lecturerCourses = await api('/api/courses?viewerRole=coordinator', lecturer);
+  assert.equal(lecturerCourses.status, 200);
+  assert.deepEqual(lecturerCourses.data.items.map((item) => item.id), ['13']);
+  assert.equal(lecturerCourses.data.items[0].meta.viewerRole, 'lecturer');
+  assert.equal((await api('/api/courses/1/detail?viewerRole=coordinator', lecturer)).status, 403);
+  assert.equal((await api('/api/courses/13/detail?viewerRole=coordinator', lecturer)).status, 200);
+
+  const adminCourses = await api('/api/courses?viewerRole=student', admin);
+  assert.equal(adminCourses.status, 200);
+  assert.equal(adminCourses.data.items.length, 13);
+  assert.equal(adminCourses.data.items[0].meta.viewerRole, 'admin');
+  assert.equal(adminCourses.data.permissions.canEdit, false);
+
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', null)).status, 401);
   assert.equal((await api('/api/codepulse/workspaces/workspace-1', 'invalid')).status, 401);
   assert.equal((await api('/api/codepulse/classrooms/class-1/dashboard', student)).status, 403);

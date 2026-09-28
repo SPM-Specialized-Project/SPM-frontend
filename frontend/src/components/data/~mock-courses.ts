@@ -3,6 +3,7 @@ import bgGreen from '@/assets/bg-dashboard-green.png';
 import bgRed from '@/assets/bg-dashboard-red.png';
 import { api } from '@/services/api-client';
 import { createRemoteDataStore } from '@/services/data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 import type { CourseDetail } from '@/types/course-content';
 
 
@@ -212,9 +213,13 @@ export const withCoursePresentation = (serverCourse: Omit<Course, 'bgImage'>): C
   };
 };
 
-export const courseStore = createRemoteDataStore(mockCourses, {
-  list: async () =>
-    (await api.getCourses({ viewerRole: 'coordinator' })).data.items.map(withCoursePresentation),
+// Do not seed the rendered store with the full mock catalog: the API response
+// is the source of truth for the courses assigned to the authenticated user.
+export const courseStore = createRemoteDataStore([] as Course[], {
+  list: async () => {
+    const viewer = getCurrentViewerContext();
+    return (await api.getCourses(viewer)).data.items.map(withCoursePresentation);
+  },
 });
 export type DataCourses = CourseDetail;
 
