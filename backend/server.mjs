@@ -10,6 +10,7 @@ const server = http.createServer((request, response) => {
     sendJson(response, status, {
       code: error?.code ?? 'BACKEND_ERROR',
       message: error?.message ?? 'Backend error.',
+      ...(error?.errors ? { errors: error.errors } : {}),
     });
   });
 });
