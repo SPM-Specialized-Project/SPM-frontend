@@ -15,6 +15,16 @@ fi
 
 cloudflared_path="$(command -v cloudflared)"
 
+# Older deployments started this service with systemd-run, which leaves a
+# transient unit in /run/systemd/transient. Stop that legacy unit before
+# installing the persistent unit with the same name.
+quick_tunnel_unit='spm-quick-tunnel.service'
+quick_tunnel_fragment="$(sudo systemctl show -p FragmentPath --value "$quick_tunnel_unit" 2>/dev/null || true)"
+if [[ "$quick_tunnel_fragment" == /run/systemd/transient/* ]]; then
+  sudo systemctl stop "$quick_tunnel_unit" 2>/dev/null || true
+  sudo systemctl reset-failed "$quick_tunnel_unit" 2>/dev/null || true
+fi
+
 if ! getent group spm >/dev/null; then
   sudo groupadd --system spm
 fi
