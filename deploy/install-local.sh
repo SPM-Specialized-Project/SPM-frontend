@@ -7,6 +7,14 @@ runner_user="${RUNNER_USER:-$(id -un)}"
 sudo apt-get update
 sudo apt-get install -y nginx rsync curl
 
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo 'cloudflared is required for the production Quick Tunnel.' >&2
+  echo 'Install cloudflared on Debian before running this script.' >&2
+  exit 69
+fi
+
+cloudflared_path="$(command -v cloudflared)"
+
 if ! getent group spm >/dev/null; then
   sudo groupadd --system spm
 fi
@@ -24,6 +32,9 @@ sudo install -d -o spm -g spm -m 0750 \
 
 sudo install -m 0644 deploy/systemd/spm-backend.service \
   /etc/systemd/system/spm-backend.service
+sed "s|__CLOUDFLARED_PATH__|$cloudflared_path|g" \
+  deploy/systemd/spm-quick-tunnel.service \
+  | sudo tee /etc/systemd/system/spm-quick-tunnel.service >/dev/null
 sudo install -m 0644 deploy/nginx/spm.conf \
   /etc/nginx/sites-available/spm.conf
 sudo install -m 0755 deploy/bin/spm-deploy \
@@ -36,20 +47,18 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/spm-deploy *\n' "$runner_user" \
 sudo chmod 0440 /etc/sudoers.d/spm-deploy
 sudo visudo -cf /etc/sudoers.d/spm-deploy
 
-systemd_run_path="$(command -v systemd-run)"
 systemctl_path="$(command -v systemctl)"
 journalctl_path="$(command -v journalctl)"
 sudo tee /etc/sudoers.d/spm-quick-tunnel >/dev/null <<EOF
-$runner_user ALL=(root) NOPASSWD: $systemd_run_path *
-$runner_user ALL=(root) NOPASSWD: $systemctl_path stop spm-quick-tunnel.service
-$runner_user ALL=(root) NOPASSWD: $systemctl_path reset-failed spm-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $systemctl_path restart spm-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $systemctl_path status spm-quick-tunnel.service
 $runner_user ALL=(root) NOPASSWD: $journalctl_path -u spm-quick-tunnel.service *
 EOF
 sudo chmod 0440 /etc/sudoers.d/spm-quick-tunnel
 sudo visudo -cf /etc/sudoers.d/spm-quick-tunnel
 
 sudo systemctl daemon-reload
-sudo systemctl enable nginx spm-backend
+sudo systemctl enable nginx spm-backend spm-quick-tunnel.service
 sudo nginx -t
 sudo systemctl start nginx
 

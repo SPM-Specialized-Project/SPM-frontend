@@ -20,6 +20,48 @@ tunnel restarts. They are for staging/testing, not stable production hosting.
 The public URL is HTTPS; do not append the origin port (`:80`, `:8080`, or
 `:8211`) to it. The Gitea route is `<public-url>/git/`.
 
+The repository installs Quick Tunnels as persistent systemd services through
+`deploy/install-local.sh` and `deploy/install-staging-local.sh`. They are
+enabled at boot and restart automatically if `cloudflared` exits. The GitHub
+Actions jobs only restart the corresponding service and read the new URL from
+its journal; they no longer create a one-shot `systemd-run` process.
+
+This improves recovery after a runner reboot, but it cannot make a Quick
+Tunnel hostname permanent. Use a named tunnel and a real DNS hostname for a
+durable Gitea clone URL; see `deploy/cloudflared/gitea-config.yml.example`.
+
+For a stable Gitea URL, use a hostname in a Cloudflare-managed zone, for
+example `git.example.com`, then set the same value in `/srv/git-platform/.env`:
+
+```bash
+sudo cloudflared tunnel login
+cloudflared tunnel create gitea
+cloudflared tunnel route dns gitea git.example.com
+
+sudo install -d -m 0750 /etc/cloudflared
+sudo cp deploy/cloudflared/gitea-config.yml.example /etc/cloudflared/gitea-config.yml
+sudoedit /etc/cloudflared/gitea-config.yml
+sudo cloudflared --config /etc/cloudflared/gitea-config.yml tunnel ingress validate
+
+sudo sed -i 's/^PUBLIC_HOST=.*/PUBLIC_HOST=git.example.com/' /srv/git-platform/.env
+sudo docker compose -f /srv/git-platform/compose.yml up -d --force-recreate gitea
+```
+
+Install `deploy/cloudflared/gitea-tunnel.service.example` as a systemd unit
+and enable it:
+
+```bash
+cloudflared_path="$(command -v cloudflared)"
+sed "s|/usr/bin/cloudflared|$cloudflared_path|g" \
+  deploy/cloudflared/gitea-tunnel.service.example \
+  | sudo tee /etc/systemd/system/gitea-tunnel.service >/dev/null
+sudo systemctl daemon-reload
+sudo systemctl enable --now gitea-tunnel.service
+```
+
+The named tunnel keeps `https://git.example.com/git/` as the canonical
+address across runner resets; the Quick Tunnel URLs remain temporary aliases.
+
 ## One-time setup on Debian 13
 
 Install `cloudflared` using the official Cloudflare package instructions, then:

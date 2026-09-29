@@ -37,3 +37,23 @@ origin port `:8080` or `:8211` to a `trycloudflare.com` URL.
 
 The host Nginx configuration in `deploy/nginx/spm.conf` and
 `deploy/nginx/spm-staging.conf` proxies `/git/` to `127.0.0.1:8211`.
+
+## Start automatically after a runner reset
+
+The containers have `restart: unless-stopped`, but install a host systemd unit
+as well so the Compose stack is explicitly brought up after Docker starts:
+
+```bash
+cd /path/to/SPM-frontend
+chmod +x deploy/gitea/install-stack-service.sh
+GITEA_COMPOSE_ROOT=/srv/git-platform \
+  bash deploy/gitea/install-stack-service.sh
+
+sudo systemctl is-enabled gitea-stack.service
+sudo systemctl status gitea-stack.service --no-pager
+docker compose -f /srv/git-platform/compose.yml ps
+```
+
+The service uses `docker compose stop` when stopped; it never removes the
+containers or named volumes. The PostgreSQL data, Redis data, Gitea data and
+Gitea configuration therefore survive a reboot and a service restart.
