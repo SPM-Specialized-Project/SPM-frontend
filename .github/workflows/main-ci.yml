@@ -125,20 +125,10 @@ jobs:
             exit 1
           fi
 
-          if ! command -v systemd-run >/dev/null 2>&1; then
-            echo '::error::systemd-run is required to keep the Quick Tunnel alive after the Actions step ends.'
-            exit 1
-          fi
-
-          sudo -n systemctl stop spm-quick-tunnel.service 2>/dev/null || true
-          sudo -n systemctl reset-failed spm-quick-tunnel.service 2>/dev/null || true
           started_at="$(date -u --iso-8601=seconds)"
-          if ! sudo -n systemd-run \
-            --unit=spm-quick-tunnel \
-            --property=Restart=on-failure \
-            --property=RestartSec=5s \
-            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:80; then
-            echo '::error::sudo must allow systemd-run non-interactively for the local-deploy runner.'
+          if ! sudo -n systemctl restart spm-quick-tunnel.service; then
+            echo '::error::The persistent spm-quick-tunnel.service is not installed or cannot be restarted.'
+            echo '::error::Run deploy/install-local.sh on the Debian host first.'
             exit 1
           fi
 

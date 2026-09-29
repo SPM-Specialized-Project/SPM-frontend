@@ -1,0 +1,14 @@
+[Unit]
+Description=Gitea Cloudflare Named Tunnel
+Wants=network-online.target
+After=network-online.target nginx.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/cloudflared --config /etc/cloudflared/gitea-config.yml tunnel run
+Restart=always
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

@@ -21,7 +21,16 @@ chmod +x deploy/install-local.sh
 RUNNER_USER="$(whoami)" bash deploy/install-local.sh
 ```
 
-Script cài `nginx`, `rsync`, tạo user `spm`, cài systemd unit, cài Nginx config và cấp quyền sudo giới hạn cho đúng wrapper `/usr/local/sbin/spm-deploy`.
+Script cài `nginx`, `rsync`, tạo user `spm`, cài systemd unit cho backend và
+Quick Tunnel, cài Nginx config, rồi cấp quyền sudo giới hạn cho đúng wrapper
+`/usr/local/sbin/spm-deploy` và service Quick Tunnel.
+
+Sau khi cài, kiểm tra service sẽ tự lên lại sau reboot:
+
+```bash
+sudo systemctl is-enabled nginx spm-backend.service spm-quick-tunnel.service
+sudo systemctl status spm-quick-tunnel.service --no-pager
+```
 
 Nếu Debian đang bật site Nginx mặc định, kiểm tra trước:
 
@@ -57,6 +66,7 @@ Sau khi merge `staging -> main`:
 5. Symlink `current` chuyển sang release mới.
 6. Backend restart, Nginx reload.
 7. Workflow kiểm tra `http://127.0.0.1/api/health`, trang `/`, và `/git/`.
+8. Workflow restart service Quick Tunnel persistent và đọc URL mới từ journal.
 
 Để mở từ máy khác trong LAN, truy cập `http://<IP-DEBIAN>/`. Nếu firewall bật, chỉ mở port 80 trong mạng nội bộ:
 

@@ -32,9 +32,9 @@ RUNNER_USER=hutieunamvang \\
   bash deploy/install-staging-local.sh
 ```
 
-The script installs the staging systemd unit, Nginx site, deploy helper and a
-non-interactive sudo rule for the GitHub Actions runner. It does not copy a
-tunnel credential into the repository.
+The script installs the staging backend and persistent Quick Tunnel systemd
+units, Nginx site, deploy helper and non-interactive sudo rules for the GitHub
+Actions runner. It does not copy a tunnel credential into the repository.
 
 ## Free Quick Tunnel
 
@@ -48,9 +48,10 @@ sudo systemctl status spm-quick-tunnel.service --no-pager || true
 sudo systemctl status spm-staging-quick-tunnel.service --no-pager || true
 ```
 
-`deploy/install-staging-local.sh` grants the local runner permission to start
-`spm-staging-quick-tunnel.service` non-interactively. The workflow prints the
-new public URL in the Actions log and Summary, then verifies both `/` and
+`deploy/install-staging-local.sh` enables
+`spm-staging-quick-tunnel.service` at boot and grants the local runner
+permission to restart it non-interactively. The workflow prints the new
+public URL in the Actions log and Summary, then verifies both `/` and
 `/api/health`, and `/git/` through that URL.
 
 Quick Tunnel URLs are random and may change after a restart or a later Actions
@@ -74,7 +75,7 @@ Every push to `staging` runs `.github/workflows/staging-deploy.yml`:
 3. Installs an atomic release under `/opt/spm-frontend-staging`.
 4. Restarts only `spm-staging-backend.service`.
 5. Reloads Nginx and verifies local `/api/health` and `/` on port 8080.
-6. Starts a staging-only Quick Tunnel to port 8080.
+6. Restarts the persistent staging-only Quick Tunnel to port 8080.
 7. Verifies the generated public staging frontend and backend health URL.
 
 The existing `main-ci.yml` production deployment still uses port 80/4000 and
