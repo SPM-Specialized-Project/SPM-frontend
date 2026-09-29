@@ -7,6 +7,7 @@ import { useDataStore } from '@/services/use-data-store';
 import storage from '@/utils/storage';
 
 import { CoordinatorRatingView } from './components/coordinator-rating-view';
+import { RATING_CRITERIA } from './components/rating-data';
 import type { RatingItem, RatingUserStore } from './components/rating-types';
 import { StudentRatingView } from './components/student-rating-view';
 import { TutorRatingView } from './components/tutor-rating-view';
@@ -22,7 +23,7 @@ function RouteComponent() {
   const { id } = Route.useParams();
   const courses = useDataStore(courseStore);
   const course = useMemo(
-    () => courses.find((item) => item.id === id) ?? courses[0],
+    () => courses.find((item) => item.id === id),
     [courses, id],
   );
   const [comment, setComment] = useState('');
@@ -34,11 +35,9 @@ function RouteComponent() {
     const saved = localStorage.getItem(`course-ratings-${id}`);
     if (saved) return JSON.parse(saved) as RatingItem[];
 
-    return Array.from({ length: 11 }, (_, index) => ({
-      id: `rating-${index + 1}`,
-      title:
-        'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Donec ipsum magna, rutrum tempus urna quis, cursus porttitor neque. Aliquam commodo enim sit.',
-      rating: 3,
+    return RATING_CRITERIA.map((criterion) => ({
+      ...criterion,
+      rating: 0,
     }));
   });
 
@@ -59,7 +58,15 @@ function RouteComponent() {
     setTimeout(() => window.location.assign(`/course/${id}`), 500);
   };
 
-  if (!course) return null;
+  if (!course) {
+    return (
+      <StudyLayout>
+        <div className="p-8 text-center text-gray-500">
+          Khóa học không tồn tại hoặc tài khoản không còn membership ACTIVE.
+        </div>
+      </StudyLayout>
+    );
+  }
 
   if (user?.isStudent) {
     return (
