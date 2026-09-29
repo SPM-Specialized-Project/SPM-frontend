@@ -13,6 +13,7 @@ export type ResourceMeta = {
   viewerRole: UserRole;
   ownerRole?: string;
   ownerEmail?: string;
+  ownershipLocked?: boolean;
 };
 
 export type BackendResource<T> = T & {

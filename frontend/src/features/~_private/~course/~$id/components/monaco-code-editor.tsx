@@ -2,6 +2,7 @@ import Editor, { type OnMount } from '@monaco-editor/react';
 import { useCallback, useEffect } from 'react';
 
 type EditorLanguage = 'python' | 'cpp' | 'plaintext';
+type MonacoEditor = Parameters<OnMount>[0];
 type MonacoApi = Parameters<OnMount>[1];
 
 type MonacoCodeEditorProps = {
@@ -66,6 +67,64 @@ function registerCompletionProvider(monaco: MonacoApi, language: EditorLanguage)
   registeredLanguages.add(language);
 }
 
+function keepSuggestionsBelow(editor: MonacoEditor) {
+  const editorNode = editor.getDomNode();
+  const cursorNode = editorNode?.querySelector<HTMLElement>('.cursor');
+  const suggestionWidget = editorNode?.querySelector<HTMLElement>('.suggest-widget');
+
+  if (!editorNode || !cursorNode || !suggestionWidget || suggestionWidget.offsetWidth === 0) {
+    return;
+  }
+
+  const cursorRect = cursorNode.getBoundingClientRect();
+  const top = Math.max(0, cursorRect.bottom + 4);
+  const nextTop = `${Math.round(top)}px`;
+
+  if (suggestionWidget.style.getPropertyValue('position') !== 'fixed') {
+    suggestionWidget.style.setProperty('position', 'fixed', 'important');
+  }
+  if (suggestionWidget.style.getPropertyValue('top') !== nextTop) {
+    suggestionWidget.style.setProperty('top', nextTop, 'important');
+  }
+  if (suggestionWidget.style.getPropertyValue('bottom') !== 'auto') {
+    suggestionWidget.style.setProperty('bottom', 'auto', 'important');
+  }
+  if (suggestionWidget.style.getPropertyValue('z-index') !== '1000') {
+    suggestionWidget.style.setProperty('z-index', '1000', 'important');
+  }
+}
+
+function watchSuggestionPosition(editor: MonacoEditor) {
+  const editorNode = editor.getDomNode();
+  if (!editorNode) return;
+
+  let frame = 0;
+  const schedule = () => {
+    window.cancelAnimationFrame(frame);
+    frame = window.requestAnimationFrame(() => keepSuggestionsBelow(editor));
+  };
+  const observer = new MutationObserver(schedule);
+  observer.observe(editorNode, {
+    attributes: true,
+    attributeFilter: ['class', 'style'],
+    childList: true,
+    subtree: true,
+  });
+
+  const disposables = [
+    editor.onDidChangeCursorPosition(schedule),
+    editor.onDidLayoutChange(schedule),
+    editor.onDidScrollChange(schedule),
+  ];
+
+  schedule();
+  editor.onDidDispose(() => {
+    window.cancelAnimationFrame(frame);
+    observer.disconnect();
+    disposables.forEach((disposable) => disposable.dispose());
+  });
+}
+
 export function MonacoCodeEditor({
   label,
   value,
@@ -75,9 +134,10 @@ export function MonacoCodeEditor({
   height = '220px',
   readOnly = false,
 }: MonacoCodeEditorProps) {
-  const handleMount = useCallback<OnMount>((_editor, monaco) => {
+  const handleMount = useCallback<OnMount>((editor, monaco) => {
     monacoInstance = monaco;
     registerCompletionProvider(monaco, language);
+    watchSuggestionPosition(editor);
   }, [language]);
 
   useEffect(() => {
@@ -102,6 +162,7 @@ export function MonacoCodeEditor({
             automaticLayout: true,
             bracketPairColorization: { enabled: true },
             contextmenu: true,
+            fixedOverflowWidgets: true,
             folding: true,
             fontSize: 14,
             lineNumbers: 'on',

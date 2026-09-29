@@ -23,6 +23,7 @@ export type CodePulseTerm = {
 export type CodePulseWorkspace = {
   id: string;
   classroomId: string;
+  assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
   updatedAt?: string;
@@ -72,12 +73,33 @@ export type CodePulseProblem = {
   rawRunnerTrace?: string;
 };
 
+export type CodePulseRunResult = {
+  testCaseId: string;
+  input: string;
+  expectedOutput: string;
+  actualOutput: string;
+  stderr: string;
+  status: 'PASSED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'OUTPUT_LIMIT' | 'COMPILE_ERROR';
+  passed: boolean;
+  durationMs: number | null;
+};
+
+export type CodePulseRunSummary = {
+  assignmentId: string;
+  runtime: CodePulseRuntime;
+  results: CodePulseRunResult[];
+  passedCount: number;
+  totalCount: number;
+};
+
 export const codePulseApi = {
   listTerms: (courseId = '13') => request(() => apiClient.get<{ items: CodePulseTerm[] }>('/codepulse/terms', { params: { courseId } })),
   createTerm: (item: Omit<CodePulseTerm, 'id' | 'status'>) => request(() =>
     apiClient.post<{ item: CodePulseTerm }>('/codepulse/terms', item)),
   updateTerm: (id: string, patch: Partial<CodePulseTerm>) => request(() =>
     apiClient.patch<{ item: CodePulseTerm }>(`/codepulse/terms/${encodeURIComponent(id)}`, { patch })),
+  deleteTerm: (id: string) => request(() =>
+    apiClient.delete<{ deleted: boolean }>(`/codepulse/terms/${encodeURIComponent(id)}`)),
   listClassrooms: (courseId = '13') => request(() =>
     apiClient.get<{ items: CodePulseClassroom[] }>('/codepulse/classrooms', { params: { courseId } })),
   createClassroom: (item: { name: string; description: string; termId: string; courseId: string; lecturerEmail?: string }) => request(() =>
@@ -94,9 +116,14 @@ export const codePulseApi = {
   getProblem: (classroomId: string, problemId: string) => request(() =>
     apiClient.get<{ item: CodePulseProblem }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/problems/${encodeURIComponent(problemId)}`)),
-  listAssignments: (classroomId: string) => request(() =>
+  listAssignments: (classroomId: string, view?: 'student') => request(() =>
     apiClient.get<{ items: CodePulseAssignment[] }>(
-      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments`)),
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments`,
+      { params: view ? { view } : undefined })),
+  runAssignment: (classroomId: string, assignmentId: string, sourceCode: string, testCaseIds?: string[]) => request(() =>
+    apiClient.post<{ item: CodePulseRunSummary }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}/run`,
+      { sourceCode, ...(testCaseIds ? { testCaseIds } : {}) })),
   createAssignment: (classroomId: string, item: Partial<CodePulseAssignmentInput>) => request(() =>
     apiClient.post<{ item: CodePulseAssignment }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments`, item)),
@@ -116,6 +143,10 @@ export const codePulseApi = {
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}`)),
   getWorkspace: (id: string) => request(() =>
     apiClient.get<{ item: CodePulseWorkspace }>(`/codepulse/workspaces/${encodeURIComponent(id)}`)),
+  getStudentWorkspace: (classroomId: string, assignmentId: string) => request(() =>
+    apiClient.get<{ item: CodePulseWorkspace }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/workspace`,
+      { params: { assignmentId } })),
   updateWorkspace: (id: string, sourceCode: string) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
