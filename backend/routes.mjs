@@ -1,8 +1,10 @@
 import { PORT } from './config.mjs';
 import {
   COURSE_CATALOG,
+  COURSE_OWNERSHIPS,
   DSA_COURSE_ID,
   DSA_MANAGER_EMAILS,
+  DSA_ROSTER_CLASSROOM_ID,
   INITIAL_CLASSROOM_OWNERSHIPS,
   INITIAL_SESSIONS,
   PROVISIONED_STUDENT_ACCOUNTS,
@@ -17,7 +19,6 @@ import {
   getCourseDetail,
   getResourcePermissions,
   findProvisionedStudent,
-  hasActiveMembership,
   normalizeEmail,
   toListResponse,
   toMembershipView,
@@ -32,7 +33,7 @@ import {
 } from './data/storage.mjs';
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
-import { getCodePulseClassrooms, handleCodePulse } from './codepulse.mjs';
+import { getCodePulseClassrooms, getCodePulseSubmissionContext, handleCodePulse } from './codepulse.mjs';
 
 const isMembershipRoute = (parts) =>
   parts[0] === 'api' &&
@@ -42,8 +43,12 @@ const isMembershipRoute = (parts) =>
 
 const getClassroomIdFromParts = (parts) => parts[2];
 
-const isAssignedTutor = (courseId, email) =>
-  INITIAL_CLASSROOM_OWNERSHIPS.some(
+const isAssignedTutor = (courseId, email) => {
+  const ownership = COURSE_OWNERSHIPS[String(courseId)];
+  return Boolean(
+    ownership?.ownershipLocked === true &&
+      normalizeEmail(ownership.ownerEmail) === normalizeEmail(email),
+  ) || INITIAL_CLASSROOM_OWNERSHIPS.some(
     (ownership) =>
       ownership.classroomId === courseId &&
       ownership.status === 'ACTIVE' &&
@@ -55,12 +60,40 @@ const isAssignedTutor = (courseId, email) =>
   ) || (String(courseId) === DSA_COURSE_ID && DSA_MANAGER_EMAILS.some(
     (managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(email),
   ));
+};
 
 const isActiveRecord = (record) => String(record.status).toUpperCase() === 'ACTIVE';
 
 const isCodePulseMembershipFor = (membership, classroom) =>
   membership.classroomId === classroom.id ||
-  membership.classroomId === classroom.id.replace(/^class-/, '');
+  (classroom.courseId === DSA_COURSE_ID && membership.classroomId === DSA_ROSTER_CLASSROOM_ID);
+
+const isMembershipForClassroom = (membership, classroomId) =>
+  membership.classroomId === classroomId
+  || (String(classroomId) === DSA_COURSE_ID && membership.classroomId === DSA_ROSTER_CLASSROOM_ID);
+
+const getCourseWithCanonicalRoster = async (courseId) => {
+  const course = getCourse(courseId);
+  if (String(courseId) !== DSA_COURSE_ID) return course;
+
+  const memberships = await readCollection('memberships');
+  const activeMemberships = memberships.filter(
+    (membership) => membership.classroomId === DSA_ROSTER_CLASSROOM_ID && isActiveRecord(membership),
+  );
+  const students = activeMemberships.map((membership) => {
+    const catalogStudent = course.students.find(
+      (student) => normalizeEmail(student.email) === normalizeEmail(membership.studentEmail),
+    );
+    return {
+      ...catalogStudent,
+      id: membership.studentId,
+      name: membership.studentName,
+      email: membership.studentEmail,
+    };
+  });
+
+  return { ...course, students };
+};
 
 const getAssignedCourseIds = async (viewerRole, viewerEmail) => {
   if (['admin', 'coordinator', 'chairman'].includes(viewerRole)) {
@@ -71,9 +104,10 @@ const getAssignedCourseIds = async (viewerRole, viewerEmail) => {
   const normalizedViewerEmail = normalizeEmail(viewerEmail);
 
   if (viewerRole === 'tutor') {
-    INITIAL_CLASSROOM_OWNERSHIPS
-      .filter((ownership) => isActiveRecord(ownership) && normalizeEmail(ownership.ownerEmail) === normalizedViewerEmail)
-      .forEach((ownership) => assignedCourseIds.add(String(ownership.classroomId)));
+    Object.entries(COURSE_OWNERSHIPS)
+      .filter(([, ownership]) => ownership.ownershipLocked === true
+        && normalizeEmail(ownership.ownerEmail) === normalizedViewerEmail)
+      .forEach(([courseId]) => assignedCourseIds.add(String(courseId)));
 
     const sessions = await readCollection('sessions');
     sessions
@@ -105,7 +139,7 @@ const getAssignedCourseIds = async (viewerRole, viewerEmail) => {
         const legacyCourseId = String(membership.classroomId);
         if (COURSE_CATALOG[legacyCourseId]) assignedCourseIds.add(legacyCourseId);
         codePulseClassrooms
-          .filter((classroom) => isCodePulseMembershipFor(membership, classroom))
+          .filter((classroom) => classroom.status === 'ACTIVE' && isCodePulseMembershipFor(membership, classroom))
           .forEach((classroom) => assignedCourseIds.add(String(classroom.courseId)));
       });
   }
@@ -131,7 +165,10 @@ const ensureClassroomExists = (classroomId) => {
 
 const assertStudentHasAccess = (memberships, classroomId, viewerRole, viewerEmail) => {
   if (viewerRole !== 'student') return;
-  if (!hasActiveMembership(memberships, classroomId, viewerEmail)) {
+  if (!memberships.some((membership) =>
+    isMembershipForClassroom(membership, classroomId)
+    && normalizeEmail(membership.studentEmail) === normalizeEmail(viewerEmail)
+    && isActiveRecord(membership))) {
     throw apiError(
       403,
       'MEMBERSHIP_REQUIRED',
@@ -206,7 +243,11 @@ async function handleRequest(request, response) {
   }
   const isDsaLabCatalogRoute = requestUrl.pathname === '/api/courses'
     || requestUrl.pathname === `/api/courses/${DSA_COURSE_ID}/detail`;
-  if ((viewerRole === 'lecturer' || viewerRole === 'admin') && !isDsaLabCatalogRoute) {
+  const isDsaLabSubmissionRoute = (requestUrl.pathname.startsWith(`/api/courses/${DSA_COURSE_ID}/submissions`)
+    || requestUrl.pathname.startsWith('/api/submissions/'));
+  if ((viewerRole === 'lecturer' || viewerRole === 'admin')
+    && !isDsaLabCatalogRoute
+    && !isDsaLabSubmissionRoute) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
   }
 
@@ -225,12 +266,11 @@ async function handleRequest(request, response) {
       if (viewerRole === 'student') {
         assertStudentHasAccess(records, classroomId, viewerRole, viewerEmail);
       }
-      const classroomMemberships = records.filter((record) => record.classroomId === classroomId);
-      const visibleMemberships = viewerRole === 'student'
-        ? classroomMemberships.filter(
-          (record) => normalizeEmail(record.studentEmail) === viewerEmail,
-        )
-        : classroomMemberships;
+      const classroomMemberships = records.filter((record) => isMembershipForClassroom(record, classroomId));
+      // Students may open the roster as a class directory. Access is still
+      // gated by the authenticated student's own ACTIVE membership above;
+      // the response must not be reduced to only the current student.
+      const visibleMemberships = classroomMemberships;
 
       sendJson(
         response,
@@ -255,7 +295,7 @@ async function handleRequest(request, response) {
       const records = await readCollection('memberships');
       const existing = records.find(
         (record) =>
-          record.classroomId === classroomId &&
+          isMembershipForClassroom(record, classroomId) &&
           (record.studentId === student.id || normalizeEmail(record.studentEmail) === studentEmail),
       );
 
@@ -269,6 +309,9 @@ async function handleRequest(request, response) {
       }
 
       const now = new Date().toISOString();
+      const membershipClassroomId = String(classroomId) === DSA_COURSE_ID
+        ? DSA_ROSTER_CLASSROOM_ID
+        : classroomId;
       const membership = existing
         ? {
           ...existing,
@@ -280,8 +323,8 @@ async function handleRequest(request, response) {
           updatedAt: now,
         }
         : {
-          id: `membership-${classroomId}-${student.id}`,
-          classroomId,
+          id: `membership-${membershipClassroomId}-${student.id}`,
+          classroomId: membershipClassroomId,
           studentId: student.id,
           studentName: student.name,
           studentEmail: student.email,
@@ -341,33 +384,33 @@ async function handleRequest(request, response) {
 
   if (request.method === 'GET' && requestUrl.pathname === '/api/courses') {
     const assignedCourseIds = await getAssignedCourseIds(viewerRole, viewerEmail);
-    const items = Object.keys(COURSE_CATALOG)
+    const items = await Promise.all(Object.keys(COURSE_CATALOG)
       .filter((courseId) => assignedCourseIds.has(courseId))
-      .map((courseId) => getCourse(courseId));
+      .map((courseId) => getCourseWithCanonicalRoster(courseId)));
     sendJson(response, 200, toListResponse(items, viewerRole, viewerEmail, 'course'));
     return;
   }
 
   if (parts[0] === 'api' && parts[1] === 'courses' && parts[3] === 'detail' && request.method === 'GET') {
-    const course = getCourse(parts[2]);
+    const course = await getCourseWithCanonicalRoster(parts[2]);
     await assertCourseAccess(parts[2], viewerRole, viewerEmail);
     sendJson(response, 200, {
       course: toResource(course, viewerRole, viewerEmail, 'course'),
-      detail: getCourseDetail(course, viewerRole),
+      detail: getCourseDetail(course, viewerRole, viewerEmail),
     });
     return;
   }
 
   if (parts[0] === 'api' && parts[1] === 'courses' && parts[3] === 'submissions' && request.method === 'GET') {
-    const course = getCourse(parts[2]);
-    const detail = getCourseDetail(course);
+    const course = await getCourseWithCanonicalRoster(parts[2]);
+    const detail = getCourseDetail(course, viewerRole, viewerEmail);
     const assignments = getAssignment(detail, requestUrl.searchParams.get('assignmentId'));
 
     if (assignments.length === 0) {
       throw apiError(404, 'ASSIGNMENT_NOT_FOUND', `Không tìm thấy bài tập trong khóa học ${course.id}.`);
     }
 
-    if (viewerRole !== 'student' && viewerRole !== 'tutor') {
+    if (!['student', 'tutor', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền xem bài nộp.');
     }
     await assertCourseAccess(course.id, viewerRole, viewerEmail);
@@ -376,17 +419,27 @@ async function handleRequest(request, response) {
     const items = [];
 
     for (const assignment of assignments) {
+      const submissionContext = await getCodePulseSubmissionContext(course.id, assignment.id);
+      const submissionStudents = course.id === DSA_COURSE_ID && submissionContext.classroom
+        ? (await readCollection('memberships'))
+          .filter((membership) => isActiveRecord(membership)
+            && isCodePulseMembershipFor(membership, submissionContext.classroom))
+          .map((membership) => ({
+            name: membership.studentName,
+            email: membership.studentEmail,
+          }))
+        : course.students;
       let assignmentRecords = records.filter(
         (record) => record.courseId === course.id && record.assignmentId === assignment.id,
       );
 
       if (assignmentRecords.length === 0) {
-        assignmentRecords = createCourseSubmissionRecords(course, assignment.id);
+        assignmentRecords = createCourseSubmissionRecords(course, assignment.id, submissionStudents);
         records = [...records, ...assignmentRecords];
         changed = true;
       }
 
-      items.push(...assignmentRecords.map((record) => toSubmissionView(record, assignment, viewerRole)));
+      items.push(...assignmentRecords.map((record) => toSubmissionView(record, assignment, viewerRole, submissionContext)));
     }
 
     if (changed) await saveSubmissions(records);
@@ -409,7 +462,7 @@ async function handleRequest(request, response) {
       viewerRole,
       permissions: {
         canView: true,
-        canEdit: viewerRole === 'tutor',
+        canEdit: viewerRole === 'tutor' || viewerRole === 'lecturer',
         canCreate: viewerRole === 'student',
       },
       meta: {
@@ -428,7 +481,7 @@ async function handleRequest(request, response) {
     if (index < 0) throw apiError(404, 'SUBMISSION_NOT_FOUND', `Không tìm thấy submission ${parts[2]}.`);
 
     const current = records[index];
-    if (viewerRole !== 'student' && viewerRole !== 'tutor') {
+    if (!['student', 'tutor', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền sửa bài nộp.');
     }
     if (viewerRole === 'student' && current.student.email !== viewerEmail) {
@@ -437,7 +490,7 @@ async function handleRequest(request, response) {
     await assertCourseAccess(current.courseId, viewerRole, viewerEmail);
     const updated = { ...current };
 
-    if (viewerRole === 'tutor') {
+    if (viewerRole === 'tutor' || viewerRole === 'lecturer') {
       if (body.score !== undefined) updated.score = body.score;
       if (body.feedback !== undefined) updated.feedback = body.feedback;
     } else {
@@ -452,11 +505,18 @@ async function handleRequest(request, response) {
     records[index] = updated;
     await saveSubmissions(records);
 
-    const course = getCourse(updated.courseId);
-    const assignment = getAssignment(getCourseDetail(course), updated.assignmentId)[0];
+    const course = await getCourseWithCanonicalRoster(updated.courseId);
+    const assignment = getAssignment(getCourseDetail(course, viewerRole, viewerEmail), updated.assignmentId)[0];
     if (!assignment) throw apiError(404, 'ASSIGNMENT_NOT_FOUND', `Không tìm thấy assignment ${updated.assignmentId}.`);
 
-    sendJson(response, 200, { item: toSubmissionView(updated, assignment, viewerRole) });
+    sendJson(response, 200, {
+      item: toSubmissionView(
+        updated,
+        assignment,
+        viewerRole,
+        await getCodePulseSubmissionContext(updated.courseId, assignment.id),
+      ),
+    });
     return;
   }
 
