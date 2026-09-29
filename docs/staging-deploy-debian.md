@@ -7,10 +7,12 @@ This is a separate staging-only deployment. It does not change the production
 
 - Nginx staging: `127.0.0.1:8080`
 - Node staging backend: `127.0.0.1:4011`
+- Gitea HTTP origin: `127.0.0.1:8211` (container HTTP port `3000`)
 - Staging data: `/opt/spm-frontend-staging/shared/data`
 - Backend service: `spm-staging-backend.service`
 - Public URL: a generated `https://<random>.trycloudflare.com` link
 - Public `/api/*`: proxied by Nginx to `127.0.0.1:4011`
+- Public `/git/*`: proxied by Nginx to Gitea at `127.0.0.1:8211`
 
 Port `4011` is intentional. The `test-E2E` runner currently uses `4010` for
 its isolated test process, so the persistent staging service does not collide
@@ -49,7 +51,7 @@ sudo systemctl status spm-staging-quick-tunnel.service --no-pager || true
 `deploy/install-staging-local.sh` grants the local runner permission to start
 `spm-staging-quick-tunnel.service` non-interactively. The workflow prints the
 new public URL in the Actions log and Summary, then verifies both `/` and
-`/api/health` through that URL.
+`/api/health`, and `/git/` through that URL.
 
 Quick Tunnel URLs are random and may change after a restart or a later Actions
 run. They are suitable for staging/testing, not a stable production hostname.
@@ -94,4 +96,6 @@ curl --fail -I http://127.0.0.1:8080/
 ```
 
 The public staging URL is printed by the `Start staging Cloudflare Quick
-Tunnel` step in GitHub Actions.
+Tunnel` step in GitHub Actions. Use the URL exactly as printed; do not append
+the runner origin port (`:8080`) to a `trycloudflare.com` URL. Gitea is
+available at `<public-url>/git/`.

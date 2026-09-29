@@ -6,6 +6,7 @@ Kiến trúc local:
 
 - Nginx listen port `80`, serve `/opt/spm-frontend/current/frontend`.
 - Nginx proxy `/api/*` tới backend `127.0.0.1:4000`.
+- Nginx proxy `/git/*` tới Gitea HTTP origin `127.0.0.1:8211`.
 - `spm-backend.service` chạy Node.js bằng user hệ thống `spm`.
 - Dữ liệu runtime nằm ở `/opt/spm-frontend/shared/data`, không bị ghi đè khi deploy release mới.
 - E2E staging dùng port `3010/4010`, nên không đụng production local `80/4000` trên cùng Debian.
@@ -55,7 +56,7 @@ Sau khi merge `staging -> main`:
 4. Backend/frontend được copy vào release mới.
 5. Symlink `current` chuyển sang release mới.
 6. Backend restart, Nginx reload.
-7. Workflow kiểm tra `http://127.0.0.1/api/health` và trang `/`.
+7. Workflow kiểm tra `http://127.0.0.1/api/health`, trang `/`, và `/git/`.
 
 Để mở từ máy khác trong LAN, truy cập `http://<IP-DEBIAN>/`. Nếu firewall bật, chỉ mở port 80 trong mạng nội bộ:
 
@@ -64,3 +65,7 @@ sudo ufw allow from 192.168.0.0/16 to any port 80 proto tcp
 ```
 
 Không đặt password, token hoặc dữ liệu production vào repository. Nếu cần domain/HTTPS, giữ Nginx local làm reverse proxy và bổ sung TLS sau khi HTTP deployment đã ổn định.
+
+Nếu dùng Cloudflare Quick Tunnel, public URL có dạng
+`https://<random>.trycloudflare.com`. Không thêm port origin `:80` hoặc
+`:8080` vào URL public. Route Gitea là `<public-url>/git/`.
