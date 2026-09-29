@@ -6,9 +6,12 @@ import { courseStore } from '@/components/data/~mock-courses';
 import { ArrowLeft } from '@/components/icons';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
-import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
+import { useDataStore } from '@/services/use-data-store';
+import { getCurrentSubmissionViewerContext, getCurrentViewerContext } from '@/services/viewer-context';
 import type { SubmissionView } from '@/types/submission';
 import filePDF from '/group07_report 02.pdf';
+
+import { CourseHeaderTabs, getCourseHeaderVisibility } from '../../components/course-header-tabs';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -50,9 +53,11 @@ const formatDate = (value: string | null) =>
 
 function RouteComponent() {
   const { id, name, stuname } = Route.useParams();
-  const course = courseStore.getById(id);
+  const courses = useDataStore(courseStore);
+  const course = courses.find((item) => item.id === id);
   const [viewerContext] = useState(getCurrentSubmissionViewerContext);
   const { viewerRole } = viewerContext;
+  const headerVisibility = getCourseHeaderVisibility(id, getCurrentViewerContext().viewerRole);
   const [matchingEntry, setMatchingEntry] = useState<SubmissionView | null>(null);
   const [activeTab, setActiveTab] = useState<'baiLam' | 'nhanXet'>('baiLam');
   const [comment, setComment] = useState('');
@@ -162,11 +167,30 @@ function RouteComponent() {
           <span>Quay lại</span>
         </Link>
 
+        <div className="mb-6">
+          <p className="text-sm font-medium text-gray-500">{course.code}</p>
+          <h1 className="text-3xl font-bold text-gray-900">{course.title}</h1>
+          <p className="mt-1 text-gray-600">Giảng viên: {course.instructor}</p>
+        </div>
+
+        <div className="mb-6 flex flex-wrap gap-3 sm:gap-4">
+          <CourseHeaderTabs id={id} active="submissions" {...headerVisibility} />
+        </div>
+
         <header className="flex items-center gap-4">
           <UserCircleIcon className="size-20 shrink-0" />
           <div>
             <h1 className="text-2xl font-bold text-gray-900">{matchingEntry.student.name}</h1>
             <p className="text-sm text-gray-500">{matchingEntry.student.email}</p>
+            <p className="mt-1 text-sm font-medium text-gray-700">Bài nộp: {matchingEntry.assignment.title}</p>
+            <div className="mt-2 flex flex-wrap gap-2 text-xs font-medium">
+              <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">
+                Học kỳ: {matchingEntry.term?.name ?? 'Chưa gắn'}
+              </span>
+              <span className="rounded-full bg-purple-50 px-2.5 py-1 text-purple-700">
+                Lớp: {matchingEntry.classroom?.name ?? 'Chưa gắn'}
+              </span>
+            </div>
             <div className="mt-1 flex items-center gap-2 text-sm text-gray-600">
               <ClockIcon className="size-4" />
               <span>{formatDate(matchingEntry.submittedAt)}</span>

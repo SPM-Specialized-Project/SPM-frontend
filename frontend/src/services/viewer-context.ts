@@ -52,7 +52,9 @@ export const getCurrentSubmissionViewerContext = (): {
 } => {
   const context = getCurrentViewerContext();
   return {
-    viewerRole: context.viewerRole === 'student' ? 'student' : 'tutor',
-    studentEmail: context.viewerEmail,
+    viewerRole: context.viewerRole === 'student' || context.viewerRole === 'lecturer'
+      ? context.viewerRole
+      : 'tutor',
+    studentEmail: context.viewerRole === 'student' ? context.viewerEmail : undefined,
   };
 };
