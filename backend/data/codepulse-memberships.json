@@ -313,7 +313,7 @@
   },
   {
     "id": "membership-13-student-account-1",
-    "classroomId": "13",
+    "classroomId": "class-1",
     "studentId": "student-account-1",
     "studentName": "Student User",
     "studentEmail": "student@gmail.com",
@@ -321,6 +321,66 @@
     "enrolledAt": "2026-09-29T02:52:49.832Z",
     "revokedAt": null,
     "createdAt": "2026-09-29T02:52:49.832Z",
-    "updatedAt": "2026-09-29T03:04:55.479Z"
+    "updatedAt": "2026-09-29T07:40:06.656Z"
+  },
+  {
+    "id": "membership-13-1-student-1",
+    "classroomId": "class-1",
+    "studentId": "1-student-1",
+    "studentName": "Nguyễn Văn A",
+    "studentEmail": "nguyenvana@student.hcmut.edu.vn",
+    "status": "ACTIVE",
+    "enrolledAt": "2025-11-01T10:00:00.000Z",
+    "revokedAt": null,
+    "createdAt": "2025-11-01T10:00:00.000Z",
+    "updatedAt": "2025-11-01T10:00:00.000Z"
+  },
+  {
+    "id": "membership-13-1-student-2",
+    "classroomId": "class-1",
+    "studentId": "1-student-2",
+    "studentName": "Trần Thị B",
+    "studentEmail": "tranthib@student.hcmut.edu.vn",
+    "status": "ACTIVE",
+    "enrolledAt": "2025-11-01T10:00:00.000Z",
+    "revokedAt": null,
+    "createdAt": "2025-11-01T10:00:00.000Z",
+    "updatedAt": "2025-11-01T10:00:00.000Z"
+  },
+  {
+    "id": "membership-13-1-student-3",
+    "classroomId": "class-1",
+    "studentId": "1-student-3",
+    "studentName": "Lê Minh C",
+    "studentEmail": "leminhc@student.hcmut.edu.vn",
+    "status": "ACTIVE",
+    "enrolledAt": "2025-11-01T10:00:00.000Z",
+    "revokedAt": null,
+    "createdAt": "2025-11-01T10:00:00.000Z",
+    "updatedAt": "2025-11-01T10:00:00.000Z"
+  },
+  {
+    "id": "membership-13-2-student-1",
+    "classroomId": "class-1",
+    "studentId": "2-student-1",
+    "studentName": "Phạm Văn D",
+    "studentEmail": "phamvand@student.hcmut.edu.vn",
+    "status": "ACTIVE",
+    "enrolledAt": "2025-11-01T10:00:00.000Z",
+    "revokedAt": null,
+    "createdAt": "2025-11-01T10:00:00.000Z",
+    "updatedAt": "2025-11-01T10:00:00.000Z"
+  },
+  {
+    "id": "membership-13-2-student-2",
+    "classroomId": "class-1",
+    "studentId": "2-student-2",
+    "studentName": "Hoàng Thị E",
+    "studentEmail": "hoangthie@student.hcmut.edu.vn",
+    "status": "ACTIVE",
+    "enrolledAt": "2025-11-01T10:00:00.000Z",
+    "revokedAt": null,
+    "createdAt": "2025-11-01T10:00:00.000Z",
+    "updatedAt": "2025-11-01T10:00:00.000Z"
   }
 ]

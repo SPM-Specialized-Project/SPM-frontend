@@ -51,6 +51,7 @@ function ClassroomRosterPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadRoster = useCallback(async () => {
@@ -156,8 +157,30 @@ function ClassroomRosterPage() {
     }
   };
 
+  const handleReactivate = async (membership: Membership) => {
+    setReactivatingId(membership.id);
+    try {
+      await api.addMembership({
+        ...viewerContext,
+        classroomId: id,
+        studentEmail: membership.studentEmail,
+      });
+      toast.success(`Đã kích hoạt lại ${membership.studentName}.`);
+      await loadRoster();
+    } catch (requestError: unknown) {
+      toast.error(
+        requestError instanceof ApiError
+          ? requestError.message
+          : 'Không thể kích hoạt lại membership.',
+      );
+    } finally {
+      setReactivatingId(null);
+    }
+  };
+
   const title = course?.title ?? `Classroom ${id}`;
-  const canManage = Boolean(permissions?.canCreate) && viewerContext.viewerRole === 'tutor';
+  const canManage = viewerContext.viewerRole === 'tutor'
+    && Boolean(permissions?.canEdit || permissions?.canCreate);
 
   return (
     <StudyLayout>
@@ -387,7 +410,14 @@ function ClassroomRosterPage() {
                               {revokingId === membership.id ? 'Đang revoke...' : 'Revoke'}
                             </button>
                           ) : (
-                            <span className="text-xs text-gray-400">Dùng form để kích hoạt lại</span>
+                            <button
+                              type="button"
+                              onClick={() => void handleReactivate(membership)}
+                              disabled={reactivatingId === membership.id}
+                              className="font-medium text-blue-700 hover:text-blue-900 disabled:opacity-50"
+                            >
+                              {reactivatingId === membership.id ? 'Đang kích hoạt...' : 'Kích hoạt lại'}
+                            </button>
                           )}
                         </td>
                       )}
