@@ -1,4 +1,6 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -12,8 +14,11 @@ import {
 import {
   DSA_CLASSROOM_ASSIGNMENTS,
   DSA_COURSE_ID,
+  DSA_ROSTER_CLASSROOM_ID,
   DSA_MANAGER_EMAILS,
+  COURSE_OWNERSHIPS,
   INITIAL_MEMBERSHIPS,
+  normalizeCourse13Memberships,
   USERS,
 } from './data/seeds.mjs';
 
@@ -27,12 +32,25 @@ const assignmentFile = ASSIGNMENTS_FILE;
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
 const MAX_MEMORY_LIMIT_MB = 1_024;
+const MAX_SOURCE_CODE_LENGTH = 200_000;
+const MAX_RUN_OUTPUT_LENGTH = 32_000;
 
 const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
   { id: 'term-2027-1', courseId: '13', name: '2027 Semester 1', startDate: '2027-01-02', endDate: '2027-06-01', resetDate: '2027-06-02', status: 'DRAFT' },
 ];
-const initialClassrooms = DSA_CLASSROOM_ASSIGNMENTS;
+const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
+
+const initialClassrooms = DSA_CLASSROOM_ASSIGNMENTS.map((classroom) => {
+  const ownerEmail = COURSE_OWNERSHIPS[classroom.courseId]?.ownerEmail;
+  return {
+    ...classroom,
+    managerEmails: [...new Set([
+      ...(classroom.managerEmails ?? []),
+      ownerEmail,
+    ].filter(Boolean))],
+  };
+});
 const initialAssignments = [{
   id: 'problem-1', classroomId: 'class-1', title: 'Hello World',
   description: 'Read one line and print it unchanged.',
@@ -54,8 +72,8 @@ const initialAssignments = [{
   rawRunnerTrace: 'internal runner trace',
 }];
 const initialWorkspaces = [
-  { id: 'workspace-1', classroomId: 'class-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")' },
-  { id: 'workspace-2', classroomId: 'class-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")' },
+  { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")' },
+  { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")' },
 ];
 
 let mutationQueue = Promise.resolve();
@@ -65,11 +83,12 @@ async function readRecords(file, initial) {
   try {
     const records = JSON.parse(await readFile(file, 'utf8'));
     if (!Array.isArray(records)) throw new Error(`Invalid data file: ${file}`);
-    return records;
+    return file === membershipFile ? normalizeCourse13Memberships(records) : records;
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
     await writeFile(file, `${JSON.stringify(initial, null, 2)}\n`, 'utf8');
-    return structuredClone(initial);
+    const records = structuredClone(initial);
+    return file === membershipFile ? normalizeCourse13Memberships(records) : records;
   }
 }
 
@@ -191,8 +210,199 @@ const publicAssignment = (assignment, viewerRole) => {
   };
 };
 
+const normalizeRunOutput = (value) => String(value ?? '').replace(/\r\n/g, '\n').trimEnd();
+
+const runProcess = (command, args, { cwd, input = '', timeoutMs }) => new Promise((resolve, reject) => {
+  const child = spawn(command, args, { cwd, windowsHide: true });
+  let stdout = '';
+  let stderr = '';
+  let timedOut = false;
+  let outputLimitReached = false;
+  let settled = false;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    child.kill();
+  }, timeoutMs);
+
+  const appendOutput = (target, chunk) => {
+    const value = chunk.toString();
+    if (target === 'stdout') stdout += value;
+    else stderr += value;
+    if (stdout.length + stderr.length > MAX_RUN_OUTPUT_LENGTH) {
+      outputLimitReached = true;
+      child.kill();
+    }
+  };
+
+  child.stdout.on('data', (chunk) => appendOutput('stdout', chunk));
+  child.stderr.on('data', (chunk) => appendOutput('stderr', chunk));
+  child.once('error', (error) => {
+    clearTimeout(timer);
+    if (settled) return;
+    settled = true;
+    reject(error);
+  });
+  child.once('close', (code, signal) => {
+    clearTimeout(timer);
+    if (settled) return;
+    settled = true;
+    resolve({
+      code,
+      signal,
+      stdout: stdout.slice(0, MAX_RUN_OUTPUT_LENGTH),
+      stderr: stderr.slice(0, MAX_RUN_OUTPUT_LENGTH),
+      timedOut,
+      outputLimitReached,
+    });
+  });
+
+  child.stdin.on('error', () => {});
+  child.stdin.end(input);
+});
+
+const runWithFallback = async (commands, options) => {
+  let lastError;
+  for (const [command, args] of commands) {
+    try {
+      return await runProcess(command, args, options);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      lastError = error;
+    }
+  }
+  throw lastError ?? new Error('Không tìm thấy runtime để chạy bài.');
+};
+
+const runnerCommands = (runtime, sourcePath, executablePath) => {
+  if (runtime === 'PYTHON') {
+    const python = process.env.PYTHON_BIN?.trim();
+    return [
+      ...(python ? [[python, ['-I', sourcePath]]] : []),
+      ...(process.platform === 'win32' ? [['py', ['-3', '-I', sourcePath]]] : []),
+      ['python', ['-I', sourcePath]],
+      ['python3', ['-I', sourcePath]],
+    ];
+  }
+
+  return [
+    ['g++', ['-std=c++17', '-O2', '-pipe', sourcePath, '-o', executablePath]],
+    ['clang++', ['-std=c++17', '-O2', sourcePath, '-o', executablePath]],
+  ];
+};
+
+const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => {
+  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-codepulse-run-'));
+  const sourceExtension = assignment.runtime === 'CPP' ? 'cpp' : 'py';
+  const sourcePath = path.join(tempDirectory, `main.${sourceExtension}`);
+  const executablePath = path.join(tempDirectory, process.platform === 'win32' ? 'main.exe' : 'main');
+  const timeoutMs = Math.min(
+    Math.max(Number(assignment.cpuTimeLimitMs) || 1_000, 100),
+    MAX_CPU_TIME_LIMIT_MS,
+  );
+
+  try {
+    await writeFile(sourcePath, sourceCode, 'utf8');
+    let executableCommand;
+    if (assignment.runtime === 'CPP') {
+      const compile = await runWithFallback(runnerCommands('CPP', sourcePath, executablePath), {
+        cwd: tempDirectory,
+        timeoutMs: MAX_CPU_TIME_LIMIT_MS,
+      });
+      if (compile.code !== 0 || compile.timedOut || compile.outputLimitReached) {
+        return testCases.map((testCase) => ({
+          testCaseId: testCase.id,
+          input: testCase.input,
+          expectedOutput: testCase.expectedOutput,
+          actualOutput: '',
+          stderr: compile.stderr || compile.stdout,
+          status: compile.timedOut ? 'TIMEOUT' : 'COMPILE_ERROR',
+          passed: false,
+          durationMs: null,
+        }));
+      }
+      executableCommand = [executablePath, []];
+    }
+
+    const results = [];
+    for (const testCase of testCases) {
+      const startedAt = Date.now();
+      const result = assignment.runtime === 'PYTHON'
+        ? await runWithFallback(runnerCommands('PYTHON', sourcePath), {
+          cwd: tempDirectory,
+          input: testCase.input,
+          timeoutMs,
+        })
+        : await runProcess(executableCommand[0], executableCommand[1], {
+          cwd: tempDirectory,
+          input: testCase.input,
+          timeoutMs,
+        });
+      const actualOutput = normalizeRunOutput(result.stdout);
+      const expectedOutput = normalizeRunOutput(testCase.expectedOutput);
+      const status = result.timedOut
+        ? 'TIMEOUT'
+        : result.outputLimitReached
+          ? 'OUTPUT_LIMIT'
+          : result.code === 0
+            ? actualOutput === expectedOutput ? 'PASSED' : 'WRONG_ANSWER'
+            : 'RUNTIME_ERROR';
+      results.push({
+        testCaseId: testCase.id,
+        input: testCase.input,
+        expectedOutput: testCase.expectedOutput,
+        actualOutput: result.stdout,
+        stderr: result.stderr,
+        status,
+        passed: status === 'PASSED',
+        durationMs: Date.now() - startedAt,
+      });
+    }
+    return results;
+  } finally {
+    await rm(tempDirectory, { recursive: true, force: true });
+  }
+};
+
 export async function getCodePulseClassrooms() {
   return readRecords(classroomFile, initialClassrooms);
+}
+
+export async function getCodePulseSubmissionContext(courseId, assignmentId) {
+  if (String(courseId) !== DSA_COURSE_ID) {
+    return { term: null, classroom: null };
+  }
+
+  const [terms, classrooms, assignments] = await Promise.all([
+    readRecords(termFile, initialTerms),
+    readRecords(classroomFile, initialClassrooms),
+    readRecords(assignmentFile, initialAssignments),
+  ]);
+  const linkedAssignment = assignments.find((item) => item.id === assignmentId);
+  const item = classrooms.find((classroomItem) => classroomItem.id === linkedAssignment?.classroomId)
+    ?? classrooms.find((classroomItem) => classroomItem.courseId === DSA_COURSE_ID && classroomItem.status === 'ACTIVE')
+    ?? classrooms.find((classroomItem) => classroomItem.courseId === DSA_COURSE_ID);
+  const term = item ? terms.find((termItem) => termItem.id === item.termId) : undefined;
+
+  return {
+    term: term
+      ? {
+        id: term.id,
+        name: term.name,
+        startDate: term.startDate,
+        endDate: term.endDate,
+        status: term.status,
+      }
+      : null,
+    classroom: item
+      ? {
+        id: item.id,
+        name: item.name,
+        termId: item.termId,
+        status: item.status,
+        lecturerEmail: item.lecturerEmail,
+      }
+      : null,
+  };
 }
 
 export async function handleCodePulse({ request, response, requestUrl, user, sendJson, readRequestBody, apiError }) {
@@ -208,16 +418,33 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const memberships = await readRecords(membershipFile, INITIAL_MEMBERSHIPS);
   const membershipClassroomId = (classroomId) => classroomId.replace(/^class-/, '');
   const belongsToClassroom = (item, classroomId) =>
-    item.classroomId === classroomId || item.classroomId === membershipClassroomId(classroomId);
+    item.classroomId === classroomId;
   const isActiveMembership = (item) => String(item.status).toUpperCase() === 'ACTIVE';
+  const isCurrentStudentTerm = (item) => Boolean(
+    item
+      && item.status === 'ACTIVE'
+      && new Date(item.startDate).getTime() <= Date.now()
+      && new Date(item.endDate).getTime() > Date.now(),
+  );
   const isMember = (classroomId) => memberships.some((item) =>
     belongsToClassroom(item, classroomId) &&
-    (item.studentEmail ?? item.userEmail) === user.email &&
+    normalizeEmail(item.studentEmail ?? item.userEmail) === normalizeEmail(user.email) &&
     isActiveMembership(item));
-  const isDsaManager = (item) => (user.role === 'lecturer' && item.lecturerEmail === user.email)
+  const isCourseOwner = (item) => {
+    const ownership = COURSE_OWNERSHIPS[item.courseId];
+    return ownership?.ownershipLocked === true
+      && normalizeEmail(ownership.ownerEmail) === normalizeEmail(user.email);
+  };
+  const isDsaManager = (item) => (user.role === 'lecturer'
+    && normalizeEmail(item.lecturerEmail) === normalizeEmail(user.email))
     || (user.role === 'tutor' && item.courseId === DSA_COURSE_ID && (
-      item.managerEmails?.includes(user.email) || DSA_MANAGER_EMAILS.includes(user.email)
+      item.managerEmails?.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
+      || DSA_MANAGER_EMAILS.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
+      || isCourseOwner(item)
     ));
+  const isStudentVisibleClassroom = (item) => item.status === 'ACTIVE'
+    && isCurrentStudentTerm(terms.find((termItem) => termItem.id === item.termId))
+    && isMember(item.id);
   const lecturerEmail = (value) => {
     if (value === undefined || value === null || value === '') return null;
     const lecturer = USERS.find((candidate) =>
@@ -228,14 +455,16 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   };
   const canAccessClass = (item) => user.role === 'admin'
     || isDsaManager(item)
-    || (user.role === 'student' && item.status === 'ACTIVE' && isMember(item.id));
+    || (user.role === 'student' && isStudentVisibleClassroom(item));
   const canManageClass = (item) => user.role === 'admin' || isDsaManager(item);
   const canManageAssignment = (item) => isDsaManager(item);
   const activeTerm = (item) => new Date(item.endDate).getTime() > Date.now();
 
   if (parts[2] === 'terms' && request.method === 'GET') {
-    const items = terms.filter((item) => item.courseId === requestedCourseId && (user.role === 'admin'
-      || classrooms.some((classroomItem) => classroomItem.termId === item.id && canAccessClass(classroomItem))));
+    const canViewAllCourseTerms = ['admin', 'lecturer', 'tutor'].includes(user.role);
+    const items = terms.filter((item) => item.courseId === requestedCourseId && (canViewAllCourseTerms
+      || (isCurrentStudentTerm(item)
+        && classrooms.some((classroomItem) => classroomItem.termId === item.id && canAccessClass(classroomItem)))));
     sendJson(response, 200, { items });
     return;
   }
@@ -259,9 +488,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (user.role !== 'admin') deny();
     const body = await readRequestBody(request);
     const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
     const updated = { ...current, ...body.patch, courseId: current.courseId };
     if (!updated.name?.trim() || new Date(updated.endDate) <= new Date(updated.startDate)) {
       throw apiError(400, 'INVALID_TERM_DATES', 'Term có ngày không hợp lệ.');
+    }
+    if (!['DRAFT', 'ACTIVE', 'ARCHIVED'].includes(updated.status)) {
+      throw apiError(400, 'INVALID_STATUS', 'Trạng thái term không hợp lệ.');
     }
     await mutate(termFile, initialTerms, (records) => { Object.assign(records.find((record) => record.id === current.id), updated); return updated; });
     sendJson(response, 200, { item: updated });
@@ -351,17 +584,106 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'workspace' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (user.role !== 'student' || !canAccessClass(classroomItem)) deny();
+
+    const assignmentId = requestUrl.searchParams.get('assignmentId');
+    const assignment = assignments.find((item) =>
+      item.id === assignmentId && item.classroomId === classroomItem.id && item.status === 'PUBLISHED');
+    if (!assignment) notFound();
+
+    const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
+    let workspace = currentWorkspaces.find((item) =>
+      item.classroomId === classroomItem.id
+      && item.assignmentId === assignment.id
+      && item.ownerEmail === user.email);
+
+    if (!workspace) {
+      workspace = {
+        id: `workspace-${Date.now()}`,
+        classroomId: classroomItem.id,
+        assignmentId: assignment.id,
+        termId: classroomItem.termId,
+        ownerEmail: user.email,
+        sourceCode: '',
+      };
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        records.push(workspace);
+        return workspace;
+      });
+    }
+
+    sendJson(response, 200, { item: workspace });
+    return;
+  }
+
   const isAssignmentRoute = parts[2] === 'classrooms'
     && parts[3]
     && ['problems', 'assignments'].includes(parts[4]);
 
+  if (isAssignmentRoute && parts[5] && parts[6] === 'run' && request.method === 'POST') {
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    const assignment = assignments.find((record) =>
+      record.id === parts[5] && record.classroomId === classroomItem.id) ?? notFound();
+    if (user.role === 'student' && assignment.status !== 'PUBLISHED') notFound();
+    if (!ALLOWED_RUNTIMES.has(assignment.runtime)) {
+      throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Assignment chưa có runtime được hỗ trợ để chạy.');
+    }
+
+    const body = await readRequestBody(request);
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const savedWorkspace = workspaces.find((item) =>
+      item.classroomId === classroomItem.id
+      && item.assignmentId === assignment.id
+      && item.ownerEmail === user.email);
+    const sourceCode = typeof body.sourceCode === 'string'
+      ? body.sourceCode
+      : savedWorkspace?.sourceCode;
+    if (!sourceCode?.trim()) throw apiError(400, 'SOURCE_CODE_REQUIRED', 'Hãy lưu hoặc nhập code trước khi chạy.');
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
+
+    const visibleTestCases = user.role === 'student'
+      ? assignment.testCases.filter((testCase) => !testCase.hidden)
+      : assignment.testCases;
+    const requestedTestCaseIds = Array.isArray(body.testCaseIds)
+      ? new Set(body.testCaseIds.map((id) => String(id)))
+      : null;
+    const selectedTestCases = requestedTestCaseIds
+      ? visibleTestCases.filter((testCase) => requestedTestCaseIds.has(testCase.id))
+      : visibleTestCases;
+    if (selectedTestCases.length === 0) {
+      throw apiError(400, 'NO_VISIBLE_TEST_CASES', 'Không có testcase public để chạy.');
+    }
+
+    const results = await runAssignmentTestCases({
+      assignment,
+      sourceCode,
+      testCases: selectedTestCases,
+    });
+    sendJson(response, 200, {
+      item: {
+        assignmentId: assignment.id,
+        runtime: assignment.runtime,
+        results,
+        passedCount: results.filter((result) => result.passed).length,
+        totalCount: results.length,
+      },
+    });
+    return;
+  }
+
   if (isAssignmentRoute && !parts[5] && request.method === 'GET') {
     const item = classroom(parts[3]);
     if (!canAccessClass(item)) deny();
+    const studentPreview = requestUrl.searchParams.get('view') === 'student';
     const visibleAssignments = assignments
       .filter((assignment) => assignment.classroomId === item.id)
-      .filter((assignment) => user.role !== 'student' || assignment.status === 'PUBLISHED')
-      .map((assignment) => publicAssignment(assignment, user.role));
+      .filter((assignment) => (!studentPreview && user.role !== 'student') || assignment.status === 'PUBLISHED')
+      .map((assignment) => publicAssignment(assignment, studentPreview || user.role === 'student' ? 'student' : user.role));
     sendJson(response, 200, { items: visibleAssignments });
     return;
   }
@@ -446,6 +768,23 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'terms' && parts[3] && request.method === 'DELETE') {
+    if (user.role !== 'admin') deny();
+    const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
+    if (classrooms.some((classroomItem) => classroomItem.termId === current.id)) {
+      throw apiError(409, 'TERM_IN_USE', 'Không thể xóa term đang được classroom sử dụng.');
+    }
+    await mutate(termFile, initialTerms, (records) => {
+      const index = records.findIndex((record) => record.id === current.id);
+      if (index < 0) notFound();
+      records.splice(index, 1);
+      return current;
+    });
+    sendJson(response, 200, { deleted: true, item: current });
+    return;
+  }
+
   if (isAssignmentRoute && parts[5] && !parts[6] && request.method === 'DELETE') {
     const classroomItem = classroom(parts[3]);
     if (!canManageAssignment(classroomItem)) deny();
@@ -512,9 +851,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (!['active', 'revoked'].includes(requestedStatus)) {
       throw apiError(400, 'INVALID_INPUT', 'Membership status phải là active hoặc revoked.');
     }
-    const codepulseMembershipIds = { 'member-1': 'student-account-1', 'member-2': '2-student-1' };
+    const codepulseMembershipIds = { 'member-1': 'student-account-1', 'member-2': '13-student-2' };
     const current = memberships.find((record) =>
-      record.id === parts[3] || record.studentId === codepulseMembershipIds[parts[3]]);
+      record.id === parts[3]
+      || (record.classroomId === DSA_ROSTER_CLASSROOM_ID && record.studentId === codepulseMembershipIds[parts[3]]));
     if (!current) notFound();
     const updated = await mutate(membershipFile, [], (records) => {
       const stored = records.find((record) => record.id === current.id) ?? notFound();
