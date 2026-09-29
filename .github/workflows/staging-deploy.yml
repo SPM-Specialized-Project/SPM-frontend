@@ -1,6 +1,9 @@
 name: Staging Deploy
 
 on:
+  push:
+    branches:
+      - staging
   workflow_call:
     inputs:
       app_ref:
