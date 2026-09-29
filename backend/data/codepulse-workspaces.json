@@ -1,0 +1,28 @@
+[
+  {
+    "id": "workspace-1",
+    "classroomId": "class-1",
+    "assignmentId": "problem-1",
+    "termId": "term-2026-1",
+    "ownerEmail": "student@gmail.com",
+    "sourceCode": "for i in range(1,200000):\r\n    print(i)",
+    "updatedAt": "2026-09-29T06:52:22.326Z"
+  },
+  {
+    "id": "workspace-2",
+    "classroomId": "class-1",
+    "assignmentId": "problem-1",
+    "termId": "term-2026-1",
+    "ownerEmail": "student2@gmail.com",
+    "sourceCode": "print(\"Private\")"
+  },
+  {
+    "id": "workspace-1790653607187",
+    "classroomId": "class-1",
+    "assignmentId": "assignment-1790613122803",
+    "termId": "term-2026-1",
+    "ownerEmail": "student@gmail.com",
+    "sourceCode": "def d(a, b):\r\n    return a + b\r\ninput_a = input()\r\ninput_b = input()\r\nprint(d(input_a, input_b))",
+    "updatedAt": "2026-09-29T06:44:58.258Z"
+  }
+]
