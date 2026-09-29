@@ -83,6 +83,21 @@ test('roster keeps history and uses authenticated identity', async (t) => {
     course13Roster.data.items.find((item) => item.studentEmail === 'nguyenvana@student.hcmut.edu.vn').permissions.canView,
     false,
   );
+  const course13MembershipId = course13Roster.data.items[0].id;
+  const course13Revoked = await request(
+    `${url}/api/classrooms/13/memberships/${course13MembershipId}`,
+    tutor,
+    'PATCH',
+    { status: 'REVOKED' },
+  );
+  assert.equal(course13Revoked.status, 200);
+  assert.equal(course13Revoked.data.item.status, 'REVOKED');
+  const course13Reactivated = await request(`${url}/api/classrooms/13/memberships`, tutor, 'POST', {
+    studentEmail: course13Revoked.data.item.studentEmail,
+  });
+  assert.equal(course13Reactivated.status, 200);
+  assert.equal(course13Reactivated.data.reactivated, true);
+  assert.equal(course13Reactivated.data.item.id, course13MembershipId);
   const own = await request(`${roster}?viewerRole=tutor&viewerEmail=tutor@gmail.com`, student);
   assert.equal(own.status, 200);
   assert.deepEqual(

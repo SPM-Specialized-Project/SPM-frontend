@@ -283,7 +283,7 @@ async function handleRequest(request, response) {
     if (request.method === 'POST' && !membershipId) {
       const body = await readRequestBody(request);
       if (viewerRole !== 'tutor') {
-        throw apiError(403, 'FORBIDDEN', 'Chỉ Lecturer được quản lý membership của classroom.');
+        throw apiError(403, 'FORBIDDEN', 'Chỉ tutor được quản lý membership của classroom.');
       }
 
       const studentEmail = normalizeEmail(body.studentEmail ?? body.email);
@@ -350,12 +350,12 @@ async function handleRequest(request, response) {
     if ((request.method === 'PATCH' || request.method === 'DELETE') && membershipId) {
       const body = await readRequestBody(request);
       if (viewerRole !== 'tutor') {
-        throw apiError(403, 'FORBIDDEN', 'Chỉ Lecturer được revoke membership của classroom.');
+        throw apiError(403, 'FORBIDDEN', 'Chỉ tutor được revoke membership của classroom.');
       }
 
       const records = await readCollection('memberships');
       const index = records.findIndex(
-        (record) => record.classroomId === classroomId && record.id === membershipId,
+        (record) => isMembershipForClassroom(record, classroomId) && record.id === membershipId,
       );
       if (index < 0) {
         throw apiError(404, 'MEMBERSHIP_NOT_FOUND', `Không tìm thấy membership ${membershipId}.`);
