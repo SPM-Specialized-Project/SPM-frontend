@@ -54,9 +54,67 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   const tutor = await login('tutor@gmail.com', 'tutor123');
   const admin = await login('admin@gmail.com', 'admin123');
 
+  const initialTerms = await api('/api/codepulse/terms?courseId=13', admin);
+  assert.equal(initialTerms.status, 200);
+  assert.equal(initialTerms.data.items.length, 2);
+  const blockedTermDelete = await api('/api/codepulse/terms/term-2026-1?courseId=13', admin, 'DELETE');
+  assert.equal(blockedTermDelete.status, 409);
+  const createdTerm = await api('/api/codepulse/terms?courseId=13', admin, 'POST', {
+    name: '2028 Semester 1',
+    startDate: '2028-01-01',
+    endDate: '2028-06-01',
+    resetDate: '2028-06-02',
+  });
+  assert.equal(createdTerm.status, 201);
+  assert.equal(createdTerm.data.item.status, 'DRAFT');
+  const updatedTerm = await api(`/api/codepulse/terms/${createdTerm.data.item.id}?courseId=13`, admin, 'PATCH', {
+    patch: { name: '2028 Semester 1 updated', status: 'ACTIVE' },
+  });
+  assert.equal(updatedTerm.status, 200);
+  const tutorTerms = await api('/api/codepulse/terms?courseId=13', tutor);
+  assert.equal(tutorTerms.status, 200);
+  assert.ok(tutorTerms.data.items.some((item) => item.id === createdTerm.data.item.id));
+  const deletedTerm = await api(`/api/codepulse/terms/${createdTerm.data.item.id}?courseId=13`, admin, 'DELETE');
+  assert.equal(deletedTerm.status, 200);
+  assert.equal(deletedTerm.data.deleted, true);
+
+  const tutorStatus = await api('/api/codepulse/classrooms/class-1', tutor, 'PATCH', {
+    patch: { status: 'DRAFT' },
+  });
+  assert.equal(tutorStatus.status, 200);
+  assert.equal(tutorStatus.data.item.status, 'DRAFT');
+  const tutorDraftClassrooms = await api('/api/codepulse/classrooms?courseId=13', tutor);
+  assert.equal(tutorDraftClassrooms.status, 200);
+  assert.equal(
+    tutorDraftClassrooms.data.items.find((item) => item.id === 'class-1').status,
+    'DRAFT',
+  );
+  const studentDraftTerms = await api('/api/codepulse/terms?courseId=13', student);
+  assert.equal(studentDraftTerms.status, 200);
+  assert.deepEqual(studentDraftTerms.data.items, []);
+  const studentDraftClassrooms = await api('/api/codepulse/classrooms?courseId=13', student);
+  assert.equal(studentDraftClassrooms.status, 200);
+  assert.deepEqual(studentDraftClassrooms.data.items, []);
+  assert.equal((await api('/api/codepulse/classrooms/class-1', tutor, 'PATCH', {
+    patch: { status: 'ACTIVE' },
+  })).status, 200);
+
   const tutorClassrooms = await api('/api/codepulse/classrooms?courseId=13', tutor);
   assert.equal(tutorClassrooms.status, 200);
   assert.equal(tutorClassrooms.data.items.length, 2);
+  const studentTerms = await api('/api/codepulse/terms?courseId=13', student);
+  assert.deepEqual(studentTerms.data.items.map((item) => item.id), ['term-2026-1']);
+  const studentClassrooms = await api('/api/codepulse/classrooms?courseId=13', student);
+  assert.deepEqual(studentClassrooms.data.items.map((item) => item.id), ['class-1']);
+  const movedToFutureTerm = await api('/api/codepulse/classrooms/class-1', admin, 'PATCH', {
+    patch: { termId: 'term-2027-1' },
+  });
+  assert.equal(movedToFutureTerm.status, 200);
+  const futureTermAssignments = await api('/api/codepulse/classrooms/class-1/assignments', student);
+  assert.equal(futureTermAssignments.status, 403);
+  assert.equal((await api('/api/codepulse/classrooms/class-1', admin, 'PATCH', {
+    patch: { termId: 'term-2026-1' },
+  })).status, 200);
   const tutorDraft = await api('/api/codepulse/classrooms/class-1/assignments', tutor, 'POST', {
     title: 'Tutor-managed draft',
   });
@@ -76,6 +134,23 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   const studentAssignmentsBeforePublish = await api('/api/codepulse/classrooms/class-1/assignments', student);
   assert.equal(studentAssignmentsBeforePublish.status, 200);
   assert.ok(studentAssignmentsBeforePublish.data.items.every((item) => item.status === 'PUBLISHED'));
+  const studentWorkspace = await api('/api/codepulse/classrooms/class-1/workspace?assignmentId=problem-1', student);
+  assert.equal(studentWorkspace.status, 200);
+  assert.equal(studentWorkspace.data.item.assignmentId, 'problem-1');
+  assert.equal(studentWorkspace.data.item.ownerEmail, 'student@gmail.com');
+  const runResult = await api('/api/codepulse/classrooms/class-1/assignments/problem-1/run', student, 'POST', {
+    sourceCode: 'print(input())',
+  });
+  assert.equal(runResult.status, 200);
+  assert.equal(runResult.data.item.passedCount, 1);
+  assert.equal(runResult.data.item.totalCount, 1);
+  assert.equal(runResult.data.item.results[0].status, 'PASSED');
+  assert.equal(runResult.data.item.results[0].actualOutput.trim(), 'Hello');
+  const savedStudentWorkspace = await api(`/api/codepulse/workspaces/${studentWorkspace.data.item.id}`, student, 'PATCH', {
+    sourceCode: 'print("pasted solution")',
+  });
+  assert.equal(savedStudentWorkspace.status, 200);
+  assert.equal(savedStudentWorkspace.data.item.sourceCode, 'print("pasted solution")');
   assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, student)).status, 404);
 
   const incompletePublish = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
@@ -204,6 +279,11 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.equal(studentPublished.status, 200);
   assert.equal(studentPublished.data.item.testCases.length, 1);
   assert.equal('referenceSolution' in studentPublished.data.item, false);
+
+  const lecturerStudentPreview = await api('/api/codepulse/classrooms/class-1/assignments?view=student', lecturer);
+  assert.equal(lecturerStudentPreview.status, 200);
+  assert.ok(lecturerStudentPreview.data.items.every((item) => item.status === 'PUBLISHED'));
+  assert.ok(lecturerStudentPreview.data.items.every((item) => !('referenceSolution' in item)));
 
   const editedPublished = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
     patch: { description: 'Updated after publication.' },

@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
 import { test } from 'node:test';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,13 +27,17 @@ async function waitForHealth(url) {
 test('serves health, authentication, and course catalog endpoints', async (t) => {
   const port = 4100 + Math.floor(Math.random() * 500);
   const baseUrl = `http://127.0.0.1:${port}`;
+  const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-smoke-test-'));
   const backend = spawn(process.execPath, ['server.mjs'], {
     cwd: backendDirectory,
-    env: { ...process.env, BACKEND_PORT: String(port) },
+    env: { ...process.env, BACKEND_PORT: String(port), BACKEND_DATA_DIRECTORY: dataDirectory },
     stdio: 'ignore',
   });
 
-  t.after(() => backend.kill());
+  t.after(async () => {
+    backend.kill();
+    await rm(dataDirectory, { recursive: true, force: true });
+  });
   await waitForHealth(baseUrl);
 
   const health = await (await fetch(`${baseUrl}/api/health`)).json();
