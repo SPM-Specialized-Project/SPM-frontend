@@ -2,7 +2,10 @@ import { useNavigate, useRouterState } from '@tanstack/react-router';
 
 import BachKhoaLogo from '../../assets/bachkhoa.png';
 
-import { SidebarNavigation } from './sidebar-navigation';
+import {
+  getSidebarStatsPermission,
+  SidebarNavigation,
+} from './sidebar-navigation';
 
 type SidebarDesktopProps = {
   isManager?: boolean;
@@ -12,15 +15,7 @@ type SidebarDesktopProps = {
 const SidebarDesktop = ({ opened }: SidebarDesktopProps) => {
   const router = useRouterState();
   const navigate = useNavigate();
-  const rawUserStore = localStorage.getItem('userStore');
-  let hasStatsPermission = false;
-
-  try {
-    const userStore = rawUserStore ? JSON.parse(rawUserStore) : null;
-    hasStatsPermission = Boolean(userStore?.state?.user?.statisticalPermission);
-  } catch {
-    hasStatsPermission = false;
-  }
+  const hasStatsPermission = getSidebarStatsPermission();
 
   return (
     <div
