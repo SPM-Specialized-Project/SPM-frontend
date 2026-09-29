@@ -1,3 +1,5 @@
+import type { ResourceMeta, ResourcePermissions } from './backend';
+
 export type CourseContentType =
   | 'introduction'
   | 'material'
@@ -119,4 +121,6 @@ export type CourseDetail = {
   title: string;
   instructor: string;
   content: CourseContent[];
+  permissions?: ResourcePermissions;
+  meta?: ResourceMeta;
 };

@@ -2,12 +2,15 @@ import { createFileRoute, Link } from '@tanstack/react-router';
 import { type SVGProps, useEffect, useMemo, useState } from 'react';
 
 import { courseStore } from '@/components/data/~mock-courses';
-import ArrowLeft from '@/components/icons/arrow-left';
 import Search from '@/components/icons/search';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
+import { useDataStore } from '@/services/use-data-store';
 import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
 import type { SubmissionView } from '@/types/submission';
+
+import { CoursePageHeader } from '../components/course-detail-header';
+import { getCourseHeaderVisibility } from '../components/course-header-tabs';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -70,6 +73,14 @@ function SubmissionItem({ entry, courseId }: { entry: SubmissionView; courseId: 
           <div className="text-sm text-gray-600">
             Bài nộp: <span className="font-medium text-gray-900">{assignment.title}</span>
           </div>
+          <div className="flex flex-wrap gap-2 text-xs font-medium">
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">
+              Học kỳ: {entry.term?.name ?? 'Chưa gắn'}
+            </span>
+            <span className="rounded-full bg-purple-50 px-2.5 py-1 text-purple-700">
+              Lớp: {entry.classroom?.name ?? 'Chưa gắn'}
+            </span>
+          </div>
         </div>
       </div>
 
@@ -95,14 +106,18 @@ function SubmissionItem({ entry, courseId }: { entry: SubmissionView; courseId: 
 
 function RouteComponent() {
   const { id } = Route.useParams();
-  const course = courseStore.getById(id);
+  const courses = useDataStore(courseStore);
+  const course = courses.find((item) => item.id === id);
   const [searchEmail, setSearchEmail] = useState('');
   const [sortOrder, setSortOrder] = useState('Cũ nhất');
   const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const navigate = Route.useNavigate();
   const viewerContext = useMemo(() => getCurrentSubmissionViewerContext(), []);
+  const headerVisibility = useMemo(
+    () => getCourseHeaderVisibility(id, viewerContext.viewerRole),
+    [id, viewerContext.viewerRole],
+  );
 
   useEffect(() => {
     let active = true;
@@ -151,28 +166,13 @@ function RouteComponent() {
 
   return (
     <StudyLayout>
-      <button
-        onClick={() => navigate({ to: `/course/${id}` })}
-        className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
-      >
-        <ArrowLeft className="size-5" />
-        <span className="font-medium">Quay lại</span>
-      </button>
-
-      <div
-        className="relative mb-8 rounded-lg p-8 text-white shadow-lg"
-        style={{ backgroundImage: `url(${course.bgImage})`, backgroundSize: 'cover', backgroundPosition: 'center', minHeight: '250px' }}
-      >
-        <div className="relative z-10">
-          <p className="mb-2 text-sm font-medium text-gray-200">{course.code}</p>
-          <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
-          <p className="text-lg text-gray-100">Giảng viên: {course.instructor}</p>
-          <div className="mt-6 flex gap-4">
-            <button onClick={() => navigate({ to: `/course/${id}` })} className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] transition hover:bg-white/80">Tổng quan</button>
-            <button onClick={() => navigate({ to: `/course/${id}/rating` })} className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] transition hover:bg-white/80">Đánh giá</button>
-          </div>
-        </div>
-      </div>
+      <CoursePageHeader
+        course={course}
+        id={id}
+        active="submissions"
+        {...headerVisibility}
+        backHref="/dashboard"
+      />
 
       <h1 className="mb-6 text-3xl font-bold text-gray-800">Tất cả bài nộp</h1>
       <div className="flex w-full items-center gap-4 bg-white pb-4">

@@ -24,10 +24,12 @@ export const getCurrentViewerContext = (): {
     rawRole === 'student' ||
     rawRole === 'tutor' ||
     rawRole === 'coordinator' ||
-    rawRole === 'chairman'
+    rawRole === 'chairman' ||
+    rawRole === 'lecturer' ||
+    rawRole === 'admin'
       ? rawRole
       : undefined;
-  const profileRole: UserRole | undefined = user?.isStudent
+  const profileRole: UserRole | undefined = user?.role ?? (user?.isStudent
     ? 'student'
     : user?.isTutor
       ? 'tutor'
@@ -35,7 +37,7 @@ export const getCurrentViewerContext = (): {
         ? 'chairman'
         : user?.isCoordinator
           ? 'coordinator'
-          : undefined;
+          : undefined);
 
   // The persisted user profile is updated by login and is more trustworthy
   // than a stale role string left by a previous session.
@@ -50,7 +52,9 @@ export const getCurrentSubmissionViewerContext = (): {
 } => {
   const context = getCurrentViewerContext();
   return {
-    viewerRole: context.viewerRole === 'student' ? 'student' : 'tutor',
-    studentEmail: context.viewerEmail,
+    viewerRole: context.viewerRole === 'student' || context.viewerRole === 'lecturer'
+      ? context.viewerRole
+      : 'tutor',
+    studentEmail: context.viewerRole === 'student' ? context.viewerEmail : undefined,
   };
 };

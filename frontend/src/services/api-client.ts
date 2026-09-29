@@ -39,6 +39,7 @@ import type {
 type ApiErrorPayload = {
   code?: string;
   message?: string;
+  errors?: Record<string, string>;
 };
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL?.trim() || '/api';
@@ -67,6 +68,7 @@ export class ApiError extends Error {
     message: string,
     public readonly status: number,
     public readonly code: string,
+    public readonly errors: Record<string, string> = {},
   ) {
     super(message);
     this.name = 'ApiError';
@@ -81,6 +83,7 @@ const toApiError = (error: unknown): ApiError => {
       error.response?.data?.message ?? 'Không thể kết nối API.',
       error.response?.status ?? 500,
       error.response?.data?.code ?? 'API_ERROR',
+      error.response?.data?.errors ?? {},
     );
   }
 

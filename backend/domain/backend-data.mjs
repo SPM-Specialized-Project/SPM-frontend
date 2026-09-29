@@ -1,4 +1,4 @@
-import { COURSE_CATALOG, PROVISIONED_STUDENT_ACCOUNTS } from '../data/seeds.mjs';
+import { COURSE_CATALOG, COURSE_OWNERSHIPS, PROVISIONED_STUDENT_ACCOUNTS } from '../data/seeds.mjs';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
 
@@ -19,9 +19,13 @@ const createGenericCourse = (courseId) => ({
   sessionsOrganized: 0,
 });
 
-const getCourse = (courseId) => clone(COURSE_CATALOG[courseId] ?? createGenericCourse(courseId));
+const getCourse = (courseId) => {
+  const course = COURSE_CATALOG[courseId] ?? createGenericCourse(courseId);
+  const ownership = COURSE_OWNERSHIPS[courseId];
+  return clone(ownership ? { ...course, ...ownership } : course);
+};
 
-const getCourseDetail = (course, viewerRole = 'student') => ({
+const getCourseDetail = (course, viewerRole = 'student', viewerEmail) => ({
   id: course.id,
   code: course.code,
   title: course.title,
@@ -72,11 +76,20 @@ const getCourseDetail = (course, viewerRole = 'student') => ({
       },
     },
   ],
-  permissions: getResourcePermissions({ viewerRole, resourceType: 'course' }),
+  permissions: getResourcePermissions({
+    viewerRole,
+    ownerRole: course.ownerRole,
+    ownerEmail: course.ownerEmail,
+    viewerEmail,
+    resourceType: 'course',
+  }),
   meta: {
     source: 'node-backend',
     updatedAt: new Date().toISOString(),
     viewerRole: normalizeRole(viewerRole),
+    ownerRole: course.ownerRole,
+    ownerEmail: course.ownerEmail,
+    ownershipLocked: course.ownershipLocked === true,
   },
 });
 
@@ -93,12 +106,12 @@ const getAssignment = (detail, requestedId) => {
 const getPermissions = (viewerRole, status) => ({
   canView: true,
   canSubmit: viewerRole === 'student',
-  canEdit: viewerRole === 'tutor' || status !== 'graded',
-  canReview: viewerRole === 'tutor',
+  canEdit: viewerRole === 'tutor' || viewerRole === 'lecturer' || status !== 'graded',
+  canReview: viewerRole === 'tutor' || viewerRole === 'lecturer',
 });
 
 const normalizeRole = (value) =>
-  ['student', 'tutor', 'coordinator', 'chairman'].includes(value) ? value : 'student';
+  ['student', 'tutor', 'coordinator', 'chairman', 'lecturer', 'admin'].includes(value) ? value : 'student';
 
 const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
 
@@ -150,7 +163,7 @@ const getResourcePermissions = ({
 }) => {
   const role = normalizeRole(viewerRole);
   const isOwner = Boolean(
-    (viewerEmail && ownerEmail && viewerEmail === ownerEmail) ||
+    (viewerEmail && ownerEmail && normalizeEmail(viewerEmail) === normalizeEmail(ownerEmail)) ||
       (!viewerEmail && ownerRole && role === ownerRole),
   );
   const canView = isManager(role) || resourceType === 'course' ||
@@ -190,6 +203,7 @@ const toResource = (record, viewerRole, viewerEmail, resourceType = 'generic') =
     viewerRole: normalizeRole(viewerRole),
     ownerRole: record.ownerRole,
     ownerEmail: record.ownerEmail,
+    ownershipLocked: record.ownershipLocked === true,
   },
 });
 
@@ -207,8 +221,20 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
     viewerRole: normalizeRole(viewerRole),
     permissions: {
       canView: true,
-      canEdit: isManager(viewerRole),
-      canDelete: isManager(viewerRole),
+      canEdit: isManager(viewerRole) || visibleItems.some((item) => getResourcePermissions({
+        viewerRole,
+        ownerRole: item.ownerRole,
+        ownerEmail: item.ownerEmail,
+        viewerEmail,
+        resourceType,
+      }).canEdit),
+      canDelete: isManager(viewerRole) || visibleItems.some((item) => getResourcePermissions({
+        viewerRole,
+        ownerRole: item.ownerRole,
+        ownerEmail: item.ownerEmail,
+        viewerEmail,
+        resourceType,
+      }).canDelete),
       canCreate: isManager(viewerRole) ||
         (resourceType === 'registration' && (viewerRole === 'student' || viewerRole === 'tutor')) ||
         (resourceType === 'session' && viewerRole === 'tutor'),
@@ -221,18 +247,20 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
   };
 };
 
-const toSubmissionView = (record, assignment, viewerRole) => ({
+const toSubmissionView = (record, assignment, viewerRole, context = { term: null, classroom: null }) => ({
   ...record,
   assignment: {
     id: assignment.id,
     title: assignment.title,
     dueDate: assignment.data.dueDate,
   },
+  term: context.term,
+  classroom: context.classroom,
   permissions: getPermissions(viewerRole, record.status),
 });
 
-const createCourseSubmissionRecords = (course, assignmentId) =>
-  course.students.map((student, index) => {
+const createCourseSubmissionRecords = (course, assignmentId, students = course.students) =>
+  students.map((student, index) => {
     const submittedAt = new Date(Date.UTC(2025, 0, 10, 9, index * 15)).toISOString();
     const isGraded = index === 0;
 
@@ -259,6 +287,7 @@ const createUser = (seedUser) => ({
   googleId: '',
   appleId: null,
   email: seedUser.email,
+  role: seedUser.role,
   firstName: seedUser.role.charAt(0).toUpperCase() + seedUser.role.slice(1),
   lastName: 'User',
   picture: null,

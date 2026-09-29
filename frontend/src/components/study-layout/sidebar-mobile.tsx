@@ -1,50 +1,13 @@
-import { Link, useNavigate, useRouterState } from '@tanstack/react-router';
-import { ReactNode, useMemo } from 'react';
+import { useNavigate, useRouterState } from '@tanstack/react-router';
 
-import {
-  HomeIcon,
-  SidebarToggleIcon,
-} from '@/components/icons';
+import { SidebarToggleIcon } from '@/components/icons';
 
 import BachKhoaLogo from '../../assets/bachkhoa.png';
 
-
-type ItemProps = {
-  isComingSoon?: boolean;
-  name: string;
-  route: string;
-  children: ReactNode;
-  current: string;
-};
-
-const Item = ({ isComingSoon, name, route, children, current }: ItemProps) => {
-  const selected = useMemo(() => {
-    return current.startsWith(route);
-  }, [current, route]);
-
-  if (isComingSoon)
-    return (
-      <div
-        className={` ${selected ? 'bg-primary font-bold text-white' : ''} group relative flex h-14 w-full cursor-not-allowed flex-row items-center gap-4 overflow-x-hidden rounded-lg p-4 duration-200 ease-in-out hover:bg-tertiary-300 hover:text-white`}
-      >
-        {children}
-        <span className="flex group-hover:hidden">{name}</span>
-        <span className="hidden font-bold opacity-0 group-hover:flex group-hover:opacity-100">
-          SẮP RA MĂT
-        </span>
-      </div>
-    );
-
-  return (
-    <Link
-      to={route}
-      className={` ${selected ? 'bg-primary font-bold text-white' : ''} group relative flex h-14 w-full flex-row items-center gap-4 overflow-x-hidden rounded-lg p-4 duration-200 ease-in-out hover:bg-primary-300 hover:text-white`}
-    >
-      {children}
-      {name}
-    </Link>
-  );
-};
+import {
+  getSidebarStatsPermission,
+  SidebarNavigation,
+} from './sidebar-navigation';
 
 type SidebarMobileProps = {
   isManager?: boolean;
@@ -84,15 +47,12 @@ const SidebarMobile = ({ opened, close }: SidebarMobileProps) => {
           </div>
           <div className="relative flex flex-col gap-2">
             <div className="mb-2 font-bold">Chung</div>
-            <Item
-              name="Trang chủ"
-              route="/dashboard"
+            <SidebarNavigation
+              opened
               current={router.location.pathname}
-            >
-              <HomeIcon
-                className={`${router.location.pathname.startsWith('/dashboard') ? 'fill-white' : 'fill-tertiary group-hover:fill-white'} size-6 duration-200 ease-in-out `}
-              />
-            </Item>
+              hasStatsPermission={getSidebarStatsPermission()}
+              onNavigate={close}
+            />
           </div>
         </div>
       </div>

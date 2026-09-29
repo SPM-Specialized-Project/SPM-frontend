@@ -10,6 +10,33 @@ const USERS = [
   { email: 'locked@gmail.com', password: 'locked123', role: 'student', status: 'LOCKED' },
 ];
 
+const DSA_COURSE_ID = '13';
+const DSA_ROSTER_CLASSROOM_ID = 'class-1';
+// DSA LAB is managed by the seeded tutor account in addition to classroom lecturers.
+const DSA_MANAGER_EMAILS = ['tutor@gmail.com'];
+const DSA_CLASSROOM_ASSIGNMENTS = [
+  {
+    id: 'class-1',
+    courseId: DSA_COURSE_ID,
+    termId: 'term-2026-1',
+    name: 'CodePulse Demo',
+    description: 'DSA practice classroom.',
+    status: 'ACTIVE',
+    lecturerEmail: 'lecturer@gmail.com',
+    managerEmails: DSA_MANAGER_EMAILS,
+  },
+  {
+    id: 'class-2',
+    courseId: DSA_COURSE_ID,
+    termId: 'term-2026-1',
+    name: 'CodePulse Other Term',
+    description: 'Second demonstration classroom.',
+    status: 'ACTIVE',
+    lecturerEmail: 'lecturer2@gmail.com',
+    managerEmails: DSA_MANAGER_EMAILS,
+  },
+];
+
 const COURSE_2 = {
   id: '2',
   code: '79748_CO2013_003184_CLC',
@@ -128,9 +155,48 @@ const COURSE_CATALOG = {
     id: '13', code: 'DSA-LAB', title: 'DSA LAB',
     instructor: 'Somebody', stats: { documents: 0, links: 0, assignments: 0 },
     numberTotalSessions: 0, sessionsOrganized: 0,
-    students: [],
+    students: [
+      { id: '13-student-1', name: 'Student User', email: 'student@gmail.com', numberOfSubmissions: 1, numberOfJoinedSessions: 8, averageScore: 85 },
+      { id: '13-student-2', name: 'Nguyễn Văn A', email: 'nguyenvana@student.hcmut.edu.vn', numberOfSubmissions: 1, numberOfJoinedSessions: 7, averageScore: 78 },
+      { id: '13-student-3', name: 'Trần Thị B', email: 'tranthib@student.hcmut.edu.vn', numberOfSubmissions: 1, numberOfJoinedSessions: 9, averageScore: 88 },
+      { id: '13-student-4', name: 'Lê Minh C', email: 'leminhc@student.hcmut.edu.vn', numberOfSubmissions: 1, numberOfJoinedSessions: 8, averageScore: 92 },
+      { id: '13-student-5', name: 'Phạm Văn D', email: 'phamvand@student.hcmut.edu.vn', numberOfSubmissions: 1, numberOfJoinedSessions: 6, averageScore: 74 },
+      { id: '13-student-6', name: 'Hoàng Thị E', email: 'hoangthie@student.hcmut.edu.vn', numberOfSubmissions: 1, numberOfJoinedSessions: 8, averageScore: 81 },
+    ],
   },
 };
+
+// Course ownership is a manager-level concern. It is deliberately kept outside
+// student memberships so revoking a student can never revoke the course owner.
+// The embedded membership is the normalized, non-revocable manager membership
+// implied by every ownership record.
+const createCourseOwnership = (courseId, ownerRole, ownerEmail) => ({
+  ownerRole,
+  ownerEmail,
+  ownershipLocked: true,
+  membership: {
+    id: `course-membership-${courseId}`,
+    role: ownerRole,
+    email: ownerEmail,
+    status: 'ACTIVE',
+    canEdit: true,
+    canDelete: true,
+  },
+});
+
+const COURSE_OWNERSHIPS = Object.fromEntries(
+  Object.keys(COURSE_CATALOG).map((courseId) => [
+    courseId,
+    createCourseOwnership(courseId, 'coordinator', 'coordinator@gmail.com'),
+  ]),
+);
+
+Object.assign(COURSE_OWNERSHIPS, {
+  '1': createCourseOwnership('1', 'tutor', 'tutor@gmail.com'),
+  '2': createCourseOwnership('2', 'tutor', 'tutor@gmail.com'),
+  '3': createCourseOwnership('3', 'tutor', 'tutor@gmail.com'),
+  [DSA_COURSE_ID]: createCourseOwnership(DSA_COURSE_ID, 'tutor', 'tutor@gmail.com'),
+});
 
 const PROVISIONED_STUDENT_ACCOUNTS = [
   { id: 'student-account-1', name: 'Student User', email: 'student@gmail.com' },
@@ -141,7 +207,9 @@ const PROVISIONED_STUDENT_ACCOUNTS = [
       email: student.email,
     })),
   ),
-];
+].filter((account, index, accounts) => accounts.findIndex(
+  (candidate) => candidate.email.toLowerCase() === account.email.toLowerCase(),
+) === index);
 
 const createMembershipSeed = (id, classroomId, studentId, createdAt = '2025-11-01T10:00:00.000Z') => {
   const student = PROVISIONED_STUDENT_ACCOUNTS.find((account) => account.id === studentId);
@@ -199,7 +267,53 @@ const INITIAL_MEMBERSHIPS = [
   createMembershipSeed('membership-11-student-2', '11', '11-student-2'),
   createMembershipSeed('membership-12-student-1', '12', '12-student-1'),
   createMembershipSeed('membership-12-student-2', '12', '12-student-2'),
+  ...COURSE_CATALOG[DSA_COURSE_ID].students.map((student) => {
+    const account = PROVISIONED_STUDENT_ACCOUNTS.find(
+      (candidate) => candidate.email.toLowerCase() === student.email.toLowerCase(),
+    );
+    const studentId = account?.id ?? student.id;
+    return createMembershipSeed(
+      `membership-${DSA_COURSE_ID}-${studentId}`,
+      DSA_ROSTER_CLASSROOM_ID,
+      studentId,
+    );
+  }),
 ];
+
+const normalizeCourse13Memberships = (records) => {
+  const canonicalMemberships = INITIAL_MEMBERSHIPS.filter(
+    (membership) => membership.classroomId === DSA_ROSTER_CLASSROOM_ID,
+  );
+  const isCourse13Membership = (membership) =>
+    membership.classroomId === DSA_ROSTER_CLASSROOM_ID
+    || membership.classroomId === DSA_COURSE_ID;
+  const existingCourse13Memberships = records.filter(
+    isCourse13Membership,
+  );
+
+  const normalizedCourse13Memberships = canonicalMemberships.map((canonical) => {
+    const existing = existingCourse13Memberships.find(
+      (membership) => membership.studentEmail === canonical.studentEmail,
+    );
+
+    return existing
+      ? {
+        ...canonical,
+        ...existing,
+        id: canonical.id,
+        classroomId: DSA_ROSTER_CLASSROOM_ID,
+        studentId: canonical.studentId,
+        studentName: canonical.studentName,
+        studentEmail: canonical.studentEmail,
+      }
+      : canonical;
+  });
+
+  return [
+    ...records.filter((membership) => !isCourse13Membership(membership)),
+    ...normalizedCourse13Memberships,
+  ];
+};
 
 const createClassroomOwnershipSeed = (
   id,
@@ -405,9 +519,15 @@ const INITIAL_COURSE_REQUESTS = [
 
 export {
   USERS,
+  DSA_COURSE_ID,
+  DSA_ROSTER_CLASSROOM_ID,
+  DSA_MANAGER_EMAILS,
+  DSA_CLASSROOM_ASSIGNMENTS,
   COURSE_CATALOG,
+  COURSE_OWNERSHIPS,
   PROVISIONED_STUDENT_ACCOUNTS,
   INITIAL_MEMBERSHIPS,
+  normalizeCourse13Memberships,
   INITIAL_CLASSROOM_OWNERSHIPS,
   INITIAL_SUBMISSIONS,
   INITIAL_SESSIONS,
