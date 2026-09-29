@@ -13,9 +13,12 @@ tunnel. They use two independent Cloudflare Quick Tunnels instead:
 
 - `main` -> Nginx on `127.0.0.1:80`
 - `staging` -> Nginx on `127.0.0.1:8080`
+- Gitea -> Nginx `/git/` -> `127.0.0.1:8211`
 
 Quick Tunnel links are random `trycloudflare.com` URLs and can change when a
 tunnel restarts. They are for staging/testing, not stable production hosting.
+The public URL is HTTPS; do not append the origin port (`:80`, `:8080`, or
+`:8211`) to it. The Gitea route is `<public-url>/git/`.
 
 ## One-time setup on Debian 13
 
@@ -53,6 +56,10 @@ The current workflows build the frontend with:
 Nginx then proxies `/api/*` to the correct local backend for each environment.
 No `SPM_BACKEND_URL` or `SPM_STAGING_PUBLIC_URL` repository variable is needed
 for Quick Tunnel mode.
+
+Gitea's `ROOT_URL` should use a stable hostname when Gitea is used as a real
+Git origin. A Quick Tunnel can still expose `/git/` temporarily, but its
+random hostname must not be treated as a permanent clone URL.
 
 ## Verify a named tunnel later
 

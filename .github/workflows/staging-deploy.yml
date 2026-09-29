@@ -128,9 +128,11 @@ jobs:
           reachable=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
+              --location --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1; then
+              --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
               reachable=1
               break
             fi
@@ -141,6 +143,7 @@ jobs:
             echo "::error::Staging Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
+            curl --fail --show-error --max-time 15 "$public_url/git/" || true
             exit 1
           fi
 
@@ -167,6 +170,8 @@ jobs:
             echo '```'
             echo
             echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
+            echo "- Gitea: [$STAGING_URL/git/]($STAGING_URL/git/)"
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
+            echo '- The public URL is HTTPS; do not append the runner origin port (for example `:8080`).'
             echo "- Backend service: spm-staging-backend.service"
           } >> "$GITHUB_STEP_SUMMARY"
