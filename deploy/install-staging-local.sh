@@ -13,6 +13,18 @@ if ! command -v cloudflared >/dev/null 2>&1; then
   exit 69
 fi
 
+cloudflared_path="$(command -v cloudflared)"
+
+# Older deployments started this service with systemd-run, which leaves a
+# transient unit in /run/systemd/transient. Stop that legacy unit before
+# installing the persistent unit with the same name.
+quick_tunnel_unit='spm-staging-quick-tunnel.service'
+quick_tunnel_fragment="$(sudo systemctl show -p FragmentPath --value "$quick_tunnel_unit" 2>/dev/null || true)"
+if [[ "$quick_tunnel_fragment" == /run/systemd/transient/* ]]; then
+  sudo systemctl stop "$quick_tunnel_unit" 2>/dev/null || true
+  sudo systemctl reset-failed "$quick_tunnel_unit" 2>/dev/null || true
+fi
+
 if ! getent group spm >/dev/null; then
   sudo groupadd --system spm
 fi
@@ -31,6 +43,9 @@ sudo install -d -m 0755 /etc/spm-frontend
 
 sudo install -m 0644 deploy/systemd/spm-staging-backend.service \
   /etc/systemd/system/spm-staging-backend.service
+sed "s|__CLOUDFLARED_PATH__|$cloudflared_path|g" \
+  deploy/systemd/spm-staging-quick-tunnel.service \
+  | sudo tee /etc/systemd/system/spm-staging-quick-tunnel.service >/dev/null
 sudo install -m 0644 deploy/nginx/spm-staging.conf \
   /etc/nginx/sites-available/spm-staging.conf
 sudo install -m 0755 deploy/bin/spm-staging-deploy \
@@ -52,20 +67,18 @@ printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/spm-staging-deploy *\n' "$runner
 sudo chmod 0440 /etc/sudoers.d/spm-staging-deploy
 sudo visudo -cf /etc/sudoers.d/spm-staging-deploy
 
-systemd_run_path="$(command -v systemd-run)"
 systemctl_path="$(command -v systemctl)"
 journalctl_path="$(command -v journalctl)"
 sudo tee /etc/sudoers.d/spm-staging-quick-tunnel >/dev/null <<EOF
-$runner_user ALL=(root) NOPASSWD: $systemd_run_path *
-$runner_user ALL=(root) NOPASSWD: $systemctl_path stop spm-staging-quick-tunnel.service
-$runner_user ALL=(root) NOPASSWD: $systemctl_path reset-failed spm-staging-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $systemctl_path restart spm-staging-quick-tunnel.service
+$runner_user ALL=(root) NOPASSWD: $systemctl_path status spm-staging-quick-tunnel.service
 $runner_user ALL=(root) NOPASSWD: $journalctl_path -u spm-staging-quick-tunnel.service *
 EOF
 sudo chmod 0440 /etc/sudoers.d/spm-staging-quick-tunnel
 sudo visudo -cf /etc/sudoers.d/spm-staging-quick-tunnel
 
 sudo systemctl daemon-reload
-sudo systemctl enable nginx spm-staging-backend
+sudo systemctl enable nginx spm-staging-backend spm-staging-quick-tunnel.service
 sudo nginx -t
 sudo systemctl reload-or-restart nginx
 

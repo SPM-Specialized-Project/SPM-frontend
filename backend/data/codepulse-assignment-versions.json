@@ -1,0 +1,38 @@
+[
+  {
+    "id": "problem-1-v1",
+    "assignmentId": "problem-1",
+    "classroomId": "class-1",
+    "version": 1,
+    "title": "Singly Linked List",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-01T08:00:00.000Z"
+  },
+  {
+    "id": "problem-2-v2",
+    "assignmentId": "problem-2",
+    "classroomId": "class-1",
+    "version": 2,
+    "title": "Doubly Linked List",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-02T08:00:00.000Z"
+  },
+  {
+    "id": "problem-3-v1",
+    "assignmentId": "problem-3",
+    "classroomId": "class-1",
+    "version": 1,
+    "title": "Queue implementation",
+    "status": "PUBLISHED",
+    "publishedAt": "2026-09-03T08:00:00.000Z"
+  },
+  {
+    "id": "problem-draft-v1",
+    "assignmentId": "problem-draft",
+    "classroomId": "class-1",
+    "version": 1,
+    "title": "Unpublished draft",
+    "status": "DRAFT",
+    "publishedAt": null
+  }
+]

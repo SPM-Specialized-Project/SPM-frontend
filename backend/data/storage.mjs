@@ -14,6 +14,7 @@ import {
   INITIAL_REGISTRATIONS,
   INITIAL_SESSIONS,
   INITIAL_SUBMISSIONS,
+  normalizeCourse13Memberships,
 } from './seeds.mjs';
 
 const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -36,7 +37,8 @@ async function readCollection(name) {
   try {
     const raw = await readFile(config.file, 'utf8');
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : clone(config.seed);
+    const records = Array.isArray(parsed) ? parsed : clone(config.seed);
+    return name === 'memberships' ? normalizeCourse13Memberships(records) : records;
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
     await saveCollection(name, config.seed);

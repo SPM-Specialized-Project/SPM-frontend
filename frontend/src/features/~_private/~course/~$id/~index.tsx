@@ -44,7 +44,10 @@ function CourseDetailsComponent() {
       .getCourseDetail(id, getCurrentViewerContext())
       .then(({ data }) => {
         if (disposed) return;
-        setCourse(withCoursePresentation(data.course));
+        setCourse(withCoursePresentation({
+          ...data.course,
+          permissions: data.detail.permissions,
+        }));
         setCourseDetail(data.detail);
       })
       .catch((error: unknown) => {
@@ -177,6 +180,11 @@ function CourseDetailsComponent() {
   }
 
   if (courseDetail) {
+    const currentRole = userLocalStore?.role ?? getCurrentViewerContext().viewerRole;
+    const canViewTerms = id === '13'
+      && ['admin', 'lecturer', 'student'].includes(currentRole);
+    const showManagerTabs = currentRole !== 'student';
+
     return (
       <StudyLayout>
         <CourseDetailView
@@ -186,12 +194,14 @@ function CourseDetailsComponent() {
           id={id}
           changing={changing}
           setChanging={setChanging}
-          isManager={Boolean(userLocalStore?.isManager)}
+          isManager={Boolean(course.permissions?.canEdit || userLocalStore?.isManager)}
+          showManagerTabs={showManagerTabs}
+          showTermsTab={canViewTerms}
+          termsContent={canViewTerms ? <DsaLabManagement courseId={id} editMode={changing && showManagerTabs} /> : undefined}
           onBack={() => navigate({ to: '/dashboard' })}
           onRate={() => navigate({ to: `/course/${id}/rating` })}
           renderSectionContent={renderSectionContent}
         />
-        {id === '13' && <DsaLabManagement courseId={id} />}
       </StudyLayout>
     );
   }

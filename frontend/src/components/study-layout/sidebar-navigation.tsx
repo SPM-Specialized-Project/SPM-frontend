@@ -16,6 +16,7 @@ type SidebarNavigationProps = {
   opened: boolean;
   current: string;
   hasStatsPermission: boolean;
+  onNavigate?: () => void;
 };
 
 type NavigationItem = {
@@ -26,24 +27,65 @@ type NavigationItem = {
 };
 
 const commonItems: NavigationItem[] = [
-  { name: 'Khóa học của tôi', route: '/dashboard', icon: IconKhoaHoc, iconMode: 'fill' },
-  { name: 'Đăng ký môn học', route: '/register-session', icon: IconDangKyMonHoc, iconMode: 'stroke' },
-  { name: 'Lịch sử đăng ký', route: '/registration-history', icon: IconLichSu, iconMode: 'fill' },
+  {
+    name: 'Khóa học của tôi',
+    route: '/dashboard',
+    icon: IconKhoaHoc,
+    iconMode: 'fill',
+  },
+  {
+    name: 'Đăng ký môn học',
+    route: '/register-session',
+    icon: IconDangKyMonHoc,
+    iconMode: 'stroke',
+  },
+  {
+    name: 'Lịch sử đăng ký',
+    route: '/registration-history',
+    icon: IconLichSu,
+    iconMode: 'fill',
+  },
   { name: 'Thư viện', route: '/library', icon: IconThuVien, iconMode: 'fill' },
   { name: 'Lịch học', route: '/schedule', icon: IconLichHoc, iconMode: 'fill' },
 ];
 
 const restrictedItems: NavigationItem[] = [
-  { name: 'Giám sát hệ thống', route: '/system-monitoring', icon: IconGiamSat, iconMode: 'stroke' },
-  { name: 'Thống Kê', route: '/statistical', icon: IconThongKe, iconMode: 'stroke' },
+  {
+    name: 'Giám sát hệ thống',
+    route: '/system-monitoring',
+    icon: IconGiamSat,
+    iconMode: 'stroke',
+  },
+  {
+    name: 'Thống Kê',
+    route: '/statistical',
+    icon: IconThongKe,
+    iconMode: 'stroke',
+  },
 ];
+
+export function getSidebarStatsPermission() {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const userStore = window.localStorage.getItem('userStore');
+    return Boolean(
+      userStore && JSON.parse(userStore)?.state?.user?.statisticalPermission,
+    );
+  } catch {
+    return false;
+  }
+}
 
 function getIconClassName(item: NavigationItem, current: string) {
   const selected = current.startsWith(item.route);
   const color = selected ? 'white' : 'tertiary group-hover:stroke-white';
   return (
-    (item.iconMode === 'fill' ? (selected ? 'fill-white' : 'fill-tertiary group-hover:fill-white') : 'stroke-' + color) +
-    ' size-6 duration-200 ease-in-out'
+    (item.iconMode === 'fill'
+      ? selected
+        ? 'fill-white'
+        : 'fill-tertiary group-hover:fill-white'
+      : 'stroke-' + color) + ' size-6 duration-200 ease-in-out'
   );
 }
 
@@ -51,8 +93,11 @@ export function SidebarNavigation({
   opened,
   current,
   hasStatsPermission,
+  onNavigate,
 }: SidebarNavigationProps) {
-  const items = hasStatsPermission ? [...commonItems, ...restrictedItems] : commonItems;
+  const items = hasStatsPermission
+    ? [...commonItems, ...restrictedItems]
+    : commonItems;
 
   return (
     <div className="relative flex shrink-0 flex-col gap-2">
@@ -63,8 +108,11 @@ export function SidebarNavigation({
           route="/overview"
           current={current}
           icon={OverviewIcon}
+          onNavigate={onNavigate}
           iconClassName={
-            (current.startsWith('/overview') ? 'stroke-white' : 'stroke-tertiary group-hover:stroke-white') +
+            (current.startsWith('/overview')
+              ? 'stroke-white'
+              : 'stroke-tertiary group-hover:stroke-white') +
             ' size-6 duration-200 ease-in-out'
           }
         />
@@ -77,6 +125,7 @@ export function SidebarNavigation({
           route={item.route}
           current={current}
           icon={item.icon}
+          onNavigate={onNavigate}
           iconClassName={getIconClassName(item, current)}
         />
       ))}

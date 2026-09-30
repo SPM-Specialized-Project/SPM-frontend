@@ -1,3 +1,5 @@
+import type { UserRole } from './backend';
+
 export type User = {
   _id: string;
   googleId: string;
@@ -7,11 +9,12 @@ export type User = {
   picture: string | null;
   dateOfBirth: string | null;
   email: string;
+  role?: UserRole;
   phone: string | null;
   isManager: boolean;
   isStudent: boolean;
   isChairman: boolean;
-  isTutor: boolean;
+  isLecturer: boolean;
   isCoordinator: boolean;
   statisticalPermission: boolean;
   createdAt: string;

@@ -1,0 +1,15 @@
+[Unit]
+Description=SPM staging Cloudflare Quick Tunnel
+Wants=network-online.target
+After=network-online.target nginx.service
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=__CLOUDFLARED_PATH__ tunnel --no-autoupdate --url http://127.0.0.1:8080
+Restart=always
+RestartSec=5s
+TimeoutStopSec=15s
+
+[Install]
+WantedBy=multi-user.target

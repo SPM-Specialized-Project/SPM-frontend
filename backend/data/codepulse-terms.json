@@ -1,0 +1,20 @@
+[
+  {
+    "id": "term-2026-1",
+    "courseId": "13",
+    "name": "2026 Semester 1",
+    "startDate": "2026-01-01",
+    "endDate": "2027-01-01",
+    "resetDate": "2027-01-02",
+    "status": "ACTIVE"
+  },
+  {
+    "id": "term-2027-1",
+    "courseId": "13",
+    "name": "2027 Semester 1",
+    "startDate": "2027-01-02",
+    "endDate": "2027-06-01",
+    "resetDate": "2027-06-02",
+    "status": "DRAFT"
+  }
+]

@@ -26,7 +26,7 @@ function RouteComponent() {
 
   useEffect(() => {
     try {
-      setIsManager(localStorage.getItem('role') === 'tutor');
+      setIsManager(localStorage.getItem('role') === 'lecturer');
     } catch (error) {
       console.error('Failed to read role from localStorage', error);
       setIsManager(false);

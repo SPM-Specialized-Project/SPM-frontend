@@ -1,6 +1,6 @@
 import { Combobox, Transition } from '@headlessui/react';
 import { CheckIcon, ChevronDownIcon, MagnifyingGlassIcon } from '@heroicons/react/24/outline';
-import { createFileRoute, Link } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { Fragment, type FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 
@@ -11,8 +11,12 @@ import type {
   Membership,
   ProvisionedStudent,
 } from '@/services/api-types';
+import { useDataStore } from '@/services/use-data-store';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 import type { ResourcePermissions } from '@/types/backend';
+
+import { CoursePageHeader } from '../components/course-detail-header';
+import { getCourseHeaderVisibility } from '../components/course-header-tabs';
 
 export const Route = createFileRoute('/_private/course/$id/roster/')({
   beforeLoad: async () => {
@@ -32,8 +36,13 @@ function getStudentInitials(name: string) {
 
 function ClassroomRosterPage() {
   const { id } = Route.useParams();
-  const course = courseStore.getById(id);
+  const courses = useDataStore(courseStore);
+  const course = courses.find((item) => item.id === id);
   const viewerContext = useMemo(() => getCurrentViewerContext(), []);
+  const headerVisibility = useMemo(
+    () => getCourseHeaderVisibility(id, viewerContext.viewerRole),
+    [id, viewerContext.viewerRole],
+  );
   const [memberships, setMemberships] = useState<Membership[]>([]);
   const [availableStudents, setAvailableStudents] = useState<ProvisionedStudent[]>([]);
   const [permissions, setPermissions] = useState<ResourcePermissions>();
@@ -42,6 +51,7 @@ function ClassroomRosterPage() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [reactivatingId, setReactivatingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const loadRoster = useCallback(async () => {
@@ -147,20 +157,45 @@ function ClassroomRosterPage() {
     }
   };
 
+  const handleReactivate = async (membership: Membership) => {
+    setReactivatingId(membership.id);
+    try {
+      await api.addMembership({
+        ...viewerContext,
+        classroomId: id,
+        studentEmail: membership.studentEmail,
+      });
+      toast.success(`Đã kích hoạt lại ${membership.studentName}.`);
+      await loadRoster();
+    } catch (requestError: unknown) {
+      toast.error(
+        requestError instanceof ApiError
+          ? requestError.message
+          : 'Không thể kích hoạt lại membership.',
+      );
+    } finally {
+      setReactivatingId(null);
+    }
+  };
+
   const title = course?.title ?? `Classroom ${id}`;
-  const canManage = Boolean(permissions?.canCreate) && viewerContext.viewerRole === 'tutor';
+  const canManage = viewerContext.viewerRole === 'lecturer'
+    && Boolean(permissions?.canEdit || permissions?.canCreate);
 
   return (
     <StudyLayout>
       <div className="mx-auto w-full max-w-6xl font-['Archivo']">
+        {course ? (
+          <CoursePageHeader
+            course={course}
+            id={id}
+            active="roster"
+            {...headerVisibility}
+            backHref="/dashboard"
+          />
+        ) : null}
         <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
           <div>
-            <Link
-              to={'/course/' + id as any}
-              className="mb-3 inline-flex text-sm font-medium text-[#3D4863] hover:text-blue-700"
-            >
-              ← Quay lại classroom
-            </Link>
             <h1 className="text-3xl font-bold text-gray-900">Danh sách lớp</h1>
             <p className="mt-1 text-gray-600">{title}</p>
           </div>
@@ -375,7 +410,14 @@ function ClassroomRosterPage() {
                               {revokingId === membership.id ? 'Đang revoke...' : 'Revoke'}
                             </button>
                           ) : (
-                            <span className="text-xs text-gray-400">Dùng form để kích hoạt lại</span>
+                            <button
+                              type="button"
+                              onClick={() => void handleReactivate(membership)}
+                              disabled={reactivatingId === membership.id}
+                              className="font-medium text-blue-700 hover:text-blue-900 disabled:opacity-50"
+                            >
+                              {reactivatingId === membership.id ? 'Đang kích hoạt...' : 'Kích hoạt lại'}
+                            </button>
                           )}
                         </td>
                       )}

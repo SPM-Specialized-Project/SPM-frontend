@@ -1,6 +1,6 @@
 export type SubmissionStatus = 'not-submitted' | 'submitted' | 'graded';
 
-export type SubmissionViewerRole = 'student' | 'tutor';
+export type SubmissionViewerRole = 'student' | 'lecturer';
 
 export type SubmissionStudent = {
   id: string;
@@ -34,9 +34,27 @@ export type SubmissionAssignment = {
   dueDate: string;
 };
 
+export type SubmissionTerm = {
+  id: string;
+  name: string;
+  startDate: string;
+  endDate: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+};
+
+export type SubmissionClassroom = {
+  id: string;
+  name: string;
+  termId: string;
+  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  lecturerEmail: string | null;
+};
+
 /** Record returned to a screen after role-based permissions are applied. */
 export type SubmissionView = SubmissionRecord & {
   assignment: SubmissionAssignment;
+  term: SubmissionTerm | null;
+  classroom: SubmissionClassroom | null;
   permissions: SubmissionPermissions;
 };
 

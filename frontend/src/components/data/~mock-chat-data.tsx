@@ -113,7 +113,7 @@ export const mockConversations: Conversation[] = [
       { id: 4, name: 'Phạm Thị D' },
       { id: 5, name: 'Hoàng Văn E' },
     ],
-    createdBy: 'tutor',
+      createdBy: 'lecturer',
   }
 ];
 
@@ -152,7 +152,7 @@ export function createGroupChat(title: string, memberIds: number[], allStudents:
     icon: GroupIcon,
     isGroup: true,
     members,
-    createdBy: 'tutor',
+    createdBy: 'lecturer',
   };
   groupChats.push(newGroup);
   return newGroup;

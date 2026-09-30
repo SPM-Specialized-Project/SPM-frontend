@@ -1,6 +1,9 @@
 name: Staging Deploy
 
 on:
+  push:
+    branches:
+      - staging
   workflow_call:
     inputs:
       app_ref:
@@ -90,20 +93,10 @@ jobs:
             exit 1
           fi
 
-          if ! command -v systemd-run >/dev/null 2>&1; then
-            echo '::error::systemd-run is required to keep the staging Quick Tunnel alive after the Actions step ends.'
-            exit 1
-          fi
-
-          sudo -n systemctl stop spm-staging-quick-tunnel.service 2>/dev/null || true
-          sudo -n systemctl reset-failed spm-staging-quick-tunnel.service 2>/dev/null || true
           started_at="$(date -u --iso-8601=seconds)"
-          if ! sudo -n systemd-run \
-            --unit=spm-staging-quick-tunnel \
-            --property=Restart=on-failure \
-            --property=RestartSec=5s \
-            "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:8080; then
-            echo '::error::sudo must allow systemd-run for the staging Quick Tunnel.'
+          if ! sudo -n systemctl restart spm-staging-quick-tunnel.service; then
+            echo '::error::The persistent spm-staging-quick-tunnel.service is not installed or cannot be restarted.'
+            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
             exit 1
           fi
 
@@ -128,9 +121,11 @@ jobs:
           reachable=0
           for _ in $(seq 1 60); do
             if curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
+              --location --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1; then
+              --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
               reachable=1
               break
             fi
@@ -141,6 +136,7 @@ jobs:
             echo "::error::Staging Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
+            curl --fail --show-error --max-time 15 "$public_url/git/" || true
             exit 1
           fi
 
@@ -167,6 +163,8 @@ jobs:
             echo '```'
             echo
             echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
+            echo "- Gitea: [$STAGING_URL/git/]($STAGING_URL/git/)"
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
+            echo '- The public URL is HTTPS; do not append the runner origin port (for example `:8080`).'
             echo "- Backend service: spm-staging-backend.service"
           } >> "$GITHUB_STEP_SUMMARY"

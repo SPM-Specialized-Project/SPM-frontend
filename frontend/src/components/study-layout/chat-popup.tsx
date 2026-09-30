@@ -22,7 +22,7 @@ const ChatPopup = ({ isOpen, onClose }: ChatPopupProps) => {
           messages={chat.messages}
           searchTerm={chat.searchTerm}
           inputValue={chat.inputValue}
-          isTutor={chat.isTutor}
+          isLecturer={chat.isLecturer}
           onSearchChange={chat.setSearchTerm}
           onInputChange={chat.setInputValue}
           onBackToList={chat.handleBackToList}
@@ -40,7 +40,7 @@ const ChatPopup = ({ isOpen, onClose }: ChatPopupProps) => {
           onCreateGroup={chat.handleStartCreateGroup}
           onSelectConversation={chat.handleSelectConversation}
           onClose={onClose}
-          isTutor={chat.isTutor}
+          isLecturer={chat.isLecturer}
         />
       )}
 

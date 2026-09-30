@@ -99,7 +99,12 @@ test('SCRUM-65: create a LAB with ordered pinned problems and isolated workspace
   };
   assert.equal((await request(baseUrl, labsRoute, student, 'POST', payload)).status, 403);
   assert.equal((await request(baseUrl, labsRoute, admin, 'POST', payload)).status, 403);
-  assert.equal((await request(baseUrl, labsRoute, tutor, 'POST', payload)).status, 403);
+  const tutorAliasValidation = await request(baseUrl, labsRoute, tutor, 'POST', {
+    ...payload,
+    name: 'Tutor alias validation',
+    assignments: [],
+  });
+  assert.equal(tutorAliasValidation.status, 422);
 
   const created = await request(baseUrl, labsRoute, lecturer, 'POST', payload);
   assert.equal(created.status, 201);

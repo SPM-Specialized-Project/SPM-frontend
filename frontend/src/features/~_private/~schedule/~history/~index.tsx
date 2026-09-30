@@ -32,7 +32,7 @@ function RouteComponent() {
   const [page, setPage] = useState(1)
   const pageSize = 4
 
-  const [role, setRole] = useState<'student' | 'tutor'>('student');
+  const [role, setRole] = useState<'student' | 'lecturer'>('student');
 
   // const rawUserStore = localStorage.getItem('userStore');
   // const userStore = rawUserStore ? JSON.parse(rawUserStore as string) : null;
@@ -58,7 +58,7 @@ function RouteComponent() {
   const handleXemChiTiet = async (role: string, id: string) => {
     // lưu localstorage role
     localStorage.setItem('role', role);
-    setRole(role as 'student' | 'tutor');
+    setRole(role as 'student' | 'lecturer');
     // chuyển trang
     window.location.href = `/schedule/history/${id}`;
   }
@@ -85,15 +85,15 @@ function RouteComponent() {
               Yêu cầu của tôi
             </button>
             <button
-              onClick={() => setRole('tutor')}
-              className={`rounded-md px-4 py-2 text-sm font-medium ${role === 'tutor' ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-800 shadow-sm hover:bg-blue-50'}`}
+              onClick={() => setRole('lecturer')}
+              className={`rounded-md px-4 py-2 text-sm font-medium ${role === 'lecturer' ? 'bg-blue-600 text-white shadow' : 'bg-white text-gray-800 shadow-sm hover:bg-blue-50'}`}
             >
               Yêu cầu từ sinh viên
             </button>
           </div>
         </div>
         {/* Filters */}
-        {role === 'tutor' ? (
+        {role === 'lecturer' ? (
           <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <input

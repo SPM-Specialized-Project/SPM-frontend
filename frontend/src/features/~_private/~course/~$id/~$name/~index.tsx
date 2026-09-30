@@ -5,8 +5,11 @@ import { courseStore } from '@/components/data/~mock-courses';
 import ArrowLeft from '@/components/icons/arrow-left';
 import StudyLayout from '@/components/study-layout';
 import { ApiError, api } from '@/services/api-client';
-import { getCurrentSubmissionViewerContext } from '@/services/viewer-context';
+import { useDataStore } from '@/services/use-data-store';
+import { getCurrentSubmissionViewerContext, getCurrentViewerContext } from '@/services/viewer-context';
 import type { SubmissionView } from '@/types/submission';
+
+import { CourseHeaderTabs, getCourseHeaderVisibility } from '../components/course-header-tabs';
 
 export function ClockIcon(props: SVGProps<SVGSVGElement>) {
   return (
@@ -71,6 +74,10 @@ function SubmissionRow({ entry }: { entry: SubmissionView }) {
       </td>
       <td className="px-4 py-3"><div className="text-gray-700">{entry.feedback || 'Không có nhận xét'}</div></td>
       <td className="px-4 py-3">
+        <div className="font-medium text-gray-700">{entry.term?.name ?? 'Chưa gắn'}</div>
+        <div className="text-xs text-gray-500">{entry.classroom?.name ?? 'Chưa gắn lớp'}</div>
+      </td>
+      <td className="px-4 py-3">
         {entry.submittedAt ? (
           <div className={getSubmittedAtColor(entry.submittedAt, entry.assignment.dueDate)}>
             {formatDate(entry.submittedAt)}
@@ -89,11 +96,13 @@ function SubmissionRow({ entry }: { entry: SubmissionView }) {
 
 function RouteComponent() {
   const { id, name } = Route.useParams();
-  const course = courseStore.getById(id);
+  const courses = useDataStore(courseStore);
+  const course = courses.find((item) => item.id === id);
   const [submissions, setSubmissions] = useState<SubmissionView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [viewerContext] = useState(getCurrentSubmissionViewerContext);
+  const headerVisibility = getCourseHeaderVisibility(id, getCurrentViewerContext().viewerRole);
 
   useEffect(() => {
     let active = true;
@@ -140,6 +149,9 @@ function RouteComponent() {
             <p className="mb-2 text-sm font-medium text-gray-200">{course.code}</p>
             <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
             <p className="text-lg text-gray-100">Giảng viên: {course.instructor}</p>
+            <div className="mt-6 flex flex-wrap gap-3 sm:gap-4">
+              <CourseHeaderTabs id={id} active="submissions" {...headerVisibility} />
+            </div>
           </div>
         </div>
 
@@ -150,6 +162,7 @@ function RouteComponent() {
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Tên sinh viên</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Điểm số</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Nhận xét</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">Học kỳ / lớp</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Ngày nộp</th>
                 <th className="px-4 py-3 text-left font-medium text-gray-700">Xem bài nộp</th>
               </tr>
