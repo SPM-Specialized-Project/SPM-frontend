@@ -21,6 +21,7 @@ import {
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
+import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
@@ -736,9 +737,8 @@ export function DsaLabManagement({
   );
   const canManageClassroom = editMode && role === 'admin';
   const canUpdateClassroom =
-    editMode && ['admin', 'lecturer', 'tutor'].includes(role ?? '');
-  const canManageAssignments =
-    editMode && (role === 'lecturer' || role === 'tutor');
+    editMode && ['admin', 'lecturer'].includes(role ?? '');
+  const canManageAssignments = editMode && role === 'lecturer';
   const showClassroomDirectory = role !== undefined && role !== 'student';
 
   const load = useCallback(async () => {
@@ -1232,6 +1232,7 @@ export function DsaLabManagement({
               canEdit={false}
             />
           ))}
+        <LabSessionManagement classrooms={classrooms} role={role} />
       </div>
     </section>
   );

@@ -179,7 +179,7 @@ function ClassroomRosterPage() {
   };
 
   const title = course?.title ?? `Classroom ${id}`;
-  const canManage = viewerContext.viewerRole === 'tutor'
+  const canManage = viewerContext.viewerRole === 'lecturer'
     && Boolean(permissions?.canEdit || permissions?.canCreate);
 
   return (

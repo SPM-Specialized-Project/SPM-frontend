@@ -12,7 +12,7 @@ type ChatConversationViewProps = {
   messages: Message[];
   searchTerm: string;
   inputValue: string;
-  isTutor: boolean;
+  isLecturer: boolean;
   onSearchChange: (value: string) => void;
   onInputChange: (value: string) => void;
   onBackToList: () => void;
@@ -26,7 +26,7 @@ export function ChatConversationView({
   messages,
   searchTerm,
   inputValue,
-  isTutor,
+  isLecturer,
   onSearchChange,
   onInputChange,
   onBackToList,
@@ -58,7 +58,7 @@ export function ChatConversationView({
               </div>
             </div>
             {/* Settings button for group chats */}
-            {isTutor && selectedConversation?.isGroup && (
+            {isLecturer && selectedConversation?.isGroup && (
               <button
                 onClick={onOpenSettings}
                 className="text-gray-600 hover:text-gray-800"
@@ -149,4 +149,3 @@ export function ChatConversationView({
     </>
   );
 }
-

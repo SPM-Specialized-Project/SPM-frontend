@@ -13,7 +13,7 @@ export type Course = {
   code: string;
   title: string;
   instructor: string;
-  ownerRole?: 'tutor' | 'lecturer' | 'coordinator' | 'chairman' | 'admin';
+  ownerRole?: 'lecturer' | 'coordinator' | 'chairman' | 'admin';
   ownerEmail?: string;
   ownershipLocked?: boolean;
   permissions?: ResourcePermissions;

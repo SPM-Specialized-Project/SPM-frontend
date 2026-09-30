@@ -84,7 +84,7 @@ function RouteComponent() {
     );
   }
 
-  if (user?.isTutor) {
+  if (user?.isLecturer) {
     return (
       <StudyLayout>
         <TutorRatingView

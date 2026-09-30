@@ -14,7 +14,7 @@ export type User = {
   isManager: boolean;
   isStudent: boolean;
   isChairman: boolean;
-  isTutor: boolean;
+  isLecturer: boolean;
   isCoordinator: boolean;
   statisticalPermission: boolean;
   createdAt: string;

@@ -19,6 +19,7 @@ import {
   getCourseDetail,
   getResourcePermissions,
   findProvisionedStudent,
+  normalizeRole,
   normalizeEmail,
   toListResponse,
   toMembershipView,
@@ -43,7 +44,7 @@ const isMembershipRoute = (parts) =>
 
 const getClassroomIdFromParts = (parts) => parts[2];
 
-const isAssignedTutor = (courseId, email) => {
+const isAssignedLecturer = (courseId, email) => {
   const ownership = COURSE_OWNERSHIPS[String(courseId)];
   return Boolean(
     ownership?.ownershipLocked === true &&
@@ -103,7 +104,7 @@ const getAssignedCourseIds = async (viewerRole, viewerEmail) => {
   const assignedCourseIds = new Set();
   const normalizedViewerEmail = normalizeEmail(viewerEmail);
 
-  if (viewerRole === 'tutor') {
+  if (viewerRole === 'lecturer') {
     Object.entries(COURSE_OWNERSHIPS)
       .filter(([, ownership]) => ownership.ownershipLocked === true
         && normalizeEmail(ownership.ownerEmail) === normalizedViewerEmail)
@@ -116,7 +117,7 @@ const getAssignedCourseIds = async (viewerRole, viewerEmail) => {
   }
 
   const codePulseClassrooms = await getCodePulseClassrooms();
-  if (viewerRole === 'tutor') {
+  if (viewerRole === 'lecturer') {
     codePulseClassrooms
       .filter((classroom) => classroom.courseId === DSA_COURSE_ID && (
         DSA_MANAGER_EMAILS.some((managerEmail) => normalizeEmail(managerEmail) === normalizedViewerEmail) ||
@@ -183,11 +184,11 @@ const membershipListResponse = (items, classroomId, viewerRole, viewerEmail) => 
   viewerRole,
   permissions: {
     canView: true,
-    canEdit: viewerRole === 'tutor',
-    canDelete: viewerRole === 'tutor',
-    canCreate: viewerRole === 'tutor',
+    canEdit: viewerRole === 'lecturer',
+    canDelete: viewerRole === 'lecturer',
+    canCreate: viewerRole === 'lecturer',
   },
-  availableStudents: viewerRole === 'tutor'
+  availableStudents: viewerRole === 'lecturer'
     ? PROVISIONED_STUDENT_ACCOUNTS
     : [],
   meta: {
@@ -223,7 +224,7 @@ async function handleRequest(request, response) {
     sendJson(response, 200, {
       accessToken: createSession(user),
       user: createUser(user),
-      role: user.role,
+      role: normalizeRole(user.role),
     });
     return;
   }
@@ -232,20 +233,21 @@ async function handleRequest(request, response) {
   if (!currentUser) throw apiError(401, 'UNAUTHORIZED', 'Phiên đăng nhập không hợp lệ hoặc đã hết hạn.');
   if (currentUser.status !== 'ACTIVE') throw apiError(403, 'ACCOUNT_LOCKED', 'Tài khoản đã bị khóa hoặc không được phép truy cập!');
   if (request.method === 'GET' && requestUrl.pathname === '/api/auth/me') {
-    sendJson(response, 200, { user: createUser(currentUser), role: currentUser.role });
+    sendJson(response, 200, { user: createUser(currentUser), role: normalizeRole(currentUser.role) });
     return;
   }
-  const viewerRole = currentUser.role;
+  const viewerRole = normalizeRole(currentUser.role);
+  const effectiveUser = { ...currentUser, role: viewerRole };
   const viewerEmail = currentUser.email;
   if (requestUrl.pathname.startsWith('/api/codepulse/')) {
-    await handleCodePulse({ request, response, requestUrl, user: currentUser, sendJson, readRequestBody, apiError });
+    await handleCodePulse({ request, response, requestUrl, user: effectiveUser, sendJson, readRequestBody, apiError });
     return;
   }
   const isDsaLabCatalogRoute = requestUrl.pathname === '/api/courses'
     || requestUrl.pathname === `/api/courses/${DSA_COURSE_ID}/detail`;
   const isDsaLabSubmissionRoute = (requestUrl.pathname.startsWith(`/api/courses/${DSA_COURSE_ID}/submissions`)
     || requestUrl.pathname.startsWith('/api/submissions/'));
-  if ((viewerRole === 'lecturer' || viewerRole === 'admin')
+  if (viewerRole === 'admin'
     && !isDsaLabCatalogRoute
     && !isDsaLabSubmissionRoute) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
@@ -255,8 +257,8 @@ async function handleRequest(request, response) {
     const classroomId = getClassroomIdFromParts(parts);
     ensureClassroomExists(classroomId);
     const membershipId = parts[4];
-    if (viewerRole === 'tutor') {
-      if (!isAssignedTutor(classroomId, viewerEmail)) {
+    if (viewerRole === 'lecturer') {
+      if (!isAssignedLecturer(classroomId, viewerEmail)) {
         throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công classroom này.');
       }
     }
@@ -282,8 +284,8 @@ async function handleRequest(request, response) {
 
     if (request.method === 'POST' && !membershipId) {
       const body = await readRequestBody(request);
-      if (viewerRole !== 'tutor') {
-        throw apiError(403, 'FORBIDDEN', 'Chỉ tutor được quản lý membership của classroom.');
+      if (viewerRole !== 'lecturer') {
+        throw apiError(403, 'FORBIDDEN', 'Chỉ lecturer được quản lý membership của classroom.');
       }
 
       const studentEmail = normalizeEmail(body.studentEmail ?? body.email);
@@ -349,8 +351,8 @@ async function handleRequest(request, response) {
 
     if ((request.method === 'PATCH' || request.method === 'DELETE') && membershipId) {
       const body = await readRequestBody(request);
-      if (viewerRole !== 'tutor') {
-        throw apiError(403, 'FORBIDDEN', 'Chỉ tutor được revoke membership của classroom.');
+      if (viewerRole !== 'lecturer') {
+        throw apiError(403, 'FORBIDDEN', 'Chỉ lecturer được revoke membership của classroom.');
       }
 
       const records = await readCollection('memberships');
@@ -410,7 +412,7 @@ async function handleRequest(request, response) {
       throw apiError(404, 'ASSIGNMENT_NOT_FOUND', `Không tìm thấy bài tập trong khóa học ${course.id}.`);
     }
 
-    if (!['student', 'tutor', 'lecturer'].includes(viewerRole)) {
+    if (!['student', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền xem bài nộp.');
     }
     await assertCourseAccess(course.id, viewerRole, viewerEmail);
@@ -462,7 +464,7 @@ async function handleRequest(request, response) {
       viewerRole,
       permissions: {
         canView: true,
-        canEdit: viewerRole === 'tutor' || viewerRole === 'lecturer',
+        canEdit: viewerRole === 'lecturer',
         canCreate: viewerRole === 'student',
       },
       meta: {
@@ -481,7 +483,7 @@ async function handleRequest(request, response) {
     if (index < 0) throw apiError(404, 'SUBMISSION_NOT_FOUND', `Không tìm thấy submission ${parts[2]}.`);
 
     const current = records[index];
-    if (!['student', 'tutor', 'lecturer'].includes(viewerRole)) {
+    if (!['student', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền sửa bài nộp.');
     }
     if (viewerRole === 'student' && current.student.email !== viewerEmail) {
@@ -490,7 +492,7 @@ async function handleRequest(request, response) {
     await assertCourseAccess(current.courseId, viewerRole, viewerEmail);
     const updated = { ...current };
 
-    if (viewerRole === 'tutor' || viewerRole === 'lecturer') {
+    if (viewerRole === 'lecturer') {
       if (body.score !== undefined) updated.score = body.score;
       if (body.feedback !== undefined) updated.feedback = body.feedback;
     } else {
@@ -540,7 +542,7 @@ async function handleRequest(request, response) {
         );
         items = items.filter((record) => activeClassrooms.has(record.courseId));
       }
-    } else if (viewerRole === 'tutor') {
+    } else if (viewerRole === 'lecturer') {
       items = items.filter((record) => record.ownerEmail === viewerEmail);
     }
     sendJson(response, 200, toListResponse(items, viewerRole, viewerEmail, 'session'));
@@ -549,10 +551,10 @@ async function handleRequest(request, response) {
 
   if (parts[0] === 'api' && parts[1] === 'sessions' && !parts[2] && request.method === 'POST') {
     const body = await readRequestBody(request);
-    if (viewerRole !== 'tutor' && viewerRole !== 'coordinator' && viewerRole !== 'chairman') {
+    if (viewerRole !== 'lecturer' && viewerRole !== 'coordinator' && viewerRole !== 'chairman') {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền tạo session.');
     }
-    if (viewerRole === 'tutor' && body.item?.courseId && !isAssignedTutor(body.item.courseId, viewerEmail)) {
+    if (viewerRole === 'lecturer' && body.item?.courseId && !isAssignedLecturer(body.item.courseId, viewerEmail)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
     }
     const item = {
@@ -585,7 +587,7 @@ async function handleRequest(request, response) {
     if (!permissions.canEdit) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền chỉnh sửa session này.');
 
     const { id: ignoredId, ownerRole: ignoredRole, ownerEmail: ignoredEmail, ...patch } = clone(body.patch ?? {});
-    if (viewerRole === 'tutor' && patch.courseId && !isAssignedTutor(patch.courseId, viewerEmail)) {
+    if (viewerRole === 'lecturer' && patch.courseId && !isAssignedLecturer(patch.courseId, viewerEmail)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công khóa học này.');
     }
     const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
@@ -624,7 +626,8 @@ async function handleRequest(request, response) {
 
   if (parts[0] === 'api' && parts[1] === 'registrations' && !parts[2] && request.method === 'POST') {
     const body = await readRequestBody(request);
-    if (viewerRole !== 'coordinator' && viewerRole !== 'chairman' && body.registrationType !== viewerRole) {
+    const requestedRegistrationRole = normalizeRole(body.registrationType);
+    if (viewerRole !== 'coordinator' && viewerRole !== 'chairman' && requestedRegistrationRole !== viewerRole) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền tạo đăng ký này.');
     }
     const item = {

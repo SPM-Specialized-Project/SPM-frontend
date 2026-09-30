@@ -54,6 +54,10 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   const lecturer = await login('lecturer@gmail.com', 'lecturer123');
   const admin = await login('admin@gmail.com', 'admin123');
   const tutor = await login('tutor@gmail.com', 'tutor123');
+  const tutorAliasSession = await api('/api/auth/me', tutor);
+  assert.equal(tutorAliasSession.status, 200);
+  assert.equal(tutorAliasSession.data.role, 'lecturer');
+  assert.equal(tutorAliasSession.data.user.role, 'lecturer');
 
   const tutorCourses = await api('/api/courses?viewerRole=coordinator', tutor);
   assert.equal(tutorCourses.status, 200);
@@ -61,8 +65,8 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
     tutorCourses.data.items.map((item) => item.id),
     ['1', '2', '3', '13'],
   );
-  assert.equal(tutorCourses.data.items[0].meta.viewerRole, 'tutor');
-  assert.equal(tutorCourses.data.items[0].meta.ownerRole, 'tutor');
+  assert.equal(tutorCourses.data.items[0].meta.viewerRole, 'lecturer');
+  assert.equal(tutorCourses.data.items[0].meta.ownerRole, 'lecturer');
   assert.equal(tutorCourses.data.items[0].meta.ownerEmail, 'tutor@gmail.com');
   assert.equal(tutorCourses.data.items[0].meta.ownershipLocked, true);
   assert.equal(tutorCourses.data.items.find((item) => item.id === '13').ownershipLocked, true);

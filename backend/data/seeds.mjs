@@ -1,7 +1,8 @@
 const USERS = [
   { email: 'student@gmail.com', password: 'student123', role: 'student', status: 'ACTIVE' },
   { email: 'student2@gmail.com', password: 'student2123', role: 'student', status: 'ACTIVE' },
-  { email: 'tutor@gmail.com', password: 'tutor123', role: 'tutor', status: 'ACTIVE' },
+  // Legacy tutor credentials are retained as an alias for the canonical lecturer role.
+  { email: 'tutor@gmail.com', password: 'tutor123', role: 'lecturer', status: 'ACTIVE' },
   { email: 'coordinator@gmail.com', password: 'coordinator123', role: 'coordinator', status: 'ACTIVE' },
   { email: 'chairman@gmail.com', password: 'chairman123', role: 'chairman', status: 'ACTIVE' },
   { email: 'lecturer@gmail.com', password: 'lecturer123', role: 'lecturer', status: 'ACTIVE' },
@@ -12,7 +13,7 @@ const USERS = [
 
 const DSA_COURSE_ID = '13';
 const DSA_ROSTER_CLASSROOM_ID = 'class-1';
-// DSA LAB is managed by the seeded tutor account in addition to classroom lecturers.
+// DSA LAB is managed by the seeded lecturer account used by the legacy tutor alias.
 const DSA_MANAGER_EMAILS = ['tutor@gmail.com'];
 const DSA_CLASSROOM_ASSIGNMENTS = [
   {
@@ -192,10 +193,10 @@ const COURSE_OWNERSHIPS = Object.fromEntries(
 );
 
 Object.assign(COURSE_OWNERSHIPS, {
-  '1': createCourseOwnership('1', 'tutor', 'tutor@gmail.com'),
-  '2': createCourseOwnership('2', 'tutor', 'tutor@gmail.com'),
-  '3': createCourseOwnership('3', 'tutor', 'tutor@gmail.com'),
-  [DSA_COURSE_ID]: createCourseOwnership(DSA_COURSE_ID, 'tutor', 'tutor@gmail.com'),
+  '1': createCourseOwnership('1', 'lecturer', 'tutor@gmail.com'),
+  '2': createCourseOwnership('2', 'lecturer', 'tutor@gmail.com'),
+  '3': createCourseOwnership('3', 'lecturer', 'tutor@gmail.com'),
+  [DSA_COURSE_ID]: createCourseOwnership(DSA_COURSE_ID, 'lecturer', 'tutor@gmail.com'),
 });
 
 const PROVISIONED_STUDENT_ACCOUNTS = [
@@ -323,7 +324,7 @@ const createClassroomOwnershipSeed = (
 ) => ({
   id,
   classroomId,
-  ownerRole: 'tutor',
+  ownerRole: 'lecturer',
   ownerEmail,
   status: 'ACTIVE',
   assignedAt,
@@ -373,7 +374,7 @@ const INITIAL_SUBMISSIONS = [
 const INITIAL_SESSIONS = [
   {
     id: 's-1',
-    ownerRole: 'tutor',
+    ownerRole: 'lecturer',
     ownerEmail: 'tutor@gmail.com',
     courseId: '1',
     courseTitle: 'Computer Network',
@@ -397,7 +398,7 @@ const INITIAL_SESSIONS = [
   },
   {
     id: 's-2',
-    ownerRole: 'tutor',
+    ownerRole: 'lecturer',
     ownerEmail: 'tutor@gmail.com',
     courseId: '2',
     courseTitle: 'Database System',
@@ -421,7 +422,7 @@ const INITIAL_SESSIONS = [
   },
   {
     id: 's-3',
-    ownerRole: 'tutor',
+    ownerRole: 'lecturer',
     ownerEmail: 'tutor@gmail.com',
     courseId: '2',
     courseTitle: 'Database System',
@@ -464,7 +465,7 @@ const INITIAL_REGISTRATIONS = [
   {
     id: 'tutor-reg-1',
     registrationType: 'tutor',
-    ownerRole: 'tutor',
+    ownerRole: 'lecturer',
     ownerEmail: 'tutor@gmail.com',
     Name: 'Tutor',
     Email: 'tutor@gmail.com',

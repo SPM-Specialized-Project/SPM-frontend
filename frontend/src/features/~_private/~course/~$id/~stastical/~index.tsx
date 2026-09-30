@@ -41,8 +41,7 @@ function RouteComponent() {
     if (
       !course ||
       courseId !== '13' ||
-      (viewerContext.viewerRole !== 'tutor' &&
-        viewerContext.viewerRole !== 'lecturer')
+      viewerContext.viewerRole !== 'lecturer'
     ) {
       return () => {
         active = false;

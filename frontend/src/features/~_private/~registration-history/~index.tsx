@@ -18,7 +18,7 @@ import { useDataStore } from '@/services/use-data-store';
 interface UserProfile {
   firstName: string;
   // isManager: boolean;
-  isTutor: boolean;
+  isLecturer: boolean;
   isCoordinator: boolean;
 }
 
@@ -69,7 +69,7 @@ function RouteComponent() {
             ...tutorRegistrations.map(r => ({ ...r, registrationType: 'Tutor' as const })),
           ];
           setRegistrations(allRegs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()));
-        } else if (userLocalStore.isTutor) {
+        } else if (userLocalStore.isLecturer) {
           const myTutorRegs = tutorRegistrations
             .filter(r => r.Name.includes(userLocalStore.firstName))
             .map(r => ({ ...r, registrationType: 'Tutor' as const }));

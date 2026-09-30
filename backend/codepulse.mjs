@@ -9,6 +9,8 @@ import {
   TERMS_FILE,
   CLASSROOMS_FILE,
   ASSIGNMENTS_FILE,
+  LABS_FILE,
+  ASSIGNMENT_VERSIONS_FILE,
   WORKSPACES_FILE,
 } from './config.mjs';
 import {
@@ -28,6 +30,8 @@ const classroomFile = CLASSROOMS_FILE;
 const membershipFile = MEMBERSHIPS_FILE;
 const workspaceFile = WORKSPACES_FILE;
 const assignmentFile = ASSIGNMENTS_FILE;
+const labFile = LABS_FILE;
+const assignmentVersionFile = ASSIGNMENT_VERSIONS_FILE;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -71,6 +75,13 @@ const initialAssignments = [{
   ],
   rawRunnerTrace: 'internal runner trace',
 }];
+const initialAssignmentVersions = [
+  { id: 'problem-1-v1', assignmentId: 'problem-1', classroomId: 'class-1', version: 1, title: 'Singly Linked List', status: 'PUBLISHED', publishedAt: '2026-09-01T08:00:00.000Z' },
+  { id: 'problem-2-v2', assignmentId: 'problem-2', classroomId: 'class-1', version: 2, title: 'Doubly Linked List', status: 'PUBLISHED', publishedAt: '2026-09-02T08:00:00.000Z' },
+  { id: 'problem-3-v1', assignmentId: 'problem-3', classroomId: 'class-1', version: 1, title: 'Queue implementation', status: 'PUBLISHED', publishedAt: '2026-09-03T08:00:00.000Z' },
+  { id: 'problem-draft-v1', assignmentId: 'problem-draft', classroomId: 'class-1', version: 1, title: 'Unpublished draft', status: 'DRAFT', publishedAt: null },
+];
+const initialLabs = [];
 const initialWorkspaces = [
   { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")' },
   { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")' },
@@ -405,6 +416,59 @@ export async function getCodePulseSubmissionContext(courseId, assignmentId) {
   };
 }
 
+const LAB_STATUSES = new Set(['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']);
+const LAB_TRANSITIONS = {
+  SCHEDULED: new Set(['LIVE', 'CANCELLED']),
+  LIVE: new Set(['ENDED', 'CANCELLED']),
+  ENDED: new Set(),
+  CANCELLED: new Set(),
+};
+
+function parseDate(value) {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function validateLabInput(body, publishedVersions, apiError) {
+  const errors = {};
+  const startAt = parseDate(body.startAt);
+  const endAt = parseDate(body.endAt);
+  if (!body.name?.trim()) errors.name = 'LAB name is required.';
+  if (startAt === null) errors.startAt = 'A valid LAB start time is required.';
+  if (endAt === null) errors.endAt = 'A valid LAB end time is required.';
+  if (startAt !== null && endAt !== null && endAt <= startAt) {
+    errors.endAt = 'LAB end time must be after its start time.';
+  }
+  if (!Array.isArray(body.assignments) || body.assignments.length === 0) {
+    errors.assignments = 'Select at least one published problem.';
+  } else {
+    const selectedVersions = new Set();
+    body.assignments.forEach((item, index) => {
+      const version = publishedVersions.find((candidate) => candidate.id === item.assignmentVersionId);
+      if (!version) errors[`assignments.${index}.assignmentVersionId`] = 'Only published problem versions can be assigned.';
+      if (selectedVersions.has(item.assignmentVersionId)) errors[`assignments.${index}.assignmentVersionId`] = 'A problem version can only be assigned once.';
+      selectedVersions.add(item.assignmentVersionId);
+      const practiceStartAt = parseDate(item.practiceStartAt);
+      const practiceEndAt = parseDate(item.practiceEndAt);
+      if (practiceStartAt === null) errors[`assignments.${index}.practiceStartAt`] = 'A valid practice start time is required.';
+      if (practiceEndAt === null || (practiceStartAt !== null && practiceEndAt <= practiceStartAt)) {
+        errors[`assignments.${index}.practiceEndAt`] = 'Practice end time must be after its start time.';
+      }
+      if (startAt !== null && practiceStartAt !== null && practiceStartAt < startAt) {
+        errors[`assignments.${index}.practiceStartAt`] = 'Practice must start within the LAB schedule.';
+      }
+      if (endAt !== null && practiceEndAt !== null && practiceEndAt > endAt) {
+        errors[`assignments.${index}.practiceEndAt`] = 'Practice must end within the LAB schedule.';
+      }
+    });
+  }
+  if (Object.keys(errors).length > 0) {
+    const error = apiError(422, 'VALIDATION_ERROR', 'LAB configuration is invalid.');
+    error.errors = errors;
+    throw error;
+  }
+}
+
 export async function handleCodePulse({ request, response, requestUrl, user, sendJson, readRequestBody, apiError }) {
   const parts = requestUrl.pathname.split('/').filter(Boolean);
   const requestedCourseId = requestUrl.searchParams.get('courseId') ?? DSA_COURSE_ID;
@@ -413,6 +477,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const terms = await readRecords(termFile, initialTerms);
   const classrooms = await readRecords(classroomFile, initialClassrooms);
   const assignments = await readRecords(assignmentFile, initialAssignments);
+  const labs = await readRecords(labFile, initialLabs);
+  const assignmentVersions = await readRecords(assignmentVersionFile, initialAssignmentVersions);
   const term = (id) => terms.find((item) => item.id === id) ?? notFound();
   const classroom = (id) => classrooms.find((item) => item.id === id) ?? notFound();
   const memberships = await readRecords(membershipFile, INITIAL_MEMBERSHIPS);
@@ -435,21 +501,19 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return ownership?.ownershipLocked === true
       && normalizeEmail(ownership.ownerEmail) === normalizeEmail(user.email);
   };
-  const isDsaManager = (item) => (user.role === 'lecturer'
-    && normalizeEmail(item.lecturerEmail) === normalizeEmail(user.email))
-    || (user.role === 'tutor' && item.courseId === DSA_COURSE_ID && (
-      item.managerEmails?.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
-      || DSA_MANAGER_EMAILS.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
-      || isCourseOwner(item)
-    ));
+  const isDsaManager = (item) => user.role === 'lecturer' && (
+    normalizeEmail(item.lecturerEmail) === normalizeEmail(user.email)
+    || item.managerEmails?.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
+    || DSA_MANAGER_EMAILS.some((managerEmail) => normalizeEmail(managerEmail) === normalizeEmail(user.email))
+    || isCourseOwner(item)
+  );
   const isStudentVisibleClassroom = (item) => item.status === 'ACTIVE'
     && isCurrentStudentTerm(terms.find((termItem) => termItem.id === item.termId))
     && isMember(item.id);
   const lecturerEmail = (value) => {
     if (value === undefined || value === null || value === '') return null;
     const lecturer = USERS.find((candidate) =>
-      (candidate.role === 'lecturer' || (candidate.role === 'tutor' && DSA_MANAGER_EMAILS.includes(candidate.email)))
-      && candidate.email === String(value).trim());
+      candidate.role === 'lecturer' && candidate.email === String(value).trim());
     if (!lecturer) throw apiError(400, 'INVALID_LECTURER', 'Email phải thuộc một tài khoản lecturer.');
     return lecturer.email;
   };
@@ -459,9 +523,42 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const canManageClass = (item) => user.role === 'admin' || isDsaManager(item);
   const canManageAssignment = (item) => isDsaManager(item);
   const activeTerm = (item) => new Date(item.endDate).getTime() > Date.now();
+  const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
+  const labView = (lab) => ({
+    ...lab,
+    assignments: lab.assignments.map((assignment) => ({
+      ...assignment,
+      ...(user.role === 'student'
+        ? {
+          workspaceId: `workspace-${lab.id}-${assignment.id}-${memberships.find((member) =>
+            belongsToClassroom(member, lab.classroomId) &&
+            normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email) &&
+            isActiveMembership(member))?.id}`,
+        }
+        : {}),
+    })),
+  });
+  const publishedAssignmentVersions = (classroomId) => {
+    const storedVersions = assignmentVersions.filter((item) =>
+      item.classroomId === classroomId && item.status === 'PUBLISHED');
+    const storedAssignmentIds = new Set(storedVersions.map((item) => item.assignmentId));
+    const derivedVersions = assignments
+      .filter((item) => item.classroomId === classroomId && item.status === 'PUBLISHED')
+      .filter((item) => !storedAssignmentIds.has(item.id))
+      .map((item) => ({
+        id: `${item.id}-v1`,
+        assignmentId: item.id,
+        classroomId: item.classroomId,
+        version: Number(item.version) || 1,
+        title: item.title,
+        status: 'PUBLISHED',
+        publishedAt: item.publishedAt ?? item.updatedAt ?? new Date().toISOString(),
+      }));
+    return [...storedVersions, ...derivedVersions];
+  };
 
   if (parts[2] === 'terms' && request.method === 'GET') {
-    const canViewAllCourseTerms = ['admin', 'lecturer', 'tutor'].includes(user.role);
+    const canViewAllCourseTerms = ['admin', 'lecturer'].includes(user.role);
     const items = terms.filter((item) => item.courseId === requestedCourseId && (canViewAllCourseTerms
       || (isCurrentStudentTerm(item)
         && classrooms.some((classroomItem) => classroomItem.termId === item.id && canAccessClass(classroomItem)))));
@@ -565,6 +662,14 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       records.splice(0, records.length, ...records.filter((record) => record.classroomId !== current.id));
       return true;
     });
+    await mutate(labFile, initialLabs, (records) => {
+      records.splice(0, records.length, ...records.filter((record) => record.classroomId !== current.id));
+      return true;
+    });
+    await mutate(assignmentVersionFile, initialAssignmentVersions, (records) => {
+      records.splice(0, records.length, ...records.filter((record) => record.classroomId !== current.id));
+      return true;
+    });
     sendJson(response, 200, { deleted: true, item: current });
     return;
   }
@@ -573,6 +678,104 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const item = classroom(parts[3]);
     if (!canAccessClass(item)) deny();
     sendJson(response, 200, { item });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'assignment-versions' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    sendJson(response, 200, { items: publishedAssignmentVersions(classroomItem.id) });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    const items = labs
+      .filter((item) => item.classroomId === classroomItem.id)
+      .filter((item) => user.role !== 'student' || item.status === 'LIVE')
+      .map(labView);
+    sendJson(response, 200, { items });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'POST') {
+    const classroomItem = classroom(parts[3]);
+    if (!isAssignedLecturer(classroomItem)) deny();
+    const body = await readRequestBody(request);
+    const publishedVersions = publishedAssignmentVersions(classroomItem.id);
+    validateLabInput(body, publishedVersions, apiError);
+    const now = new Date().toISOString();
+    const labId = body.id ?? `lab-${Date.now()}`;
+    const item = {
+      id: labId,
+      classroomId: classroomItem.id,
+      name: body.name.trim(),
+      description: body.description?.trim() ?? '',
+      startAt: new Date(body.startAt).toISOString(),
+      endAt: new Date(body.endAt).toISOString(),
+      status: 'SCHEDULED',
+      createdBy: user.email,
+      createdAt: now,
+      updatedAt: now,
+      assignments: body.assignments.map((selection, index) => {
+        const version = publishedVersions.find((candidate) => candidate.id === selection.assignmentVersionId);
+        return {
+          id: `lab-assignment-${labId}-${index + 1}`,
+          assignmentId: version.assignmentId,
+          assignmentVersionId: version.id,
+          version: version.version,
+          title: version.title,
+          order: index + 1,
+          mandatory: Boolean(selection.mandatory),
+          practiceStartAt: new Date(selection.practiceStartAt).toISOString(),
+          practiceEndAt: new Date(selection.practiceEndAt).toISOString(),
+        };
+      }),
+    };
+    await mutate(labFile, initialLabs, (records) => { records.push(item); return item; });
+    const activeStudents = memberships.filter((member) =>
+      belongsToClassroom(member, classroomItem.id) && isActiveMembership(member));
+    await mutate(workspaceFile, initialWorkspaces, (records) => {
+      for (const member of activeStudents) {
+        const ownerEmail = member.studentEmail ?? member.userEmail;
+        for (const assignment of item.assignments) {
+          records.push({
+            id: `workspace-${item.id}-${assignment.id}-${member.id}`,
+            classroomId: classroomItem.id,
+            termId: classroomItem.termId,
+            labId: item.id,
+            labAssignmentId: assignment.id,
+            assignmentId: assignment.assignmentId,
+            assignmentVersionId: assignment.assignmentVersionId,
+            ownerEmail,
+            sourceCode: '',
+            updatedAt: now,
+          });
+        }
+      }
+      return true;
+    });
+    sendJson(response, 201, { item });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && parts[5] && request.method === 'PATCH') {
+    const classroomItem = classroom(parts[3]);
+    if (!isAssignedLecturer(classroomItem)) deny();
+    const current = labs.find((item) => item.id === parts[5] && item.classroomId === classroomItem.id) ?? notFound();
+    const body = await readRequestBody(request);
+    const requestedStatus = body.status ?? body.patch?.status;
+    if (!LAB_STATUSES.has(requestedStatus)) throw apiError(400, 'INVALID_STATUS', 'LAB status is invalid.');
+    if (!LAB_TRANSITIONS[current.status]?.has(requestedStatus)) {
+      throw apiError(409, 'INVALID_STATUS_TRANSITION', `LAB cannot move from ${current.status} to ${requestedStatus}.`);
+    }
+    const updated = { ...current, status: requestedStatus, updatedAt: new Date().toISOString() };
+    await mutate(labFile, initialLabs, (records) => {
+      Object.assign(records.find((record) => record.id === current.id), updated);
+      return updated;
+    });
+    sendJson(response, 200, { item: updated });
     return;
   }
 

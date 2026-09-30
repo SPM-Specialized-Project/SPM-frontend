@@ -32,7 +32,7 @@ export type DropdownOption = {
 // Kiểu dữ liệu cho một đơn đăng ký của GIA SƯ
 export type PastRegistration = {
   id: string;
-  ownerRole?: 'student' | 'tutor' | 'coordinator' | 'chairman';
+  ownerRole?: 'student' | 'lecturer' | 'coordinator' | 'chairman';
   ownerEmail?: string;
   Name: string;
   Email: string;

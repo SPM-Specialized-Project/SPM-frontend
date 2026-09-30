@@ -45,7 +45,7 @@
     "specialRequest": "d",
     "status": "Pending",
     "createdAt": "2026-09-15T08:20:01.956Z",
-    "ownerRole": "tutor",
+    "ownerRole": "lecturer",
     "ownerEmail": "tutor@tutor.example.com",
     "registrationType": "tutor"
   },

@@ -80,7 +80,7 @@ export function CourseHeaderTabs({
 
 export function getCourseHeaderVisibility(courseId: string, viewerRole: string) {
   return {
-    showTermsTab: courseId === '13' && ['admin', 'lecturer', 'tutor', 'student'].includes(viewerRole),
+    showTermsTab: courseId === '13' && ['admin', 'lecturer', 'student'].includes(viewerRole),
     showManagerTabs: viewerRole !== 'student',
   };
 }

@@ -13,7 +13,7 @@ interface CalendarGridProps {
     desc: string;
   }>;
   weekLabels: Array<{ weekday: string; date: string }>;
-  role: 'student' | 'tutor';
+  role: 'student' | 'lecturer';
 }
 
 export function CalendarGrid({ items, weekLabels, role }: CalendarGridProps) {
@@ -200,4 +200,3 @@ function CalendarItem({ item }: CalendarItemProps) {
     </>
   );
 }
-

@@ -1,6 +1,6 @@
 export type SubmissionStatus = 'not-submitted' | 'submitted' | 'graded';
 
-export type SubmissionViewerRole = 'student' | 'tutor' | 'lecturer';
+export type SubmissionViewerRole = 'student' | 'lecturer';
 
 export type SubmissionStudent = {
   id: string;

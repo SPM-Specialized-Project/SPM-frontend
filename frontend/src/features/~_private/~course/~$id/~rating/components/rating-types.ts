@@ -18,7 +18,7 @@ export type StudentRatingRecord = {
 export type RatingUser = {
   isCoordinator?: boolean;
   isStudent?: boolean;
-  isTutor?: boolean;
+  isLecturer?: boolean;
   statisticalPermission?: boolean;
 };
 

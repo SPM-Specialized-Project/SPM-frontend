@@ -128,7 +128,7 @@ export function ScheduleDetailPopup({ onClose, position, title, desc, id, isMana
   // const userLocalStore = State.user ?? null;
   // const rawRole = localStorage.getItem('role');
   // const userLocalStore = {
-  //   isManager: rawRole === 'tutor'
+  //   isManager: rawRole === 'lecturer'
   // };
   const popupStyle = getPopupStyle();
   const isPositioned = !!position;

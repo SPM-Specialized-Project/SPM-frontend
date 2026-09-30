@@ -18,3 +18,5 @@ export const WORKSPACES_FILE = path.join(DATA_DIRECTORY, 'codepulse-workspaces.j
 export const CLASSROOMS_FILE = path.join(DATA_DIRECTORY, 'codepulse-classrooms.json');
 export const TERMS_FILE = path.join(DATA_DIRECTORY, 'codepulse-terms.json');
 export const ASSIGNMENTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-assignments.json');
+export const LABS_FILE = path.join(DATA_DIRECTORY, 'codepulse-labs.json');
+export const ASSIGNMENT_VERSIONS_FILE = path.join(DATA_DIRECTORY, 'codepulse-assignment-versions.json');

@@ -1,5 +1,5 @@
 import type { User } from '@/types';
-import type { UserRole } from '@/types/backend';
+import { normalizeUserRole, type UserRole } from '@/types/backend';
 import type { SubmissionViewerRole } from '@/types/submission';
 
 export const getCurrentViewerContext = (): {
@@ -10,29 +10,23 @@ export const getCurrentViewerContext = (): {
 
   const rawUserStore = window.localStorage.getItem('userStore');
   const rawRole = window.localStorage.getItem('role');
-  let user: Partial<User> | undefined;
+  let user: (Partial<User> & { isTutor?: boolean }) | undefined;
 
   try {
     user = rawUserStore
-      ? (JSON.parse(rawUserStore) as { state?: { user?: Partial<User> } }).state?.user
+      ? (JSON.parse(rawUserStore) as {
+          state?: { user?: Partial<User> & { isTutor?: boolean; role?: unknown } };
+        }).state?.user
       : undefined;
   } catch {
     user = undefined;
   }
 
-  const storedRole: UserRole | undefined =
-    rawRole === 'student' ||
-    rawRole === 'tutor' ||
-    rawRole === 'coordinator' ||
-    rawRole === 'chairman' ||
-    rawRole === 'lecturer' ||
-    rawRole === 'admin'
-      ? rawRole
-      : undefined;
-  const profileRole: UserRole | undefined = user?.role ?? (user?.isStudent
+  const storedRole: UserRole | undefined = normalizeUserRole(rawRole);
+  const profileRole: UserRole | undefined = normalizeUserRole(user?.role) ?? (user?.isStudent
     ? 'student'
-    : user?.isTutor
-      ? 'tutor'
+    : user?.isLecturer || user?.isTutor
+      ? 'lecturer'
       : user?.isChairman
         ? 'chairman'
         : user?.isCoordinator
@@ -52,9 +46,7 @@ export const getCurrentSubmissionViewerContext = (): {
 } => {
   const context = getCurrentViewerContext();
   return {
-    viewerRole: context.viewerRole === 'student' || context.viewerRole === 'lecturer'
-      ? context.viewerRole
-      : 'tutor',
+    viewerRole: context.viewerRole === 'student' ? 'student' : 'lecturer',
     studentEmail: context.viewerRole === 'student' ? context.viewerEmail : undefined,
   };
 };

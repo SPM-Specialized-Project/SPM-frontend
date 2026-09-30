@@ -73,6 +73,58 @@ export type CodePulseProblem = {
   rawRunnerTrace?: string;
 };
 
+export type CodePulseAssignmentVersion = {
+  id: string;
+  assignmentId: string;
+  classroomId: string;
+  version: number;
+  title: string;
+  status: 'PUBLISHED';
+  publishedAt: string;
+};
+
+export type CodePulseLabStatus = 'SCHEDULED' | 'LIVE' | 'ENDED' | 'CANCELLED';
+
+export type CodePulseLabAssignment = {
+  id: string;
+  assignmentId: string;
+  assignmentVersionId: string;
+  version: number;
+  title: string;
+  order: number;
+  mandatory: boolean;
+  practiceStartAt: string;
+  practiceEndAt: string;
+  workspaceId?: string;
+};
+
+export type CodePulseLab = {
+  id: string;
+  classroomId: string;
+  name: string;
+  description: string;
+  startAt: string;
+  endAt: string;
+  status: CodePulseLabStatus;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  assignments: CodePulseLabAssignment[];
+};
+
+export type CreateCodePulseLabInput = {
+  name: string;
+  description: string;
+  startAt: string;
+  endAt: string;
+  assignments: Array<{
+    assignmentVersionId: string;
+    mandatory: boolean;
+    practiceStartAt: string;
+    practiceEndAt: string;
+  }>;
+};
+
 export type CodePulseRunResult = {
   testCaseId: string;
   input: string;
@@ -116,6 +168,19 @@ export const codePulseApi = {
   getProblem: (classroomId: string, problemId: string) => request(() =>
     apiClient.get<{ item: CodePulseProblem }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/problems/${encodeURIComponent(problemId)}`)),
+  listPublishedAssignmentVersions: (classroomId: string) => request(() =>
+    apiClient.get<{ items: CodePulseAssignmentVersion[] }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignment-versions`)),
+  listLabs: (classroomId: string) => request(() =>
+    apiClient.get<{ items: CodePulseLab[] }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs`)),
+  createLab: (classroomId: string, item: CreateCodePulseLabInput) => request(() =>
+    apiClient.post<{ item: CodePulseLab }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs`, item)),
+  updateLabStatus: (classroomId: string, labId: string, status: CodePulseLabStatus) => request(() =>
+    apiClient.patch<{ item: CodePulseLab }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}`,
+      { status })),
   listAssignments: (classroomId: string, view?: 'student') => request(() =>
     apiClient.get<{ items: CodePulseAssignment[] }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments`,

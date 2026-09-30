@@ -182,7 +182,7 @@ function CourseDetailsComponent() {
   if (courseDetail) {
     const currentRole = userLocalStore?.role ?? getCurrentViewerContext().viewerRole;
     const canViewTerms = id === '13'
-      && ['admin', 'lecturer', 'tutor', 'student'].includes(currentRole);
+      && ['admin', 'lecturer', 'student'].includes(currentRole);
     const showManagerTabs = currentRole !== 'student';
 
     return (

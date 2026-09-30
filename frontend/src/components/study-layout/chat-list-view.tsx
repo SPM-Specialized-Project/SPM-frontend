@@ -13,7 +13,7 @@ type ChatListViewProps = {
   onCreateGroup: () => void;
   onSelectConversation: (conversation: Conversation) => void;
   onClose?: () => void;
-  isTutor: boolean;
+  isLecturer: boolean;
 };
 
 export function ChatListView({
@@ -23,7 +23,7 @@ export function ChatListView({
   onCreateGroup,
   onSelectConversation,
   onClose,
-  isTutor,
+  isLecturer,
 }: ChatListViewProps) {
   return (
         <div className="flex flex-1 flex-col overflow-y-auto">
@@ -40,8 +40,8 @@ export function ChatListView({
               <div className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">
                 <SearchIcon />
               </div>
-              {/* Create group button for tutors */}
-              {isTutor && (
+              {/* Create group button for lecturers */}
+              {isLecturer && (
                 <button
                   onClick={onCreateGroup}
                   className="rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-700"
