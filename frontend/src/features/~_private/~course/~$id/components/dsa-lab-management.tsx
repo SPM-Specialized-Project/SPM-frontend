@@ -589,24 +589,24 @@ function StudentProblemWorkspace({
             </h2>
           </div>
           {assignments.length > 1 && (
-            <label className="text-xs text-slate-500">
-              <span className="sr-only">Chọn bài tập</span>
-              <select
-                aria-label="Chọn bài tập"
-                value={selectedIndex}
-                onChange={(event) => {
-                  setSelectedIndex(Number(event.target.value));
-                  setMobileTab('problem');
-                }}
-                className="h-9 min-w-52 rounded border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
-              >
-                {assignments.map((item, index) => (
-                  <option key={item.id} value={index}>
-                    {problemNumber(index)} · {item.title}
-                  </option>
-                ))}
-              </select>
-            </label>
+            <div className="flex gap-2">
+              {assignments.map((item, index) => (
+                <button
+                  key={item.id}
+                  onClick={() => {
+                    setSelectedIndex(index);
+                    setMobileTab('problem');
+                  }}
+                  className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
+                    selectedIndex === index
+                      ? 'bg-teal-700 text-white shadow-sm'
+                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  {problemNumber(index)}
+                </button>
+              ))}
+            </div>
           )}
         </div>
 
@@ -657,7 +657,7 @@ function StudentProblemWorkspace({
           </p>
         )}
         {!loading && !error && assignment && (
-          <div className="mt-4 grid grid-cols-1 items-start gap-6">
+          <div className="mt-4 grid grid-cols-1 items-start gap-6 lg:grid-cols-[35%_65%]">
             <div
               className={mobileTab === 'problem' ? 'block' : 'hidden lg:block'}
             >
