@@ -600,7 +600,7 @@ function StudentProblemWorkspace({
                   className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
                     selectedIndex === index
                       ? 'bg-teal-700 text-white shadow-sm'
-                      : 'bg-white text-slate-700 hover:bg-slate-50 border border-slate-300'
+                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
                   }`}
                 >
                   {problemNumber(index)}
@@ -657,7 +657,7 @@ function StudentProblemWorkspace({
           </p>
         )}
         {!loading && !error && assignment && (
-          <div className="mt-4 grid grid-cols-1 lg:grid-cols-[35%_65%] items-start gap-6">
+          <div className="mt-4 grid grid-cols-1 items-start gap-6 lg:grid-cols-[35%_65%]">
             <div
               className={mobileTab === 'problem' ? 'block' : 'hidden lg:block'}
             >
