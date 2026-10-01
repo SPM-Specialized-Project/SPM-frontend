@@ -8,6 +8,8 @@ import {
   type CodePulseLabStatus,
 } from '@/services/codepulse-api';
 
+import { StudentLabWorkspace } from './student-lab-workspace';
+
 type LabSessionManagementProps = {
   classrooms: CodePulseClassroom[];
   role?: string;
@@ -491,6 +493,7 @@ export function LabSessionManagement({
           </form>
         )}
       </div>
+      {role === 'student' && <StudentLabWorkspace labs={labs} />}
     </div>
   );
 }
