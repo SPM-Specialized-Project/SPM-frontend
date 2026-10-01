@@ -26,6 +26,8 @@ export type CodePulseWorkspace = {
   assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
+  executionResult: CodePulseExecutionResult | null;
+  problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
 };
 
@@ -65,6 +67,35 @@ export type CodePulseAssignmentInput = Omit<
   'id' | 'classroomId' | 'status' | 'verificationStatus' | 'verifiedAt' | 'verifiedBy'
 > & { id?: string };
 
+export type CodePulseExecutionResult = {
+  id: string;
+  status: 'COMPLETED' | 'FAILED' | 'RUNTIME_ERROR';
+  stdout: string;
+  stderr: string;
+  exitCode: number;
+  runtimeMs: number;
+  executedAt: string;
+  passedCount?: number;
+  totalCount?: number;
+  results?: CodePulseRunResult[];
+};
+
+export type CodePulseWorkspaceHint = {
+  id: string;
+  title: string;
+  revealed: boolean;
+  content?: string;
+};
+
+export type CodePulseWorkspaceProblem = {
+  id: string;
+  title: string;
+  description: string;
+  version: number;
+  language: string;
+  hints: CodePulseWorkspaceHint[];
+};
+
 export type CodePulseProblem = {
   id: string;
   classroomId: string;
@@ -79,6 +110,8 @@ export type CodePulseAssignmentVersion = {
   classroomId: string;
   version: number;
   title: string;
+  description?: string;
+  language?: string;
   status: 'PUBLISHED';
   publishedAt: string;
 };
@@ -91,11 +124,14 @@ export type CodePulseLabAssignment = {
   assignmentVersionId: string;
   version: number;
   title: string;
+  description?: string;
+  language?: string;
   order: number;
   mandatory: boolean;
   practiceStartAt: string;
   practiceEndAt: string;
   workspaceId?: string;
+  hintCount?: number;
 };
 
 export type CodePulseLab = {
@@ -215,6 +251,12 @@ export const codePulseApi = {
   updateWorkspace: (id: string, sourceCode: string) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
+  executeWorkspace: (id: string, sourceCode: string) => request(() =>
+    apiClient.post<{ item: CodePulseWorkspace }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode })),
+  revealWorkspaceHint: (id: string, hintId: string) => request(() =>
+    apiClient.post<{ item: CodePulseWorkspace }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/hints/${encodeURIComponent(hintId)}`)),
   revokeMembership: (id: string) => request(() =>
     apiClient.patch<{ item: { id: string; status: 'revoked' } }>(
       `/codepulse/memberships/${encodeURIComponent(id)}`, { status: 'revoked' })),

@@ -76,9 +76,35 @@ const initialAssignments = [{
   rawRunnerTrace: 'internal runner trace',
 }];
 const initialAssignmentVersions = [
-  { id: 'problem-1-v1', assignmentId: 'problem-1', classroomId: 'class-1', version: 1, title: 'Singly Linked List', status: 'PUBLISHED', publishedAt: '2026-09-01T08:00:00.000Z' },
-  { id: 'problem-2-v2', assignmentId: 'problem-2', classroomId: 'class-1', version: 2, title: 'Doubly Linked List', status: 'PUBLISHED', publishedAt: '2026-09-02T08:00:00.000Z' },
-  { id: 'problem-3-v1', assignmentId: 'problem-3', classroomId: 'class-1', version: 1, title: 'Queue implementation', status: 'PUBLISHED', publishedAt: '2026-09-03T08:00:00.000Z' },
+  {
+    id: 'problem-1-v1', assignmentId: 'problem-1', classroomId: 'class-1', version: 1,
+    title: 'Singly Linked List', description: 'Implement the core operations of a singly linked list.',
+    language: 'PYTHON', starterCode: '# Implement the singly linked list here\n',
+    hints: [
+      { id: 'problem-1-v1-hint-1', title: 'Head pointer', content: 'Keep the first node in a dedicated head reference.' },
+      { id: 'problem-1-v1-hint-2', title: 'Traversal', content: 'Move through the list by following each node next reference.' },
+    ],
+    status: 'PUBLISHED', publishedAt: '2026-09-01T08:00:00.000Z',
+  },
+  {
+    id: 'problem-2-v2', assignmentId: 'problem-2', classroomId: 'class-1', version: 2,
+    title: 'Doubly Linked List', description: 'Implement insertion and deletion for a doubly linked list.',
+    language: 'PYTHON', starterCode: '# Implement the doubly linked list here\n',
+    hints: [
+      { id: 'problem-2-v2-hint-1', title: 'Two directions', content: 'Update both next and previous references when linking nodes.' },
+      { id: 'problem-2-v2-hint-2', title: 'Boundary nodes', content: 'Handle head and tail updates as separate edge cases.' },
+    ],
+    status: 'PUBLISHED', publishedAt: '2026-09-02T08:00:00.000Z',
+  },
+  {
+    id: 'problem-3-v1', assignmentId: 'problem-3', classroomId: 'class-1', version: 1,
+    title: 'Queue implementation', description: 'Build a FIFO queue with enqueue and dequeue operations.',
+    language: 'PYTHON', starterCode: '# Implement the queue here\n',
+    hints: [
+      { id: 'problem-3-v1-hint-1', title: 'FIFO', content: 'Insert at the rear and remove from the front.' },
+    ],
+    status: 'PUBLISHED', publishedAt: '2026-09-03T08:00:00.000Z',
+  },
   { id: 'problem-draft-v1', assignmentId: 'problem-draft', classroomId: 'class-1', version: 1, title: 'Unpublished draft', status: 'DRAFT', publishedAt: null },
 ];
 const initialLabs = [];
@@ -526,18 +552,64 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
   const labView = (lab) => ({
     ...lab,
-    assignments: lab.assignments.map((assignment) => ({
-      ...assignment,
-      ...(user.role === 'student'
-        ? {
-          workspaceId: `workspace-${lab.id}-${assignment.id}-${memberships.find((member) =>
-            belongsToClassroom(member, lab.classroomId) &&
-            normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email) &&
-            isActiveMembership(member))?.id}`,
-        }
-        : {}),
-    })),
+    assignments: lab.assignments.map((assignment) => {
+      if (user.role !== 'student') return assignment;
+      const { hints = [], starterCode, ...safeAssignment } = assignment;
+      const membership = memberships.find((member) =>
+        belongsToClassroom(member, lab.classroomId) &&
+        normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email) &&
+        isActiveMembership(member));
+      return {
+        ...safeAssignment,
+        hintCount: hints.length,
+        workspaceId: `workspace-${lab.id}-${assignment.id}-${membership?.id}`,
+      };
+    }),
   });
+  const workspaceContext = (workspace) => {
+    const classroomItem = classroom(workspace.classroomId);
+    const lab = workspace.labId
+      ? labs.find((candidate) => candidate.id === workspace.labId && candidate.classroomId === classroomItem.id) ?? notFound()
+      : null;
+    const labAssignment = lab
+      ? lab.assignments.find((candidate) => candidate.id === workspace.labAssignmentId) ?? notFound()
+      : null;
+    return { classroomItem, lab, labAssignment };
+  };
+  const assertWorkspaceWritable = (workspace, context) => {
+    if (context.classroomItem.status === 'ARCHIVED') {
+      throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
+    }
+    if (!context.lab) return;
+    if (context.lab.status !== 'LIVE') {
+      throw apiError(409, 'LAB_NOT_LIVE', 'Workspace changes are only allowed while the LAB is Live.');
+    }
+    const now = Date.now();
+    if (now < Date.parse(context.labAssignment.practiceStartAt) || now > Date.parse(context.labAssignment.practiceEndAt)) {
+      throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'This problem is outside its practice window.');
+    }
+  };
+  const workspaceView = (workspace, context) => {
+    if (!context.labAssignment) return workspace;
+    const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
+    return {
+      ...workspace,
+      executionResult: workspace.executionResult ?? null,
+      problem: {
+        id: context.labAssignment.id,
+        title: context.labAssignment.title,
+        description: context.labAssignment.description ?? '',
+        version: context.labAssignment.version,
+        language: context.labAssignment.language ?? 'PYTHON',
+        hints: (context.labAssignment.hints ?? []).map((hint) => ({
+          id: hint.id,
+          title: hint.title,
+          revealed: revealedHintIds.has(hint.id),
+          ...(revealedHintIds.has(hint.id) ? { content: hint.content } : {}),
+        })),
+      },
+    };
+  };
   const publishedAssignmentVersions = (classroomId) => {
     const storedVersions = assignmentVersions.filter((item) =>
       item.classroomId === classroomId && item.status === 'PUBLISHED');
@@ -546,11 +618,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       .filter((item) => item.classroomId === classroomId && item.status === 'PUBLISHED')
       .filter((item) => !storedAssignmentIds.has(item.id))
       .map((item) => ({
-        id: `${item.id}-v1`,
+        id: `${item.id}-v${Number(item.version) || 1}`,
         assignmentId: item.id,
         classroomId: item.classroomId,
         version: Number(item.version) || 1,
         title: item.title,
+        description: item.description ?? '',
+        language: item.runtime ?? 'PYTHON',
+        starterCode: '',
+        hints: structuredClone(item.hints ?? []),
         status: 'PUBLISHED',
         publishedAt: item.publishedAt ?? item.updatedAt ?? new Date().toISOString(),
       }));
@@ -684,7 +760,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'assignment-versions' && request.method === 'GET') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
-    sendJson(response, 200, { items: publishedAssignmentVersions(classroomItem.id) });
+    const items = publishedAssignmentVersions(classroomItem.id).map((version) => {
+      if (user.role !== 'student') return version;
+      const { hints = [], starterCode, ...safeVersion } = version;
+      return { ...safeVersion, hintCount: hints.length };
+    });
+    sendJson(response, 200, { items });
     return;
   }
 
@@ -726,6 +807,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
           assignmentVersionId: version.id,
           version: version.version,
           title: version.title,
+          description: version.description ?? '',
+          language: version.language ?? 'PYTHON',
+          starterCode: version.starterCode ?? '',
+          hints: structuredClone(version.hints ?? []),
           order: index + 1,
           mandatory: Boolean(selection.mandatory),
           practiceStartAt: new Date(selection.practiceStartAt).toISOString(),
@@ -749,7 +834,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
             assignmentId: assignment.assignmentId,
             assignmentVersionId: assignment.assignmentVersionId,
             ownerEmail,
-            sourceCode: '',
+            sourceCode: assignment.starterCode,
+            executionResult: null,
+            hintProgress: [],
             updatedAt: now,
           });
         }
@@ -1017,11 +1104,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
-  if (parts[2] === 'workspaces' && parts[3] && (request.method === 'GET' || request.method === 'PATCH')) {
+  if (parts[2] === 'workspaces' && parts[3] && !parts[4] && (request.method === 'GET' || request.method === 'PATCH')) {
     if (user.role === 'admin') deny();
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
     const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
     const item = classroom(workspace.classroomId);
+    const context = workspaceContext(workspace);
     if (workspace.termId !== item.termId) deny();
     const isOwner = user.role === 'student' && workspace.ownerEmail === user.email && isMember(item.id);
     const lecturerCanRead = isDsaManager(item) && memberships.some((member) =>
@@ -1030,10 +1118,11 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       isActiveMembership(member));
     if (request.method === 'GET') {
       if (!isOwner && !lecturerCanRead) deny();
-      sendJson(response, 200, { item: workspace });
+      sendJson(response, 200, { item: workspaceView(workspace, context) });
       return;
     }
     if (!isOwner) deny();
+    assertWorkspaceWritable(workspace, context);
     if (item.status === 'ARCHIVED') throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom đã được lưu trữ và chỉ đọc.');
     const body = await readRequestBody(request);
     if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode phải là chuỗi.');
@@ -1043,7 +1132,89 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       current.updatedAt = new Date().toISOString();
       return current;
     });
-    sendJson(response, 200, { item: updated });
+    sendJson(response, 200, { item: workspaceView(updated, context) });
+    return;
+  }
+
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'execute' && request.method === 'POST') {
+    if (user.role !== 'student') deny();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const context = workspaceContext(workspace);
+    if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
+    assertWorkspaceWritable(workspace, context);
+    const body = await readRequestBody(request);
+    const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
+    if (!sourceCode.trim()) throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
+    const startedAt = Date.now();
+    const linkedAssignment = assignments.find((assignment) =>
+      assignment.id === workspace.assignmentId &&
+      assignment.classroomId === workspace.classroomId &&
+      assignment.status === 'PUBLISHED');
+    let executionResult;
+    if (linkedAssignment && ALLOWED_RUNTIMES.has(linkedAssignment.runtime)) {
+      const visibleTestCases = linkedAssignment.testCases.filter((testCase) => !testCase.hidden);
+      const results = await runAssignmentTestCases({
+        assignment: linkedAssignment,
+        sourceCode,
+        testCases: visibleTestCases,
+      });
+      const passedCount = results.filter((result) => result.passed).length;
+      const runtimeFailure = results.find((result) =>
+        ['RUNTIME_ERROR', 'COMPILE_ERROR', 'TIMEOUT', 'OUTPUT_LIMIT'].includes(result.status));
+      executionResult = {
+        id: `execution-${Date.now()}`,
+        status: runtimeFailure ? 'RUNTIME_ERROR' : passedCount === results.length ? 'COMPLETED' : 'FAILED',
+        stdout: results.map((result) => result.actualOutput).filter(Boolean).join('\n'),
+        stderr: results.map((result) => result.stderr).filter(Boolean).join('\n'),
+        exitCode: passedCount === results.length ? 0 : 1,
+        runtimeMs: results.reduce((total, result) => total + (result.durationMs ?? 0), 0),
+        executedAt: new Date().toISOString(),
+        passedCount,
+        totalCount: results.length,
+        results,
+      };
+    } else {
+      const hasRuntimeError = /\b(raise|throw)\b|syntax_error/i.test(sourceCode);
+      executionResult = {
+        id: `execution-${Date.now()}`,
+        status: hasRuntimeError ? 'RUNTIME_ERROR' : 'COMPLETED',
+        stdout: hasRuntimeError ? '' : `Execution completed for ${context.labAssignment?.title ?? 'problem'}.`,
+        stderr: hasRuntimeError ? 'The submitted source triggered a runtime error.' : '',
+        exitCode: hasRuntimeError ? 1 : 0,
+        runtimeMs: Math.max(1, Date.now() - startedAt),
+        executedAt: new Date().toISOString(),
+      };
+    }
+    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
+      const current = records.find((record) => record.id === workspace.id) ?? notFound();
+      current.sourceCode = sourceCode;
+      current.executionResult = executionResult;
+      current.updatedAt = executionResult.executedAt;
+      return current;
+    });
+    sendJson(response, 200, { item: workspaceView(updated, context) });
+    return;
+  }
+
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'hints' && parts[5] && request.method === 'POST') {
+    if (user.role !== 'student') deny();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const context = workspaceContext(workspace);
+    if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
+    assertWorkspaceWritable(workspace, context);
+    const hint = context.labAssignment?.hints?.find((candidate) => candidate.id === parts[5]) ?? notFound();
+    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
+      const current = records.find((record) => record.id === workspace.id) ?? notFound();
+      current.hintProgress ??= [];
+      if (!current.hintProgress.some((item) => item.hintId === hint.id)) {
+        current.hintProgress.push({ hintId: hint.id, revealedAt: new Date().toISOString() });
+        current.updatedAt = new Date().toISOString();
+      }
+      return current;
+    });
+    sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }
 
