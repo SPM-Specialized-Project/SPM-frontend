@@ -61,9 +61,53 @@ test('roster keeps history and uses authenticated identity', async (t) => {
   const initial = await request(`${roster}?viewerRole=student`, tutor);
   assert.equal(initial.status, 200);
   assert.equal(initial.data.items.length, 3);
+  const course13Roster = await request(`${url}/api/classrooms/13/memberships`, student);
+  assert.equal(course13Roster.status, 200);
+  assert.equal(course13Roster.data.items.length, 6);
+  assert.deepEqual(
+    course13Roster.data.items.map((item) => item.studentEmail),
+    [
+      'student@gmail.com',
+      'nguyenvana@student.hcmut.edu.vn',
+      'tranthib@student.hcmut.edu.vn',
+      'leminhc@student.hcmut.edu.vn',
+      'phamvand@student.hcmut.edu.vn',
+      'hoangthie@student.hcmut.edu.vn',
+    ],
+  );
+  assert.equal(
+    course13Roster.data.items.find((item) => item.studentEmail === 'student@gmail.com').permissions.canView,
+    true,
+  );
+  assert.equal(
+    course13Roster.data.items.find((item) => item.studentEmail === 'nguyenvana@student.hcmut.edu.vn').permissions.canView,
+    false,
+  );
+  const course13MembershipId = course13Roster.data.items[0].id;
+  const course13Revoked = await request(
+    `${url}/api/classrooms/13/memberships/${course13MembershipId}`,
+    tutor,
+    'PATCH',
+    { status: 'REVOKED' },
+  );
+  assert.equal(course13Revoked.status, 200);
+  assert.equal(course13Revoked.data.item.status, 'REVOKED');
+  const course13Reactivated = await request(`${url}/api/classrooms/13/memberships`, tutor, 'POST', {
+    studentEmail: course13Revoked.data.item.studentEmail,
+  });
+  assert.equal(course13Reactivated.status, 200);
+  assert.equal(course13Reactivated.data.reactivated, true);
+  assert.equal(course13Reactivated.data.item.id, course13MembershipId);
   const own = await request(`${roster}?viewerRole=tutor&viewerEmail=tutor@gmail.com`, student);
   assert.equal(own.status, 200);
-  assert.deepEqual(own.data.items.map((item) => item.studentEmail), ['student@gmail.com']);
+  assert.deepEqual(
+    own.data.items.map((item) => item.studentEmail),
+    [
+      'student@gmail.com',
+      'nguyenvana@student.hcmut.edu.vn',
+      'tranthib@student.hcmut.edu.vn',
+    ],
+  );
   assert.equal(own.data.permissions.canEdit, false);
   assert.equal((await request(roster, student, 'POST', {
     viewerRole: 'tutor', viewerEmail: 'tutor@gmail.com', studentEmail: 'student2@gmail.com',

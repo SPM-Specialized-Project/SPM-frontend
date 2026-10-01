@@ -1,0 +1,10 @@
+# Stable named tunnel for the Gitea canonical URL.
+# Keep the credentials JSON outside Git and replace both placeholders.
+tunnel: REPLACE_WITH_GITEA_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_GITEA_TUNNEL_UUID.json
+
+ingress:
+  # Nginx serves the shared /git/ path and forwards it to Gitea on :8211.
+  - hostname: git.example.com
+    service: http://127.0.0.1:80
+  - service: http_status:404

@@ -1,4 +1,5 @@
 import type { Dispatch, SetStateAction } from 'react';
+import { useState } from 'react';
 
 import type { Course } from '@/components/data/~mock-courses';
 
@@ -13,8 +14,6 @@ type TutorRatingViewProps = {
   onConfirm: () => void;
 };
 
-const studentFeedbackCount = 7;
-
 export function TutorRatingView({
   course,
   id,
@@ -22,19 +21,34 @@ export function TutorRatingView({
   setComment,
   onConfirm,
 }: TutorRatingViewProps) {
+  const [studentComments, setStudentComments] = useState<Record<string, string>>({});
+
+  const updateStudentComment = (studentEmail: string, value: SetStateAction<string>) => {
+    setStudentComments((current) => ({
+      ...current,
+      [studentEmail]: typeof value === 'function'
+        ? value(current[studentEmail] ?? '')
+        : value,
+    }));
+  };
+
   return (
     <div className="w-full font-['Archivo']">
-      <RatingCourseHeader course={course} id={id} backLink={false} />
-      {Array.from({ length: studentFeedbackCount }, (_, index) => (
+      <RatingCourseHeader course={course} id={id} />
+      {course.students.length > 0 ? course.students.map((student) => (
         <FeedbackField
-          key={`student-feedback-${index}`}
-          label="Bạn có nhận xét thế nào về sinh viên A"
-          placeholder="Nhận xét"
-          comment={comment}
-          setComment={setComment}
+          key={student.email}
+          label={`Bạn có nhận xét thế nào về ${student.name}`}
+          placeholder={`Nhận xét dành cho ${student.name}`}
+          comment={studentComments[student.email] ?? ''}
+          setComment={(value) => updateStudentComment(student.email, value)}
           className="mt-6"
         />
-      ))}
+      )) : (
+        <div className="mt-6 rounded-lg border border-dashed border-gray-300 bg-white p-6 text-center text-gray-500">
+          Chưa có sinh viên ACTIVE trong khóa học này để đánh giá.
+        </div>
+      )}
       <FeedbackField
         label="Bạn có nhận xét thế nào về môn học"
         placeholder="Nhận xét"

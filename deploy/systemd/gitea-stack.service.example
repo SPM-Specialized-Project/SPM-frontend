@@ -1,0 +1,17 @@
+[Unit]
+Description=Gitea Docker Compose stack
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=__GITEA_COMPOSE_ROOT__
+ExecStart=__DOCKER_PATH__ compose -f __GITEA_COMPOSE_ROOT__/compose.yml up -d
+ExecStop=__DOCKER_PATH__ compose -f __GITEA_COMPOSE_ROOT__/compose.yml stop
+RemainAfterExit=yes
+TimeoutStartSec=0
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target

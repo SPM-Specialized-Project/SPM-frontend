@@ -9,7 +9,7 @@ export type SessionMember = { id: number; name: string; present: boolean };
 
 export type Session = {
   id: string;
-  ownerRole?: 'student' | 'tutor' | 'coordinator' | 'chairman';
+  ownerRole?: 'student' | 'lecturer' | 'coordinator' | 'chairman';
   ownerEmail?: string;
   instructorEmail?: string;
   courseId: string;
@@ -256,7 +256,7 @@ export const sessionStore = createRemoteDataStore(mockSessions, {
   list: async () => (await api.getSessions(getCurrentViewerContext())).data.items,
   create: async (record) => (await api.createSession({
     ...getCurrentViewerContext(),
-    item: { ...record, ownerRole: 'tutor', ownerEmail: record.instructorEmail },
+    item: { ...record, ownerRole: 'lecturer', ownerEmail: record.instructorEmail },
   })).data.item,
   update: async (id, patch) => (await api.updateSession({
     ...getCurrentViewerContext(),

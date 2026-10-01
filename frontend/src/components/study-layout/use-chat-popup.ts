@@ -32,7 +32,7 @@ export function useChatPopupState() {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editedGroupName, setEditedGroupName] = useState('');
 
-  const isTutor = true;
+  const isLecturer = true;
 
   useEffect(() => {
     const names = getAllNames();
@@ -235,7 +235,7 @@ export function useChatPopupState() {
     groupName,
     inputValue,
     isEditingName,
-    isTutor,
+    isLecturer,
     editedGroupName,
     messages,
     searchTerm,

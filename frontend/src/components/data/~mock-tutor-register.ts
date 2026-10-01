@@ -85,7 +85,7 @@ export const tutorRegistrationStore = createRemoteDataStore(
     create: async (record) => (await api.createRegistration({
       ...getCurrentViewerContext(),
       registrationType: 'tutor',
-      item: { ...record, ownerRole: 'tutor', ownerEmail: record.Email },
+      item: { ...record, ownerRole: 'lecturer', ownerEmail: record.Email },
     })).data.item,
     update: async (id, patch) => (await api.updateRegistration({
       ...getCurrentViewerContext(),

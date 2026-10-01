@@ -23,7 +23,7 @@ export function CourseContentPanel({
   renderSectionContent,
 }: CourseContentPanelProps) {
   return (
-    <div className="flex-1">
+    <div className="min-w-0 flex-1">
       {changing && (
         <div className="mb-4 mt-10 flex items-center justify-center rounded-lg border-2 border-dashed border-[#3D4863] bg-white p-6">
           <button
@@ -38,7 +38,7 @@ export function CourseContentPanel({
 
       <div
         ref={contentContainerRef}
-        className="mt-10 max-h-[calc(100vh-220px)] overflow-auto rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
+        className="mt-10 max-h-[calc(100vh-220px)] w-full min-w-0 overflow-auto rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
       >
         {courseDetail.content.map((item, index) => {
           const sectionKey = item.type + '-' + index;
@@ -48,7 +48,7 @@ export function CourseContentPanel({
               ref={(element) => {
                 sectionRefs.current[sectionKey] = element;
               }}
-              className="mb-12 rounded-lg border border-gray-200 p-4"
+              className="mb-12 w-full min-w-0 rounded-lg border border-gray-200 p-4"
               style={{ boxShadow: '4px 4px 0 0 rgba(249,186,8,1)' }}
             >
               {renderSectionContent(item, index)}

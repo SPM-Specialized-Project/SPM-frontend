@@ -48,5 +48,6 @@ systemctl reload-or-restart nginx
 
 curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1/api/health >/dev/null
 curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1/ >/dev/null
+curl --fail --silent --show-error --retry 10 --retry-delay 1 http://127.0.0.1/git/ >/dev/null
 
 echo "SPM deployed: $release_id"

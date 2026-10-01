@@ -78,5 +78,101 @@
     "feedback": "",
     "submittedAt": "2025-01-10T09:30:00.000Z",
     "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "13-13-submission-1",
+    "courseId": "13",
+    "assignmentId": "13-submission",
+    "student": {
+      "id": "13-student-1",
+      "memberId": 1,
+      "name": "Student User",
+      "email": "student@gmail.com"
+    },
+    "status": "graded",
+    "score": 8.5,
+    "feedback": "Bài làm đạt yêu cầu trong Node.js backend.",
+    "submittedAt": "2025-01-10T09:00:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "13-13-submission-2",
+    "courseId": "13",
+    "assignmentId": "13-submission",
+    "student": {
+      "id": "13-student-2",
+      "memberId": 2,
+      "name": "Nguyễn Văn A",
+      "email": "nguyenvana@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:15:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "13-13-submission-3",
+    "courseId": "13",
+    "assignmentId": "13-submission",
+    "student": {
+      "id": "13-student-3",
+      "memberId": 3,
+      "name": "Trần Thị B",
+      "email": "tranthib@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:30:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "1-1-submission-1",
+    "courseId": "1",
+    "assignmentId": "1-submission",
+    "student": {
+      "id": "1-student-1",
+      "memberId": 1,
+      "name": "Nguyễn Văn A",
+      "email": "nguyenvana@student.hcmut.edu.vn"
+    },
+    "status": "graded",
+    "score": 8.5,
+    "feedback": "Bài làm đạt yêu cầu trong Node.js backend.",
+    "submittedAt": "2025-01-10T09:00:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "1-1-submission-2",
+    "courseId": "1",
+    "assignmentId": "1-submission",
+    "student": {
+      "id": "1-student-2",
+      "memberId": 2,
+      "name": "Trần Thị B",
+      "email": "tranthib@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:15:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
+  },
+  {
+    "id": "1-1-submission-3",
+    "courseId": "1",
+    "assignmentId": "1-submission",
+    "student": {
+      "id": "1-student-3",
+      "memberId": 3,
+      "name": "Lê Minh C",
+      "email": "leminhc@student.hcmut.edu.vn"
+    },
+    "status": "submitted",
+    "score": null,
+    "feedback": "",
+    "submittedAt": "2025-01-10T09:30:00.000Z",
+    "fileUrl": "/group07_report 02.pdf"
   }
 ]

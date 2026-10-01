@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import type { Course } from '@/components/data/~mock-courses';
 
 import { RatingCourseHeader } from './rating-course-header';
+import { getStudentRatingId } from './rating-data';
 import { StarRating } from './star-rating';
 
 
@@ -10,20 +11,34 @@ type CoordinatorRatingViewProps = {
   course: Course;
   id: string;
   onViewRating: (id: string) => void;
+  showHeader?: boolean;
+  students?: Course['students'];
 };
 
 export function CoordinatorRatingView({
   course,
   id,
   onViewRating,
+  showHeader = true,
+  students = course.students,
 }: CoordinatorRatingViewProps) {
   const [searchName, setSearchName] = useState('');
   const [searchEmail, setSearchEmail] = useState('');
   const [filterStatus, setFilterStatus] = useState('Cũ nhất');
+  const visibleStudents = useMemo(() => {
+    const nameQuery = searchName.trim().toLowerCase();
+    const emailQuery = searchEmail.trim().toLowerCase();
+    const filtered = students.filter((student) =>
+      student.name.toLowerCase().includes(nameQuery)
+      && student.email.toLowerCase().includes(emailQuery),
+    );
+
+    return filterStatus === 'Mới nhất' ? [...filtered].reverse() : filtered;
+  }, [filterStatus, searchEmail, searchName, students]);
 
   return (
     <div className="w-full font-['Archivo']">
-      <RatingCourseHeader course={course} id={id} />
+      {showHeader ? <RatingCourseHeader course={course} id={id} /> : null}
       <div className="mt-8 flex items-center gap-4">
         <SearchField
           value={searchName}
@@ -47,41 +62,53 @@ export function CoordinatorRatingView({
       </div>
 
       <div className="mt-6 space-y-4">
-        {[1, 2, 3].map((index) => (
-          <div
-            key={index}
-            className="relative rounded-lg border-2 border-gray-400 bg-white p-6 shadow-custom-yellow"
-          >
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-4">
-                <div className="flex size-12 items-center justify-center rounded-full bg-gray-300">
-                  <UserIcon />
-                </div>
-                <div>
-                  <h3 className="font-semibold text-gray-900">Nguyễn Trần Văn AAA</h3>
-                  <p className="text-sm text-gray-500">nguyentranvanaaa123456789@gmail.com</p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2 text-gray-600">
-                <ClockIcon />
-                <span className="text-sm">19:00 {10 + index}/10/2024</span>
-              </div>
-            </div>
-            <div className="absolute bottom-10 right-3">
-              <StarRating rating={4} onRate={() => undefined} />
-            </div>
-            <p className="text-[12px] italic">
-              In MiniGo, an identifier is the name used to identify variables,
-              constants, types, functions...
-            </p>
-            <button
-              onClick={() => onViewRating(`/course/${id}/rating/1/${index}`)}
-              className="mt-2 rounded-lg bg-blue-600 px-6 py-2 font-medium text-white transition hover:bg-blue-700"
-            >
-              Xem đánh giá
-            </button>
+        {visibleStudents.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-gray-300 bg-white p-8 text-center text-gray-500">
+            Chưa có dữ liệu đánh giá sinh viên cho khóa học này.
           </div>
-        ))}
+        ) : visibleStudents.map((student, index) => {
+          const rating = student.averageScore == null
+            ? 0
+            : Math.min(5, Math.max(0, Math.round(student.averageScore / 2)));
+          const ratingId = getStudentRatingId(id, student);
+
+          return (
+            <div
+              key={student.email}
+              className="relative rounded-lg border-2 border-gray-400 bg-white p-6 shadow-custom-yellow"
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 items-center justify-center rounded-full bg-gray-300">
+                    <UserIcon />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-gray-900">{student.name}</h3>
+                    <p className="text-sm text-gray-500">{student.email}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2 text-gray-600">
+                  <ClockIcon />
+                  <span className="text-sm">Dữ liệu hiện tại</span>
+                </div>
+              </div>
+              <div className="absolute bottom-10 right-3">
+                <StarRating rating={rating} onRate={() => undefined} />
+              </div>
+              <p className="text-[12px] italic">
+                Điểm trung bình hiện tại: {student.averageScore ?? 0}/100.
+              </p>
+              <button
+                onClick={() => onViewRating(
+                  `/course/${encodeURIComponent(id)}/rating/${encodeURIComponent(ratingId)}/${index + 1}`,
+                )}
+                className="mt-2 rounded-lg bg-blue-600 px-6 py-2 font-medium text-white transition hover:bg-blue-700"
+              >
+                Xem đánh giá
+              </button>
+            </div>
+          );
+        })}
       </div>
     </div>
   );

@@ -4,10 +4,21 @@ export interface RatingItem {
   rating: number;
 }
 
+export type StudentRatingRecord = {
+  id: string;
+  courseId: string;
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  submittedAt: string;
+  comment: string;
+  items: RatingItem[];
+};
+
 export type RatingUser = {
   isCoordinator?: boolean;
   isStudent?: boolean;
-  isTutor?: boolean;
+  isLecturer?: boolean;
   statisticalPermission?: boolean;
 };
 
