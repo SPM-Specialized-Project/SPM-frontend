@@ -11,6 +11,9 @@ import {
   ASSIGNMENTS_FILE,
   LABS_FILE,
   ASSIGNMENT_VERSIONS_FILE,
+  CODEPULSE_SUBMISSIONS_FILE,
+  CODEPULSE_ACTIVITIES_FILE,
+  PRACTICE_WINDOW_AUDIT_FILE,
   WORKSPACES_FILE,
 } from './config.mjs';
 import {
@@ -32,6 +35,9 @@ const workspaceFile = WORKSPACES_FILE;
 const assignmentFile = ASSIGNMENTS_FILE;
 const labFile = LABS_FILE;
 const assignmentVersionFile = ASSIGNMENT_VERSIONS_FILE;
+const submissionFile = CODEPULSE_SUBMISSIONS_FILE;
+const activityFile = CODEPULSE_ACTIVITIES_FILE;
+const practiceWindowAuditFile = PRACTICE_WINDOW_AUDIT_FILE;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -108,6 +114,9 @@ const initialAssignmentVersions = [
   { id: 'problem-draft-v1', assignmentId: 'problem-draft', classroomId: 'class-1', version: 1, title: 'Unpublished draft', status: 'DRAFT', publishedAt: null },
 ];
 const initialLabs = [];
+const initialCodePulseSubmissions = [];
+const initialCodePulseActivities = [];
+const initialPracticeWindowAudit = [];
 const initialWorkspaces = [
   { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")' },
   { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")' },
@@ -442,10 +451,11 @@ export async function getCodePulseSubmissionContext(courseId, assignmentId) {
   };
 }
 
-const LAB_STATUSES = new Set(['SCHEDULED', 'LIVE', 'ENDED', 'CANCELLED']);
+const LAB_STATUSES = new Set(['SCHEDULED', 'LIVE', 'PAUSED', 'ENDED', 'CANCELLED']);
 const LAB_TRANSITIONS = {
   SCHEDULED: new Set(['LIVE', 'CANCELLED']),
-  LIVE: new Set(['ENDED', 'CANCELLED']),
+  LIVE: new Set(['PAUSED', 'ENDED', 'CANCELLED']),
+  PAUSED: new Set(['LIVE', 'ENDED']),
   ENDED: new Set(),
   CANCELLED: new Set(),
 };
@@ -455,15 +465,47 @@ function parseDate(value) {
   return Number.isFinite(timestamp) ? timestamp : null;
 }
 
-function validateLabInput(body, publishedVersions, apiError) {
+const practiceWindowStatus = (assignment) => assignment.practiceWindowStatus ?? 'OPEN';
+
+const practiceWindowValues = (assignment) => ({
+  openAt: assignment.openAt
+    ?? assignment.open_at
+    ?? assignment.practiceStartAt
+    ?? assignment.practice_start_at,
+  closeAt: assignment.closeAt
+    ?? assignment.close_at
+    ?? assignment.practiceEndAt
+    ?? assignment.practice_end_at,
+});
+
+const isPracticeWindowOpen = (assignment, at = Date.now()) => {
+  const { openAt, closeAt } = practiceWindowValues(assignment);
+  const openTimestamp = parseDate(openAt);
+  const closeTimestamp = parseDate(closeAt);
+  return practiceWindowStatus(assignment) === 'OPEN'
+    && openTimestamp !== null
+    && closeTimestamp !== null
+    && openTimestamp <= at
+    && at < closeTimestamp;
+};
+
+function validateLabInput(body, publishedVersions, selectedTerm, apiError) {
   const errors = {};
   const startAt = parseDate(body.startAt);
   const endAt = parseDate(body.endAt);
+  const termStart = parseDate(selectedTerm.startDate);
+  const termEnd = parseDate(selectedTerm.endDate);
   if (!body.name?.trim()) errors.name = 'LAB name is required.';
   if (startAt === null) errors.startAt = 'A valid LAB start time is required.';
   if (endAt === null) errors.endAt = 'A valid LAB end time is required.';
   if (startAt !== null && endAt !== null && endAt <= startAt) {
     errors.endAt = 'LAB end time must be after its start time.';
+  }
+  if (termStart !== null && startAt !== null && startAt < termStart) {
+    errors.startAt = 'LAB must start within the academic term.';
+  }
+  if (termEnd !== null && endAt !== null && endAt > termEnd) {
+    errors.endAt = 'LAB must end within the academic term.';
   }
   if (!Array.isArray(body.assignments) || body.assignments.length === 0) {
     errors.assignments = 'Select at least one published problem.';
@@ -474,17 +516,18 @@ function validateLabInput(body, publishedVersions, apiError) {
       if (!version) errors[`assignments.${index}.assignmentVersionId`] = 'Only published problem versions can be assigned.';
       if (selectedVersions.has(item.assignmentVersionId)) errors[`assignments.${index}.assignmentVersionId`] = 'A problem version can only be assigned once.';
       selectedVersions.add(item.assignmentVersionId);
-      const practiceStartAt = parseDate(item.practiceStartAt);
-      const practiceEndAt = parseDate(item.practiceEndAt);
-      if (practiceStartAt === null) errors[`assignments.${index}.practiceStartAt`] = 'A valid practice start time is required.';
-      if (practiceEndAt === null || (practiceStartAt !== null && practiceEndAt <= practiceStartAt)) {
-        errors[`assignments.${index}.practiceEndAt`] = 'Practice end time must be after its start time.';
+      const { openAt, closeAt } = practiceWindowValues(item);
+      const practiceOpenAt = parseDate(openAt);
+      const practiceCloseAt = parseDate(closeAt);
+      if (practiceOpenAt === null) errors[`assignments.${index}.openAt`] = 'A valid practice opening time is required.';
+      if (practiceCloseAt === null || (practiceOpenAt !== null && practiceCloseAt <= practiceOpenAt)) {
+        errors[`assignments.${index}.closeAt`] = 'Practice close time must be after its opening time.';
       }
-      if (startAt !== null && practiceStartAt !== null && practiceStartAt < startAt) {
-        errors[`assignments.${index}.practiceStartAt`] = 'Practice must start within the LAB schedule.';
+      if (termStart !== null && practiceOpenAt !== null && practiceOpenAt < termStart) {
+        errors[`assignments.${index}.openAt`] = 'Practice must open within the academic term.';
       }
-      if (endAt !== null && practiceEndAt !== null && practiceEndAt > endAt) {
-        errors[`assignments.${index}.practiceEndAt`] = 'Practice must end within the LAB schedule.';
+      if (termEnd !== null && practiceCloseAt !== null && practiceCloseAt > termEnd) {
+        errors[`assignments.${index}.closeAt`] = 'Practice must close within the academic term.';
       }
     });
   }
@@ -548,21 +591,125 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     || (user.role === 'student' && isStudentVisibleClassroom(item));
   const canManageClass = (item) => user.role === 'admin' || isDsaManager(item);
   const canManageAssignment = (item) => isDsaManager(item);
-  const activeTerm = (item) => new Date(item.endDate).getTime() > Date.now();
+  const activeTerm = (item) => Boolean(item && new Date(item.endDate).getTime() > Date.now());
+  const isAcademicTermActive = (item) => Boolean(
+    item
+      && item.status === 'ACTIVE'
+      && new Date(item.startDate).getTime() <= Date.now()
+      && new Date(item.endDate).getTime() > Date.now(),
+  );
   const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
+const normalizeLabAssignment = (assignment) => {
+    const { openAt, closeAt } = practiceWindowValues(assignment);
+    return {
+      ...assignment,
+      openAt,
+      closeAt,
+      open_at: openAt,
+      close_at: closeAt,
+      // Keep the SCRUM-65 names in responses while clients migrate to the
+      // independent practice-window contract.
+      practiceStartAt: openAt,
+      practiceEndAt: closeAt,
+      practiceWindowStatus: practiceWindowStatus(assignment),
+      practiceWindowVersion: Number.isInteger(assignment.practiceWindowVersion)
+        ? assignment.practiceWindowVersion
+        : 0,
+    };
+  };
+  const labAssignmentContext = ({ classroomId, labId, labAssignmentId, assignmentId } = {}) => {
+    const candidateLabs = labs.filter((item) => item.classroomId === classroomId);
+    const scopedLabs = labId
+      ? candidateLabs.filter((item) => item.id === labId)
+      : candidateLabs;
+    for (const lab of scopedLabs) {
+      const labAssignment = lab.assignments
+        .map(normalizeLabAssignment)
+        .find((item) =>
+          (labAssignmentId && item.id === labAssignmentId)
+          || (!labAssignmentId && assignmentId && item.assignmentId === assignmentId));
+      if (labAssignment) return { lab, labAssignment };
+    }
+    return null;
+  };
+  const studentPracticeAccess = (context) => {
+    if (!context || user.role !== 'student') return {
+      acceptedAt: new Date().toISOString(),
+      activityContext: context
+        ? (Date.now() >= parseDate(context.lab.startAt) && Date.now() < parseDate(context.lab.endAt)
+          ? 'IN_LAB'
+          : 'OUTSIDE_LAB')
+        : null,
+    };
+    const classroomItem = classroom(context.lab.classroomId);
+    const selectedTerm = terms.find((item) => item.id === classroomItem.termId);
+    if (!isCurrentStudentTerm(selectedTerm)) {
+      throw apiError(403, 'PRACTICE_TERM_INACTIVE', 'Học kỳ không còn hiệu lực cho practice window.');
+    }
+    const now = Date.now();
+    const { openAt, closeAt } = practiceWindowValues(context.labAssignment);
+    const openTimestamp = parseDate(openAt);
+    const closeTimestamp = parseDate(closeAt);
+    if (practiceWindowStatus(context.labAssignment) !== 'OPEN'
+      || closeTimestamp === null
+      || now >= closeTimestamp) {
+      throw apiError(403, 'PRACTICE_WINDOW_CLOSED', 'Practice window đã đóng.');
+    }
+    if (openTimestamp === null || now < openTimestamp) {
+      throw apiError(403, 'PRACTICE_WINDOW_NOT_OPEN', 'Practice window chưa mở.');
+    }
+    return {
+      acceptedAt: new Date(now).toISOString(),
+      activityContext: now >= parseDate(context.lab.startAt) && now < parseDate(context.lab.endAt)
+        ? 'IN_LAB'
+        : 'OUTSIDE_LAB',
+    };
+  };
+  const recordActivity = async ({ type, context, activityAt, metadata = {} }) => {
+    const timestamp = activityAt ?? new Date().toISOString();
+    const item = {
+      id: `activity-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      type,
+      classroomId: context?.lab?.classroomId ?? null,
+      labId: context?.lab?.id ?? null,
+      labAssignmentId: context?.labAssignment?.id ?? null,
+      assignmentId: context?.labAssignment?.assignmentId ?? metadata.assignmentId ?? null,
+      termId: context ? classroom(context.lab.classroomId).termId : null,
+      ownerEmail: user.email,
+      occurredAt: timestamp,
+      activityContext: metadata.activityContext ?? null,
+      ...metadata,
+    };
+    await mutate(activityFile, initialCodePulseActivities, (records) => {
+      records.push(item);
+      return item;
+    });
+    return item;
+  };
   const labView = (lab) => ({
     ...lab,
-    assignments: lab.assignments.map((assignment) => {
-      if (user.role !== 'student') return assignment;
-      const { hints = [], starterCode, ...safeAssignment } = assignment;
+    stateVersion: Number.isInteger(lab.stateVersion) ? lab.stateVersion : 0,
+    assignments: lab.assignments.map((rawAssignment) => {
+      const assignment = normalizeLabAssignment(rawAssignment);
+      const accessOpen = isPracticeWindowOpen(assignment);
+      const termActive = isAcademicTermActive(terms.find((item) => item.id === classroom(lab.classroomId).termId));
       const membership = memberships.find((member) =>
         belongsToClassroom(member, lab.classroomId) &&
         normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email) &&
         isActiveMembership(member));
+      const { hints = [], starterCode, ...studentSafeAssignment } = assignment;
       return {
-        ...safeAssignment,
-        hintCount: hints.length,
-        workspaceId: `workspace-${lab.id}-${assignment.id}-${membership?.id}`,
+        ...(user.role === 'student' ? studentSafeAssignment : assignment),
+        ...(user.role === 'student' ? {
+          hintCount: hints.length,
+          workspaceId: `workspace-${lab.id}-${assignment.id}-${membership?.id}`,
+        } : {}),
+        practiceAccess: termActive && accessOpen ? 'OPEN' : 'CLOSED',
+        activityContext: termActive && accessOpen
+        ? (Date.now() >= parseDate(lab.startAt) && Date.now() < parseDate(lab.endAt)
+          ? 'IN_LAB'
+          : 'OUTSIDE_LAB')
+        : null,
       };
     }),
   });
@@ -580,14 +727,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (context.classroomItem.status === 'ARCHIVED') {
       throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
     }
-    if (!context.lab) return;
-    if (context.lab.status !== 'LIVE') {
-      throw apiError(409, 'LAB_NOT_LIVE', 'Workspace changes are only allowed while the LAB is Live.');
-    }
-    const now = Date.now();
-    if (now < Date.parse(context.labAssignment.practiceStartAt) || now > Date.parse(context.labAssignment.practiceEndAt)) {
-      throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'This problem is outside its practice window.');
-    }
+    if (!context.lab) return null;
+    if (!context.labAssignment) notFound();
+    const practiceContext = labAssignmentContext({
+      classroomId: workspace.classroomId,
+      labId: context.lab.id,
+      labAssignmentId: context.labAssignment.id,
+    });
+    if (!practiceContext) notFound();
+    return {
+      practiceContext,
+      practiceAccess: studentPracticeAccess(practiceContext),
+    };
   };
   const workspaceView = (workspace, context) => {
     if (!context.labAssignment) return workspace;
@@ -769,12 +920,153 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'classrooms'
+    && parts[3]
+    && parts[4] === 'labs'
+    && parts[5]
+    && parts[6] === 'assignments'
+    && parts[7]
+    && parts[8] === 'practice-window'
+    && request.method === 'PATCH') {
+    const classroomItem = classroom(parts[3]);
+    if (!isAssignedLecturer(classroomItem)) deny();
+    const selectedTerm = term(classroomItem.termId);
+    if (!isAcademicTermActive(selectedTerm)) {
+      throw apiError(409, 'TERM_INACTIVE', 'Practice window chỉ được thay đổi trong academic term đang active.');
+    }
+    const lab = labs.find((item) => item.id === parts[5] && item.classroomId === classroomItem.id) ?? notFound();
+    const currentAssignment = lab.assignments.find((item) => item.id === parts[7]) ?? notFound();
+    const body = await readRequestBody(request);
+    const patch = body.patch ?? body;
+    const currentWindow = practiceWindowValues(currentAssignment);
+    const requestedOpenAt = Object.hasOwn(patch, 'openAt') || Object.hasOwn(patch, 'open_at')
+      ? (patch.openAt ?? patch.open_at)
+      : currentWindow.openAt;
+    const requestedCloseAt = Object.hasOwn(patch, 'closeAt') || Object.hasOwn(patch, 'close_at')
+      ? (patch.closeAt ?? patch.close_at)
+      : currentWindow.closeAt;
+    const expectedVersion = patch.expectedVersion;
+    if (expectedVersion === undefined) {
+      throw apiError(400, 'PRACTICE_WINDOW_VERSION_REQUIRED', 'expectedVersion is required to update a practice window.');
+    }
+    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
+      throw apiError(400, 'INVALID_PRACTICE_WINDOW_VERSION', 'expectedVersion must be a non-negative integer.');
+    }
+    const openTimestamp = parseDate(requestedOpenAt);
+    const closeTimestamp = parseDate(requestedCloseAt);
+    const errors = {};
+    if (openTimestamp === null) errors.openAt = 'A valid practice opening time is required.';
+    if (closeTimestamp === null) errors.closeAt = 'A valid practice closing time is required.';
+    if (openTimestamp !== null && closeTimestamp !== null && closeTimestamp <= openTimestamp) {
+      errors.closeAt = 'Practice close time must be after its opening time.';
+    }
+    if (openTimestamp !== null && parseDate(selectedTerm.startDate) > openTimestamp) {
+      errors.openAt = 'Practice must open within the academic term.';
+    }
+    if (closeTimestamp !== null && parseDate(selectedTerm.endDate) < closeTimestamp) {
+      errors.closeAt = 'Practice must close within the academic term.';
+    }
+    const requestedStatus = patch.status ?? patch.practiceWindowStatus ?? currentAssignment.practiceWindowStatus ?? 'OPEN';
+    if (!['OPEN', 'CLOSED'].includes(requestedStatus)) errors.status = 'Practice window status must be OPEN or CLOSED.';
+    if (requestedStatus === 'OPEN' && closeTimestamp !== null && closeTimestamp <= Date.now()) {
+      errors.closeAt = 'Reopening requires a closing time in the future.';
+    }
+    if (Object.keys(errors).length > 0) {
+      const error = apiError(422, 'VALIDATION_ERROR', 'Practice window configuration is invalid.');
+      error.errors = errors;
+      throw error;
+    }
+    const mutation = await mutate(labFile, initialLabs, (records) => {
+      const storedLab = records.find((record) => record.id === lab.id) ?? notFound();
+      const storedAssignment = storedLab.assignments.find((assignment) => assignment.id === currentAssignment.id) ?? notFound();
+      const latestVersion = Number.isInteger(storedAssignment.practiceWindowVersion)
+        ? storedAssignment.practiceWindowVersion
+        : 0;
+      if (expectedVersion !== latestVersion) {
+        throw apiError(409, 'STALE_PRACTICE_WINDOW', 'Practice window đã được cập nhật. Hãy tải lại dữ liệu mới nhất.');
+      }
+      const before = {
+        openAt: practiceWindowValues(storedAssignment).openAt,
+        closeAt: practiceWindowValues(storedAssignment).closeAt,
+        status: storedAssignment.practiceWindowStatus ?? 'OPEN',
+      };
+      const now = new Date().toISOString();
+      const updatedAssignment = {
+        ...storedAssignment,
+        openAt: new Date(openTimestamp).toISOString(),
+        closeAt: new Date(closeTimestamp).toISOString(),
+        open_at: new Date(openTimestamp).toISOString(),
+        close_at: new Date(closeTimestamp).toISOString(),
+        practiceStartAt: new Date(openTimestamp).toISOString(),
+        practiceEndAt: new Date(closeTimestamp).toISOString(),
+        practiceWindowStatus: requestedStatus,
+        practiceWindowVersion: latestVersion + 1,
+        manualCloseAt: requestedStatus === 'CLOSED' ? now : storedAssignment.manualCloseAt ?? null,
+        manualCloseBy: requestedStatus === 'CLOSED' ? user.email : storedAssignment.manualCloseBy ?? null,
+        lastReopenedAt: requestedStatus === 'OPEN' && storedAssignment.practiceWindowStatus === 'CLOSED'
+          ? now
+          : storedAssignment.lastReopenedAt ?? null,
+        lastReopenedBy: requestedStatus === 'OPEN' && storedAssignment.practiceWindowStatus === 'CLOSED'
+          ? user.email
+          : storedAssignment.lastReopenedBy ?? null,
+        updatedAt: now,
+      };
+      storedLab.assignments = storedLab.assignments.map((assignment) =>
+        assignment.id === currentAssignment.id ? updatedAssignment : assignment);
+      storedLab.updatedAt = now;
+      return {
+        lab: storedLab,
+        assignment: updatedAssignment,
+        before,
+        occurredAt: now,
+      };
+    });
+    const action = requestedStatus === 'CLOSED'
+      ? 'CLOSE'
+      : mutation.before.status === 'CLOSED'
+        ? 'REOPEN'
+        : 'UPDATE';
+    await mutate(practiceWindowAuditFile, initialPracticeWindowAudit, (records) => {
+      records.push({
+        id: `practice-window-audit-${Date.now()}-${currentAssignment.id}`,
+        action,
+        classroomId: classroomItem.id,
+        labId: lab.id,
+        labAssignmentId: currentAssignment.id,
+        actorEmail: user.email,
+        actorRole: user.role,
+        occurredAt: mutation.occurredAt,
+        before: mutation.before,
+        after: {
+          openAt: mutation.assignment.openAt,
+          closeAt: mutation.assignment.closeAt,
+          status: mutation.assignment.practiceWindowStatus,
+        },
+      });
+      return true;
+    });
+    sendJson(response, 200, { item: labView(mutation.lab).assignments.find((item) => item.id === currentAssignment.id) });
+    return;
+  }
+
+  if (parts[2] === 'practice-window-audit' && request.method === 'GET') {
+    if (user.role !== 'admin') deny();
+    const records = await readRecords(practiceWindowAuditFile, initialPracticeWindowAudit);
+    const labId = requestUrl.searchParams.get('labId');
+    const classroomId = requestUrl.searchParams.get('classroomId');
+    sendJson(response, 200, {
+      items: records.filter((item) => (!labId || item.labId === labId) && (!classroomId || item.classroomId === classroomId)),
+    });
+    return;
+  }
+
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'GET') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
     const items = labs
       .filter((item) => item.classroomId === classroomItem.id)
-      .filter((item) => user.role !== 'student' || item.status === 'LIVE')
+      .filter((item) => user.role !== 'student'
+        || isCurrentStudentTerm(terms.find((termItem) => termItem.id === classroomItem.termId)))
       .map(labView);
     sendJson(response, 200, { items });
     return;
@@ -783,24 +1075,31 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!isAssignedLecturer(classroomItem)) deny();
+    const selectedTerm = term(classroomItem.termId);
+    if (!isAcademicTermActive(selectedTerm)) {
+      throw apiError(409, 'TERM_INACTIVE', 'Chỉ có thể tạo LAB trong academic term đang active.');
+    }
     const body = await readRequestBody(request);
     const publishedVersions = publishedAssignmentVersions(classroomItem.id);
-    validateLabInput(body, publishedVersions, apiError);
+    validateLabInput(body, publishedVersions, selectedTerm, apiError);
     const now = new Date().toISOString();
     const labId = body.id ?? `lab-${Date.now()}`;
     const item = {
       id: labId,
       classroomId: classroomItem.id,
+      termId: classroomItem.termId,
       name: body.name.trim(),
       description: body.description?.trim() ?? '',
       startAt: new Date(body.startAt).toISOString(),
       endAt: new Date(body.endAt).toISOString(),
       status: 'SCHEDULED',
+      stateVersion: 0,
       createdBy: user.email,
       createdAt: now,
       updatedAt: now,
       assignments: body.assignments.map((selection, index) => {
         const version = publishedVersions.find((candidate) => candidate.id === selection.assignmentVersionId);
+        const { openAt, closeAt } = practiceWindowValues(selection);
         return {
           id: `lab-assignment-${labId}-${index + 1}`,
           assignmentId: version.assignmentId,
@@ -813,12 +1112,43 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
           hints: structuredClone(version.hints ?? []),
           order: index + 1,
           mandatory: Boolean(selection.mandatory),
-          practiceStartAt: new Date(selection.practiceStartAt).toISOString(),
-          practiceEndAt: new Date(selection.practiceEndAt).toISOString(),
+          openAt: new Date(openAt).toISOString(),
+          closeAt: new Date(closeAt).toISOString(),
+          open_at: new Date(openAt).toISOString(),
+          close_at: new Date(closeAt).toISOString(),
+          practiceStartAt: new Date(openAt).toISOString(),
+          practiceEndAt: new Date(closeAt).toISOString(),
+          practiceWindowStatus: 'OPEN',
+          practiceWindowVersion: 0,
+          manualCloseAt: null,
+          manualCloseBy: null,
+          lastReopenedAt: null,
+          lastReopenedBy: null,
         };
       }),
     };
     await mutate(labFile, initialLabs, (records) => { records.push(item); return item; });
+    await mutate(practiceWindowAuditFile, initialPracticeWindowAudit, (records) => {
+      for (const assignment of item.assignments) {
+        records.push({
+          id: `practice-window-audit-${Date.now()}-${assignment.id}`,
+          action: 'CREATE',
+          classroomId: classroomItem.id,
+          labId: item.id,
+          labAssignmentId: assignment.id,
+          actorEmail: user.email,
+          actorRole: user.role,
+          occurredAt: now,
+          before: null,
+          after: {
+            openAt: assignment.openAt,
+            closeAt: assignment.closeAt,
+            status: assignment.practiceWindowStatus,
+          },
+        });
+      }
+      return true;
+    });
     const activeStudents = memberships.filter((member) =>
       belongsToClassroom(member, classroomItem.id) && isActiveMembership(member));
     await mutate(workspaceFile, initialWorkspaces, (records) => {
@@ -854,13 +1184,31 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const body = await readRequestBody(request);
     const requestedStatus = body.status ?? body.patch?.status;
     if (!LAB_STATUSES.has(requestedStatus)) throw apiError(400, 'INVALID_STATUS', 'LAB status is invalid.');
-    if (!LAB_TRANSITIONS[current.status]?.has(requestedStatus)) {
-      throw apiError(409, 'INVALID_STATUS_TRANSITION', `LAB cannot move from ${current.status} to ${requestedStatus}.`);
+    const expectedStateVersion = body.expectedStateVersion ?? body.patch?.expectedStateVersion;
+    if (expectedStateVersion === undefined) {
+      throw apiError(400, 'STATE_VERSION_REQUIRED', 'expectedStateVersion is required to transition a LAB state.');
     }
-    const updated = { ...current, status: requestedStatus, updatedAt: new Date().toISOString() };
-    await mutate(labFile, initialLabs, (records) => {
-      Object.assign(records.find((record) => record.id === current.id), updated);
-      return updated;
+    if (!Number.isInteger(expectedStateVersion) || expectedStateVersion < 0) {
+      throw apiError(400, 'INVALID_STATE_VERSION', 'expectedStateVersion must be a non-negative integer.');
+    }
+    if (!isAcademicTermActive(term(classroomItem.termId))) {
+      throw apiError(409, 'TERM_INACTIVE', 'LAB state chỉ được thay đổi trong academic term đang active.');
+    }
+    const updated = await mutate(labFile, initialLabs, (records) => {
+      const latest = records.find((record) => record.id === current.id && record.classroomId === classroomItem.id) ?? notFound();
+      const latestVersion = Number.isInteger(latest.stateVersion) ? latest.stateVersion : 0;
+      if (expectedStateVersion !== latestVersion) {
+        throw apiError(409, 'STALE_LAB_STATE', 'LAB state đã được giảng viên khác cập nhật. Hãy tải lại trạng thái mới nhất.');
+      }
+      if (!LAB_TRANSITIONS[latest.status]?.has(requestedStatus)) {
+        throw apiError(409, 'INVALID_STATUS_TRANSITION', `LAB cannot move from ${latest.status} to ${requestedStatus}.`);
+      }
+      Object.assign(latest, {
+        status: requestedStatus,
+        stateVersion: latestVersion + 1,
+        updatedAt: new Date().toISOString(),
+      });
+      return latest;
     });
     sendJson(response, 200, { item: updated });
     return;
@@ -879,14 +1227,44 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (user.role !== 'student' || !canAccessClass(classroomItem)) deny();
 
     const assignmentId = requestUrl.searchParams.get('assignmentId');
+    const requestedLabId = requestUrl.searchParams.get('labId');
+    const requestedLabAssignmentId = requestUrl.searchParams.get('labAssignmentId');
+    const practiceContext = labAssignmentContext({
+      classroomId: classroomItem.id,
+      labId: requestedLabId,
+      labAssignmentId: requestedLabAssignmentId,
+      assignmentId,
+    });
+    const practiceAccess = practiceContext
+      ? {
+        acceptedAt: new Date().toISOString(),
+        activityContext: isPracticeWindowOpen(practiceContext.labAssignment)
+          ? (Date.now() >= parseDate(practiceContext.lab.startAt) && Date.now() < parseDate(practiceContext.lab.endAt)
+            ? 'IN_LAB'
+            : 'OUTSIDE_LAB')
+          : null,
+        practiceAccess: isCurrentStudentTerm(terms.find((item) => item.id === classroomItem.termId))
+          && isPracticeWindowOpen(practiceContext.labAssignment)
+          ? 'OPEN'
+          : 'CLOSED',
+      }
+      : null;
+    if (requestedLabId || requestedLabAssignmentId) {
+      if (!practiceContext) notFound();
+      if (assignmentId && practiceContext.labAssignment.assignmentId !== assignmentId) notFound();
+    }
+    const selectedAssignmentId = practiceContext?.labAssignment.assignmentId ?? assignmentId;
     const assignment = assignments.find((item) =>
-      item.id === assignmentId && item.classroomId === classroomItem.id && item.status === 'PUBLISHED');
+      item.id === selectedAssignmentId && item.classroomId === classroomItem.id && item.status === 'PUBLISHED');
     if (!assignment) notFound();
 
     const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
     let workspace = currentWorkspaces.find((item) =>
       item.classroomId === classroomItem.id
       && item.assignmentId === assignment.id
+      && (!practiceContext
+        ? !item.labAssignmentId
+        : item.labId === practiceContext.lab.id && item.labAssignmentId === practiceContext.labAssignment.id)
       && item.ownerEmail === user.email);
 
     if (!workspace) {
@@ -897,6 +1275,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         termId: classroomItem.termId,
         ownerEmail: user.email,
         sourceCode: '',
+        ...(practiceContext
+          ? {
+            labId: practiceContext.lab.id,
+            labAssignmentId: practiceContext.labAssignment.id,
+            assignmentVersionId: practiceContext.labAssignment.assignmentVersionId,
+          }
+          : {}),
       };
       await mutate(workspaceFile, initialWorkspaces, (records) => {
         records.push(workspace);
@@ -904,7 +1289,16 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       });
     }
 
-    sendJson(response, 200, { item: workspace });
+    sendJson(response, 200, {
+      item: workspace,
+      ...(practiceContext ? {
+        practiceWindow: {
+          ...practiceContext.labAssignment,
+          practiceAccess: practiceAccess?.practiceAccess ?? 'CLOSED',
+          activityContext: practiceAccess?.activityContext ?? null,
+        },
+      } : {}),
+    });
     return;
   }
 
@@ -912,12 +1306,158 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     && parts[3]
     && ['problems', 'assignments'].includes(parts[4]);
 
+  if (parts[2] === 'classrooms'
+    && parts[3]
+    && parts[4] === 'labs'
+    && parts[5]
+    && parts[6] === 'assignments'
+    && parts[7]
+    && parts[8] === 'submit'
+    && request.method === 'POST') {
+    if (user.role !== 'student') deny();
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    const practiceContext = labAssignmentContext({
+      classroomId: classroomItem.id,
+      labId: parts[5],
+      labAssignmentId: parts[7],
+    });
+    if (!practiceContext) notFound();
+    const practiceAccess = studentPracticeAccess(practiceContext);
+    const assignment = assignments.find((record) =>
+      record.id === practiceContext.labAssignment.assignmentId
+      && record.classroomId === classroomItem.id
+      && record.status === 'PUBLISHED') ?? notFound();
+    const body = await readRequestBody(request);
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) =>
+      item.classroomId === classroomItem.id
+      && item.labId === practiceContext.lab.id
+      && item.labAssignmentId === practiceContext.labAssignment.id
+      && item.ownerEmail === user.email);
+    const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace?.sourceCode;
+    if (!sourceCode?.trim()) throw apiError(400, 'SOURCE_CODE_REQUIRED', 'Hãy lưu hoặc nhập code trước khi nộp bài.');
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
+    const results = await runAssignmentTestCases({
+      assignment,
+      sourceCode,
+      testCases: assignment.testCases,
+    });
+    const acceptedAt = practiceAccess.acceptedAt;
+    const passedCount = results.filter((result) => result.passed).length;
+    const submission = {
+      id: `codepulse-submission-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      classroomId: classroomItem.id,
+      termId: classroomItem.termId,
+      labId: practiceContext.lab.id,
+      labAssignmentId: practiceContext.labAssignment.id,
+      assignmentId: assignment.id,
+      assignmentVersionId: practiceContext.labAssignment.assignmentVersionId,
+      ownerEmail: user.email,
+      acceptedAt,
+      receivedAt: acceptedAt,
+      activityContext: practiceAccess.activityContext,
+      status: 'GRADED',
+      passedCount,
+      totalCount: results.length,
+      score: results.length > 0 ? Math.round((passedCount / results.length) * 100) : 0,
+      results,
+      // The repository has no external AI detector adapter yet. The queued
+      // state is persisted so a detector/notification worker can consume it
+      // without changing the deadline or historical submission record.
+      aiAnalysis: {
+        status: 'QUEUED',
+        queuedAt: acceptedAt,
+        outsideLabSupported: true,
+      },
+      notification: {
+        type: 'SUBMISSION_RECEIVED',
+        status: 'QUEUED',
+        queuedAt: acceptedAt,
+      },
+    };
+    await mutate(submissionFile, initialCodePulseSubmissions, (records) => {
+      records.push(submission);
+      return submission;
+    });
+    if (workspace && workspace.sourceCode !== sourceCode) {
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const stored = records.find((record) => record.id === workspace.id);
+        if (stored) {
+          stored.sourceCode = sourceCode;
+          stored.updatedAt = acceptedAt;
+        }
+        return stored;
+      });
+    }
+    await recordActivity({
+      type: 'SUBMIT',
+      context: practiceContext,
+      activityAt: acceptedAt,
+      metadata: {
+        assignmentId: assignment.id,
+        activityContext: practiceAccess.activityContext,
+        submissionId: submission.id,
+        passedCount,
+        totalCount: results.length,
+      },
+    });
+    sendJson(response, 201, { item: submission });
+    return;
+  }
+
+  if (parts[2] === 'classrooms'
+    && parts[3]
+    && parts[4] === 'labs'
+    && parts[5]
+    && parts[6] === 'assignments'
+    && parts[7]
+    && parts[8] === 'submissions'
+    && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    const practiceContext = labAssignmentContext({
+      classroomId: classroomItem.id,
+      labId: parts[5],
+      labAssignmentId: parts[7],
+    });
+    if (!practiceContext) notFound();
+    const records = await readRecords(submissionFile, initialCodePulseSubmissions);
+    const items = records.filter((item) =>
+      item.classroomId === classroomItem.id
+      && item.labId === practiceContext.lab.id
+      && item.labAssignmentId === practiceContext.labAssignment.id
+      && (user.role !== 'student' || item.ownerEmail === user.email));
+    sendJson(response, 200, { items });
+    return;
+  }
+
+  if (parts[2] === 'practice-activities' && request.method === 'GET') {
+    if (!['admin', 'lecturer'].includes(user.role)) deny();
+    const records = await readRecords(activityFile, initialCodePulseActivities);
+    const classroomId = requestUrl.searchParams.get('classroomId');
+    const labId = requestUrl.searchParams.get('labId');
+    sendJson(response, 200, {
+      items: records.filter((item) => (!classroomId || item.classroomId === classroomId) && (!labId || item.labId === labId)),
+    });
+    return;
+  }
+
   if (isAssignmentRoute && parts[5] && parts[6] === 'run' && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
     const assignment = assignments.find((record) =>
       record.id === parts[5] && record.classroomId === classroomItem.id) ?? notFound();
     if (user.role === 'student' && assignment.status !== 'PUBLISHED') notFound();
+    const practiceContext = labAssignmentContext({
+      classroomId: classroomItem.id,
+      labId: requestUrl.searchParams.get('labId'),
+      labAssignmentId: requestUrl.searchParams.get('labAssignmentId'),
+      assignmentId: assignment.id,
+    });
+    const practiceAccess = practiceContext ? studentPracticeAccess(practiceContext) : null;
     if (!ALLOWED_RUNTIMES.has(assignment.runtime)) {
       throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Assignment chưa có runtime được hỗ trợ để chạy.');
     }
@@ -927,6 +1467,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const savedWorkspace = workspaces.find((item) =>
       item.classroomId === classroomItem.id
       && item.assignmentId === assignment.id
+      && (!practiceContext
+        ? !item.labAssignmentId
+        : item.labId === practiceContext.lab.id && item.labAssignmentId === practiceContext.labAssignment.id)
       && item.ownerEmail === user.email);
     const sourceCode = typeof body.sourceCode === 'string'
       ? body.sourceCode
@@ -953,6 +1496,17 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       assignment,
       sourceCode,
       testCases: selectedTestCases,
+    });
+    await recordActivity({
+      type: 'RUN',
+      context: practiceContext,
+      activityAt: practiceAccess?.acceptedAt,
+      metadata: {
+        assignmentId: assignment.id,
+        activityContext: practiceAccess?.activityContext ?? null,
+        passedCount: results.filter((result) => result.passed).length,
+        totalCount: results.length,
+      },
     });
     sendJson(response, 200, {
       item: {
@@ -1122,7 +1676,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       return;
     }
     if (!isOwner) deny();
-    assertWorkspaceWritable(workspace, context);
+    const access = assertWorkspaceWritable(workspace, context);
     if (item.status === 'ARCHIVED') throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom đã được lưu trữ và chỉ đọc.');
     const body = await readRequestBody(request);
     if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode phải là chuỗi.');
@@ -1132,6 +1686,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       current.updatedAt = new Date().toISOString();
       return current;
     });
+    if (access) {
+      await recordActivity({
+        type: 'SAVE',
+        context: access.practiceContext,
+        activityAt: access.practiceAccess.acceptedAt,
+        metadata: {
+          assignmentId: workspace.assignmentId,
+          activityContext: access.practiceAccess.activityContext,
+          workspaceId: workspace.id,
+        },
+      });
+    }
     sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }
@@ -1142,7 +1708,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
     const context = workspaceContext(workspace);
     if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
-    assertWorkspaceWritable(workspace, context);
+    const access = assertWorkspaceWritable(workspace, context);
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
     if (!sourceCode.trim()) throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
@@ -1193,6 +1759,20 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       current.updatedAt = executionResult.executedAt;
       return current;
     });
+    if (access) {
+      await recordActivity({
+        type: 'RUN',
+        context: access.practiceContext,
+        activityAt: access.practiceAccess.acceptedAt,
+        metadata: {
+          assignmentId: workspace.assignmentId,
+          activityContext: access.practiceAccess.activityContext,
+          workspaceId: workspace.id,
+          executionId: executionResult.id,
+          executionStatus: executionResult.status,
+        },
+      });
+    }
     sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }
@@ -1203,7 +1783,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
     const context = workspaceContext(workspace);
     if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
-    assertWorkspaceWritable(workspace, context);
+    const access = assertWorkspaceWritable(workspace, context);
     const hint = context.labAssignment?.hints?.find((candidate) => candidate.id === parts[5]) ?? notFound();
     const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
@@ -1214,6 +1794,19 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       }
       return current;
     });
+    if (access) {
+      await recordActivity({
+        type: 'HINT',
+        context: access.practiceContext,
+        activityAt: access.practiceAccess.acceptedAt,
+        metadata: {
+          assignmentId: workspace.assignmentId,
+          activityContext: access.practiceAccess.activityContext,
+          workspaceId: workspace.id,
+          hintId: hint.id,
+        },
+      });
+    }
     sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }
