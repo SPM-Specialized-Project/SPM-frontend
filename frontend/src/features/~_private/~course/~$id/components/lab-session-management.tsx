@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { toast } from 'react-toastify';
 
 import {
   codePulseApi,
@@ -6,6 +7,8 @@ import {
   type CodePulseClassroom,
   type CodePulseLab,
   type CodePulseLabStatus,
+  type CodePulseLabAssignment,
+  type CodePulsePracticeWindowAudit,
 } from '@/services/codepulse-api';
 
 import { StudentLabWorkspace } from './student-lab-workspace';
@@ -18,8 +21,8 @@ type LabSessionManagementProps = {
 type SelectedProblem = {
   assignmentVersionId: string;
   mandatory: boolean;
-  practiceStartAt: string;
-  practiceEndAt: string;
+  openAt: string;
+  closeAt: string;
 };
 
 const fieldClassName =
@@ -39,8 +42,138 @@ function formatDateTime(value: string) {
 
 function nextStatuses(status: CodePulseLabStatus): CodePulseLabStatus[] {
   if (status === 'SCHEDULED') return ['LIVE', 'CANCELLED'];
-  if (status === 'LIVE') return ['ENDED', 'CANCELLED'];
+  if (status === 'LIVE') return ['PAUSED', 'ENDED', 'CANCELLED'];
+  if (status === 'PAUSED') return ['LIVE', 'ENDED'];
   return [];
+}
+
+function labStatusLabel(status: CodePulseLabStatus) {
+  const labels: Record<CodePulseLabStatus, string> = {
+    SCHEDULED: 'Đã lên lịch',
+    LIVE: 'Đang diễn ra',
+    PAUSED: 'Đang tạm dừng',
+    ENDED: 'Đã kết thúc',
+    CANCELLED: 'Đã hủy',
+  };
+  return labels[status];
+}
+
+function labStatusClassName(status: CodePulseLabStatus) {
+  const classes: Record<CodePulseLabStatus, string> = {
+    SCHEDULED: 'bg-slate-100 text-slate-700',
+    LIVE: 'bg-emerald-100 text-emerald-800',
+    PAUSED: 'bg-amber-100 text-amber-800',
+    ENDED: 'bg-blue-100 text-blue-800',
+    CANCELLED: 'bg-rose-100 text-rose-800',
+  };
+  return classes[status];
+}
+
+function transitionLabel(status: CodePulseLabStatus) {
+  const labels: Record<CodePulseLabStatus, string> = {
+    SCHEDULED: 'Lên lịch',
+    LIVE: 'Bắt đầu / tiếp tục',
+    PAUSED: 'Tạm dừng',
+    ENDED: 'Kết thúc LAB',
+    CANCELLED: 'Hủy LAB',
+  };
+  return labels[status];
+}
+
+function practiceStatusLabel(assignment: CodePulseLabAssignment) {
+  if (assignment.practiceWindowStatus === 'CLOSED') return 'Đã đóng thủ công';
+  if (assignment.practiceAccess === 'OPEN') {
+    return assignment.activityContext === 'OUTSIDE_LAB' ? 'Đang mở · Outside-Lab' : 'Đang mở · In-Lab';
+  }
+  if (new Date(assignment.openAt).getTime() > Date.now()) return 'Chưa mở';
+  return 'Đã hết hạn';
+}
+
+function PracticeWindowControls({
+  classroomId,
+  labId,
+  assignment,
+  disabled,
+  onUpdated,
+}: {
+  classroomId: string;
+  labId: string;
+  assignment: CodePulseLabAssignment;
+  disabled: boolean;
+  onUpdated: () => void;
+}) {
+  const [openAt, setOpenAt] = useState(() => toLocalDateTime(new Date(assignment.openAt)));
+  const [closeAt, setCloseAt] = useState(() => toLocalDateTime(new Date(assignment.closeAt)));
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setOpenAt(toLocalDateTime(new Date(assignment.openAt)));
+    setCloseAt(toLocalDateTime(new Date(assignment.closeAt)));
+  }, [assignment.closeAt, assignment.id, assignment.openAt, assignment.practiceWindowVersion]);
+
+  const update = async (status?: 'OPEN' | 'CLOSED') => {
+    setSaving(true);
+    try {
+      await codePulseApi.updatePracticeWindow(classroomId, labId, assignment.id, {
+        status,
+        openAt: new Date(openAt).toISOString(),
+        closeAt: new Date(closeAt).toISOString(),
+        expectedVersion: assignment.practiceWindowVersion,
+      });
+      onUpdated();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Không thể cập nhật practice window.');
+      onUpdated();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3 rounded border border-blue-100 bg-white p-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <label className="text-xs font-medium text-gray-600">
+          Mở practice
+          <input
+            type="datetime-local"
+            value={openAt}
+            onChange={(event) => setOpenAt(event.target.value)}
+            className={fieldClassName}
+            disabled={disabled || saving}
+          />
+        </label>
+        <label className="text-xs font-medium text-gray-600">
+          Đóng practice
+          <input
+            type="datetime-local"
+            min={openAt}
+            value={closeAt}
+            onChange={(event) => setCloseAt(event.target.value)}
+            className={fieldClassName}
+            disabled={disabled || saving}
+          />
+        </label>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-2">
+        <button
+          type="button"
+          disabled={disabled || saving}
+          onClick={() => void update()}
+          className="rounded border border-blue-200 px-2 py-1 text-xs font-semibold text-blue-700 disabled:opacity-50"
+        >
+          Lưu thời gian
+        </button>
+        <button
+          type="button"
+          disabled={disabled || saving}
+          onClick={() => void update(assignment.practiceWindowStatus === 'CLOSED' ? 'OPEN' : 'CLOSED')}
+          className="rounded border border-gray-300 px-2 py-1 text-xs font-semibold text-gray-700 disabled:opacity-50"
+        >
+          {assignment.practiceWindowStatus === 'CLOSED' ? 'Mở lại practice' : 'Đóng practice'}
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function LabSessionManagement({
@@ -50,6 +183,7 @@ export function LabSessionManagement({
   const [classroomId, setClassroomId] = useState('');
   const [versions, setVersions] = useState<CodePulseAssignmentVersion[]>([]);
   const [labs, setLabs] = useState<CodePulseLab[]>([]);
+  const [audits, setAudits] = useState<CodePulsePracticeWindowAudit[]>([]);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [startAt, setStartAt] = useState(() =>
@@ -85,6 +219,12 @@ export function LabSessionManagement({
       ]);
       setLabs(labResult.data.items);
       setVersions(versionResult.data.items);
+      if (role === 'admin') {
+        const auditResult = await codePulseApi.listPracticeWindowAudit(classroomId);
+        setAudits(auditResult.data.items);
+      } else {
+        setAudits([]);
+      }
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : 'Không thể tải dữ liệu LAB.',
@@ -92,7 +232,7 @@ export function LabSessionManagement({
     } finally {
       setLoading(false);
     }
-  }, [classroomId]);
+  }, [classroomId, role]);
 
   useEffect(() => {
     void load();
@@ -109,8 +249,8 @@ export function LabSessionManagement({
       {
         assignmentVersionId: version.id,
         mandatory: true,
-        practiceStartAt: startAt,
-        practiceEndAt: endAt,
+        openAt: startAt,
+        closeAt: endAt,
       },
     ]);
   };
@@ -148,8 +288,8 @@ export function LabSessionManagement({
         endAt: new Date(endAt).toISOString(),
         assignments: selectedProblems.map((item) => ({
           ...item,
-          practiceStartAt: new Date(item.practiceStartAt).toISOString(),
-          practiceEndAt: new Date(item.practiceEndAt).toISOString(),
+          openAt: new Date(item.openAt).toISOString(),
+          closeAt: new Date(item.closeAt).toISOString(),
         })),
       });
       setName('');
@@ -170,8 +310,8 @@ export function LabSessionManagement({
   ) => {
     setLoading(true);
     try {
-      await codePulseApi.updateLabStatus(classroomId, lab.id, status);
-      setMessage(`Đã chuyển ${lab.name} sang trạng thái ${status}.`);
+      await codePulseApi.updateLabStatus(classroomId, lab.id, status, lab.stateVersion);
+      setMessage(`Đã chuyển ${lab.name} sang trạng thái ${labStatusLabel(status)}.`);
       await load();
     } catch (error) {
       setMessage(
@@ -179,6 +319,7 @@ export function LabSessionManagement({
           ? error.message
           : 'Không thể cập nhật trạng thái LAB.',
       );
+      await load();
     } finally {
       setLoading(false);
     }
@@ -245,10 +386,13 @@ export function LabSessionManagement({
                     {formatDateTime(lab.startAt)} – {formatDateTime(lab.endAt)}
                   </p>
                 </div>
-                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                  {lab.status}
+                <span className={`rounded-full px-3 py-1 text-xs font-bold ${labStatusClassName(lab.status)}`}>
+                  {labStatusLabel(lab.status)}
                 </span>
               </div>
+              <p className="mt-2 text-xs text-slate-500">
+                Trạng thái buổi LAB không tự đóng practice window của từng bài.
+              </p>
               {lab.description && (
                 <p className="mt-3 text-sm text-gray-600">{lab.description}</p>
               )}
@@ -268,28 +412,40 @@ export function LabSessionManagement({
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-gray-500">
-                      {formatDateTime(assignment.practiceStartAt)} –{' '}
-                      {formatDateTime(assignment.practiceEndAt)}
+                      Practice: {formatDateTime(assignment.openAt)} –{' '}
+                      {formatDateTime(assignment.closeAt)}
+                    </p>
+                    <p className={`mt-1 text-xs font-semibold ${assignment.practiceAccess === 'OPEN' ? 'text-emerald-700' : 'text-slate-500'}`}>
+                      {practiceStatusLabel(assignment)}
                     </p>
                     {assignment.workspaceId && (
                       <p className="mt-1 text-xs font-medium text-emerald-700">
                         Workspace độc lập đã sẵn sàng
                       </p>
                     )}
+                    {isLecturer && (
+                      <PracticeWindowControls
+                        classroomId={classroomId}
+                        labId={lab.id}
+                        assignment={assignment}
+                        disabled={loading}
+                        onUpdated={() => void load()}
+                      />
+                    )}
                   </li>
                 ))}
               </ol>
               {isLecturer && nextStatuses(lab.status).length > 0 && (
-                <div className="mt-4 flex flex-wrap gap-2">
+                <div className="mt-4 flex flex-wrap gap-2" aria-label="Điều khiển trạng thái LAB">
                   {nextStatuses(lab.status).map((status) => (
                     <button
                       key={status}
                       type="button"
                       disabled={loading}
                       onClick={() => void updateStatus(lab, status)}
-                      className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs font-semibold text-gray-700 hover:border-blue-500 hover:text-blue-700 disabled:opacity-50"
+                      className={`rounded-lg border px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${status === 'ENDED' || status === 'CANCELLED' ? 'border-rose-200 text-rose-700 hover:border-rose-500' : status === 'PAUSED' ? 'border-amber-200 text-amber-800 hover:border-amber-500' : 'border-blue-200 text-blue-700 hover:border-blue-500'}`}
                     >
-                      Chuyển sang {status}
+                      {transitionLabel(status)}
                     </button>
                   ))}
                 </div>
@@ -302,6 +458,21 @@ export function LabSessionManagement({
                 ? 'Chưa có LAB đang diễn ra.'
                 : 'Chưa có LAB nào trong classroom này.'}
             </p>
+          )}
+          {role === 'admin' && audits.length > 0 && (
+            <details className="rounded-xl border border-amber-200 bg-amber-50 p-4">
+              <summary className="cursor-pointer text-sm font-semibold text-amber-900">
+                Audit practice window ({audits.length})
+              </summary>
+              <ol className="mt-3 space-y-2 text-xs text-amber-900">
+                {audits.map((audit) => (
+                  <li key={audit.id} className="rounded border border-amber-200 bg-white p-2">
+                    <span className="font-bold">{audit.action}</span> · {audit.actorEmail} ·{' '}
+                    {formatDateTime(audit.occurredAt)}
+                  </li>
+                ))}
+              </ol>
+            </details>
           )}
         </div>
 
@@ -446,32 +617,29 @@ export function LabSessionManagement({
                     </label>
                     <div className="mt-3 grid gap-3 sm:grid-cols-2">
                       <label className="text-xs font-medium text-gray-600">
-                        Practice bắt đầu
+                        Practice mở lúc
                         <input
                           required
                           type="datetime-local"
-                          min={startAt}
-                          max={endAt}
-                          value={selection.practiceStartAt}
+                          value={selection.openAt}
                           onChange={(event) =>
                             updateProblem(index, {
-                              practiceStartAt: event.target.value,
+                              openAt: event.target.value,
                             })
                           }
                           className={fieldClassName}
                         />
                       </label>
                       <label className="text-xs font-medium text-gray-600">
-                        Practice kết thúc
+                        Practice đóng lúc
                         <input
                           required
                           type="datetime-local"
-                          min={selection.practiceStartAt || startAt}
-                          max={endAt}
-                          value={selection.practiceEndAt}
+                          min={selection.openAt || startAt}
+                          value={selection.closeAt}
                           onChange={(event) =>
                             updateProblem(index, {
-                              practiceEndAt: event.target.value,
+                              closeAt: event.target.value,
                             })
                           }
                           className={fieldClassName}
