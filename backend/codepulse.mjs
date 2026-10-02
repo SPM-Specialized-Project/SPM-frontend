@@ -1314,6 +1314,7 @@ const normalizeLabAssignment = (assignment) => {
     && parts[7]
     && parts[8] === 'submit'
     && request.method === 'POST') {
+    if (user.role !== 'student') deny();
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
     const practiceContext = labAssignmentContext({
