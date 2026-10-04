@@ -18,8 +18,8 @@ if [[ ! "$release_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
   exit 64
 fi
 
-if [[ ! -d "$source_root/frontend/dist" || ! -f "$source_root/backend/server.mjs" ]]; then
-  echo "The workspace does not contain a built frontend and backend/server.mjs" >&2
+if [[ ! -d "$source_root/frontend/dist" || ! -f "$source_root/backend/server.mjs" || ! -f "$source_root/backend/matching/service.mjs" || ! -f "$source_root/backend/ai-service/app.py" ]]; then
+  echo "The workspace does not contain the built frontend, backend, and matching AI modules" >&2
   exit 66
 fi
 

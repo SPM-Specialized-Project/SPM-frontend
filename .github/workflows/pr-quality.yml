@@ -62,3 +62,21 @@ jobs:
 
       - name: Test Node.js backend
         run: npm run backend:test
+
+  matching-ai-quality:
+    name: Matching AI Quality
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Check Python adapter syntax
+        run: python -m py_compile backend/ai-service/app.py
+
+      - name: Check evaluation schema JSON
+        run: python -c "import json; from pathlib import Path; json.loads(Path('backend/matching/evaluation-dataset.schema.json').read_text(encoding='utf-8'))"

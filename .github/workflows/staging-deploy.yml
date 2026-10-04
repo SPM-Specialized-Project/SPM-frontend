@@ -24,9 +24,32 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  matching-ai-quality:
+    name: Matching AI Quality
+    if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging revision
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.app_ref || github.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Check Python adapter syntax
+        run: python -m py_compile backend/ai-service/app.py
+
+      - name: Check evaluation schema JSON
+        run: python -c "import json; from pathlib import Path; json.loads(Path('backend/matching/evaluation-dataset.schema.json').read_text(encoding='utf-8'))"
+
   deploy-staging:
     name: Deploy staging to Debian
     if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
+    needs:
+      - matching-ai-quality
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
     outputs:
