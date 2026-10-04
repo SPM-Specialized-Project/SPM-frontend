@@ -24,12 +24,12 @@ Course creation requests use `/api/course-requests` with generic item/patch shap
 
 ## Coordination and matching (web `/overview`)
 
-- **Audience:** coordinator gate in current screen; backend management semantics include coordinator/chairman but exact matching API is absent.
-- **Current behavior:** Data and Results tabs consume registration stores. `hardMatch` filters tutors if subject IDs, language IDs and session-type IDs overlap; offline student also requires location overlap. Separately, “Gợi ý AI” changes tab and displays an illustration/wait state for five seconds; that click does not call `matchAllStudents()` or an AI/API service. Therefore it is not evidence of AI matching or durable assignment.
-- **Target layout:** data filters; explicit “Run matching” action with selected cohort; progress state driven by actual job/API; explainable match reasons; candidate list; coordinator review; confirmed assignment action. Show unmatched requests with actionable reason, not just empty table.
-- **Actions:** preview deterministic criteria, adjust allowable constraints if product approves, accept/reject candidate, create/persist assignment only through API with audit trail. Do not assign automatically without policy approval.
-- **States:** no eligible requests, loading, no candidates per reason, stale inputs, matching job failure, duplicate run, result awaiting review, conflict when another manager changes data.
-- **Decision needed:** authoritative algorithm and weighting/tie-break rules; whether currently intended as simple hard constraints or AI-assisted recommendations; explainability, privacy, fairness review, manual override, persistence, approval and audit.
+- **Audience:** web route gates Coordinator; backend authorizes coordinator/chairman from the bearer session.
+- **Initial audit behavior:** the old wait state and popup did not call a model or persist assignment. These were replaced in the current web checkout.
+- **Current web behavior:** coordinator selects a student and TF-IDF or optional local BGE-M3, requests Top-K hard-feasible tutors, sees reasons/feature values and confirms or rejects a candidate. Rejections require a reason. Acceptance revalidates capacity and stores a durable assignment. See [API and persistence contract](../../ai-matching-research/05-api-design.md) and [model design](../../ai-matching-research/04-model-design.md).
+- **Flutter target:** reproduce API states and error reasons, show only stored/server-confirmed decisions, preserve manual approval, and clearly label scores as rankings rather than probabilities. Do not implement separate mobile scoring or inference.
+- **States:** missing/incomplete profile, no eligible tutors, loading, unavailable BGE adapter, pending/rejected/accepted recommendation, stale constraints/capacity conflict, active assignment, forbidden.
+- **Decision needed:** mobile exposure and production rollout policy; HCMUT judgment rubric/benchmark; JSON-to-transactional persistence migration; privacy/fairness review. The current ranking has no empirical quality validation.
 
 ## Role and privacy requirements
 

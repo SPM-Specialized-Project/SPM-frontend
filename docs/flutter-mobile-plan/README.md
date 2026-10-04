@@ -62,7 +62,7 @@ Phase 0 Discovery → Phase 1 Flutter foundation → Phase 2 authentication/auth
 3. Define mobile-safe session refresh/revocation and canonical server capability contract.
 4. Resolve coordinator/chairman/admin/lecturer permission mismatches and fixture/JSON persistence production readiness.
 5. Decide core MVP and explicitly defer unbacked ratings, profile editing, library, notifications/chat, analytics and monitoring.
-6. Confirm matching semantics (current interaction is not AI), CodePulse production sandbox requirements, Android package ID/signing, iOS bundle ID and minimum OS.
+6. Review the implemented web matching contract in [`docs/ai-matching-research`](../ai-matching-research/README.md); decide mobile exposure, Coordinator policy and production persistence/privacy gates. Also confirm CodePulse production sandbox requirements, Android package ID/signing, iOS bundle ID and minimum OS.
 
 ## Status vocabulary
 

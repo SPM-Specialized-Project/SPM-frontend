@@ -24,7 +24,7 @@ Mobile route strings below are **proposed** canonical paths for GoRouter; route 
 | `/schedule/history/$id` | `/schedule/requests/:requestId` | Request detail/review after contract. |
 | `/register-session` | `/more/registrations/new` | Role-specific form variant. |
 | `/registration-history` | `/more/registrations` | My requests/review queue by capability. |
-| `/overview` | `/more/coordination/matching` | Coordinator-only; do not call it AI until real algorithm exists. |
+| `/overview` | `/more/coordination/matching` | Coordinator-only; use the documented advisory ranking API. Do not present ranking scores as probabilities or claim validated quality. |
 | `/library` | `/library` | Library tab. |
 | `/library/$query` | `/library/search/:query` | Search results. |
 | `/profile` | `/account/profile` | Own profile, read-only until API supports updates. |

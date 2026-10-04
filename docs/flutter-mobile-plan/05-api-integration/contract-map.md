@@ -28,6 +28,18 @@ This is a mapping of endpoints observed in the checkout. Contracts are not versi
 | Update/delete registration | `PATCH /api/registrations/:id`; `DELETE /api/registrations/:id` | Status/ownership behavior should be written into OpenAPI/schema. |
 | Course requests | `GET/POST /api/course-requests`, `PATCH/DELETE /api/course-requests/:id` | Coordinator/chairman management; generic item/patch. |
 
+## Coordinator matching
+
+The matching API was added after the initial Flutter repository audit. It is synchronous and coordinator/chairman-only except participant feedback. The full schemas and JSON consistency limits are documented in [`docs/ai-matching-research/05-api-design.md`](../../ai-matching-research/05-api-design.md).
+
+| Feature | Endpoint | Current contract / gap |
+|---|---|---|
+| Generate recommendation | `POST /api/matching/recommendations` | `{ studentRegistrationId, model?, topK? }`; `TFIDF` default or configured local `BGE_M3`. Returns feasible ranked candidates, hard-constraint exclusions and feature explanations. |
+| Read recommendation history | `GET /api/matching/recommendations?studentRegistrationId=` | Coordinator/chairman only; saved results. No pagination. |
+| Record candidate decision | `POST /api/matching/recommendations/:id/decision` | `{ tutorRegistrationId, decision: ACCEPT\|REJECT, reason? }`; accept revalidates hard constraints/capacity and creates an assignment; reject requires reason. |
+| Read active assignments | `GET /api/matching/assignments` | Coordinator/chairman only; current IDs/names/status/time. No complete/cancel API yet. |
+| Record outcome feedback | `POST /api/matching/feedback` | Participant or coordinator; `SUCCESSFUL\|PARTIAL\|UNSUCCESSFUL`, optional comment. No feedback list/UI yet; feedback is not automatically training data. |
+
 ## CodePulse endpoint groups
 
 Paths below are relative to `/api/codepulse` unless full path is shown:
@@ -115,6 +127,6 @@ These are adapter types/bodies, not a generated OpenAPI contract. Validate actua
 ### Explicitly unsupported or not confirmed
 
 - A backend upload endpoint, `multipart/form-data` contract, upload size/type limits, scanning result, file download authorization or signed URL lifecycle: **Not confirmed from current codebase**.
-- A public library search, profile CRUD, ratings CRUD, push-token registration, notifications/chat, aggregate report, system-monitoring metrics or matching-job endpoint: **Not found in inspected backend**.
+- A public library search, profile CRUD, ratings CRUD, push-token registration, notifications/chat, aggregate report, system-monitoring metrics or asynchronous matching-job endpoint: **Not found in inspected backend**. Synchronous coordinator matching routes are listed above.
 - Server pagination/sorting for all listed collections: **Not confirmed**; see [pagination/filtering](pagination-filtering.md).
 - Exact body field validation rules for generic `{ item }` / `{ patch }` resources and every CodePulse operation: **Not confirmed** until generated contract or handler-level schema is published.

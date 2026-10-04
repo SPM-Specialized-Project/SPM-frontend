@@ -24,7 +24,7 @@ The web app registers route files through TanStack Router; most routes below are
 | `/schedule/history/$id` | Accept/decline/detail actions; current helper update is local. | Request review/detail after API contract is defined. |
 | `/register-session` | Student, lecturer and coordinator registration/request forms. | Role-specific “Requests” area under More. |
 | `/registration-history` | Registration list/history and status actions; JSON-backed API. | My requests and role-specific review queue. |
-| `/overview` | Coordinator-oriented matching and results UI. The “Gợi ý AI” button shows a five-second waiting state; `hardMatch` separately implements simple criteria overlap. | Coordinator matching workspace only after requirements, persistence and explainability are agreed. |
+| `/overview` | After the 2026-10-02 web matching work, the coordinator panel calls `/api/matching/recommendations`, shows server reasons/features, persists accept/reject decisions, and lists active assignments. TF-IDF is the default; BGE-M3 requires the optional local adapter. | Flutter can use the documented endpoints. Keep this advisory, surface missing-profile reasons, and retain Coordinator confirmation. Matching quality is not benchmarked. |
 | `/library` | Search landing page for HCMUT Library. | Library tab; API/catalog availability must be confirmed. |
 | `/library/$query` | Query results/cards/details; source data is static/local. | Search results and book detail; clearly distinguish catalog availability from cached fixture data. |
 | `/profile` | Placeholder editable-looking profile fields; no API binding confirmed. | Profile read-only initially; editing gated on profile API. |
@@ -33,7 +33,7 @@ The web app registers route files through TanStack Router; most routes below are
 | `/statistical/reports` | Report charts/filters and placeholders; no aggregate endpoint found. | Reports screen after backend aggregates are available. |
 | `/statistical/overview` | Overview/analytics route; role intent differs across screens. | Defer until chairman/coordinator access policy is resolved. |
 | `/statistical/$id` | Course report/detail route. | Course report detail. |
-| `/system-monitoring` | Polls `localhost:5000/api/stats`; no matching API in inspected backend. | Do not port until a secured, reachable metrics service is identified. |
+| `/system-monitoring` | Polls `localhost:5000/api/stats`; no matching metrics API was confirmed in this backend. | Do not port until a secured, reachable metrics service is identified. |
 
 ## Cross-cutting current web UI
 
@@ -64,7 +64,7 @@ The route table above is the exhaustive route inventory. These field notes recor
 - **`/schedule/history`, `/schedule/history/$id`** — Purpose: history/review; role toggles and filters on web. Accept/decline uses local update helper in inspected path. Decision reason/audit and server persistence are not confirmed. Mobile list/detail with explicit pending/decided status after API work.
 - **`/register-session`** — Student/lecturer/manager form branches: student course/language/session/location/target grade; lecturer subjects/languages/session types/location; coordinator course request and proposed slots. Registration stores use API for student/tutor requests; coordinator course request uses `/course-requests`. Exact field schemas/status transitions are generic/not fully confirmed. Mobile uses role-derived form, no role toggle.
 - **`/registration-history`** — Uses registration APIs; pending/approved/declined display and CRUD paths. Filtering by display name is fragile. Exact pagination/server sort is not confirmed. Mobile groups own requests vs manager queue and identifies owner by stable ID.
-- **`/overview`** — Coordinator client gate, data/results tabs, registration filters and match result tables. `hardMatch` is exact overlap on subject, language and session type, plus location for offline student. “Gợi ý AI” only displays a five-second wait view; that click does not call `hardMatch` or an AI service. Mobile must not brand it as AI or persist assignment without a service.
+- **`/overview`** — Coordinator gate, registration filters, persisted matching recommendations and decision review. The old five-second wait and client-only assignment popup described in the initial audit were removed. Current API, feature semantics and evaluation limits are in [AI matching research](../../ai-matching-research/README.md). The UI is advisory; the score is not a probability and quality is not yet evaluated on HCMUT labels.
 
 ### Library, profile and management screens
 
