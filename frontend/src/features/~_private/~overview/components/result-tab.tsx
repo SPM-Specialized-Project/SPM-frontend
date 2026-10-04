@@ -4,16 +4,14 @@ import { courseStore } from '@/components/data/~mock-courses';
 import { pastRegistrationStore, type PastRegistration } from '@/components/data/~mock-register';
 import { sessionStore, type Session } from '@/components/data/~mock-session';
 import { tutorRegistrationStore } from '@/components/data/~mock-tutor-register';
-import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
 import { useDataStore } from '@/services/use-data-store';
 
 import { MatchedSessionsPanel } from './matched-sessions-panel';
-import { MatchingPopupOverlay } from './matching-popup-overlay';
+import { MatchingRecommendationsPanel } from './matching-recommendations-panel';
 import type { MatchedCourseGroup, UnifiedRegistration } from './result-types';
 import { UnmatchedRequestsPanel } from './unmatched-requests-panel';
 
 const ITEMS_PER_PAGE_TOP = 3;
-const ITEMS_PER_PAGE_BOTTOM = 5;
 
 export function ResultTab() {
   const courses = useDataStore(courseStore);
@@ -23,12 +21,8 @@ export function ResultTab() {
 
   const [topCurrentPage, setTopCurrentPage] = useState(1);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
-  const [bottomCurrentPage, setBottomCurrentPage] = useState(1);
   const [searchName, setSearchName] = useState('');
   const [searchSubject, setSearchSubject] = useState('');
-  const [isAssignPopupOpen, setIsAssignPopupOpen] = useState(false);
-  const [selectedRegistration, setSelectedRegistration] = useState<UnifiedRegistration | null>(null);
-  useLockBodyScroll(isAssignPopupOpen);
 
   const matchedData = useMemo<MatchedCourseGroup[]>(() => {
     const sessionsByCourse = sessions.reduce<Record<string, Session[]>>((groups, session) => {
@@ -81,10 +75,7 @@ export function ResultTab() {
       .filter((request) => request.courseCode.toLowerCase().includes(searchSubject.toLowerCase())),
     [allUnmatchedRequests, searchName, searchSubject],
   );
-  const paginatedBottomRequests = useMemo(() => {
-    const start = (bottomCurrentPage - 1) * ITEMS_PER_PAGE_BOTTOM;
-    return filteredBottomRequests.slice(start, start + ITEMS_PER_PAGE_BOTTOM);
-  }, [filteredBottomRequests, bottomCurrentPage]);
+  const paginatedBottomRequests = filteredBottomRequests;
 
   const toggleRow = (courseId: string) => {
     setExpandedRows((previous) => {
@@ -95,42 +86,9 @@ export function ResultTab() {
     });
   };
 
-  const openAssignPopup = (registration: UnifiedRegistration) => {
-    setSelectedRegistration(registration);
-    setIsAssignPopupOpen(true);
-  };
-
-  const closePopup = () => {
-    setIsAssignPopupOpen(false);
-    setSelectedRegistration(null);
-  };
-
-  const availableMatches = useMemo(() => {
-    if (!selectedRegistration) return { people: [] as PastRegistration[], label: '' };
-    const courseCode = selectedRegistration.courseCode;
-    if (selectedRegistration.role === 'Student') {
-      return {
-        people: tutorRegistrations.filter((tutor) => tutor.subjects.some((subject) => subject?.name?.includes(courseCode))),
-        label: 'Tutor',
-      };
-    }
-    return {
-      people: studentRegistrations.filter((student) =>
-        (student.subjects?.[0]?.name?.split('(')?.[1]?.replace(')', '') ?? '') === courseCode,
-      ),
-      label: 'Student',
-    };
-  }, [selectedRegistration, studentRegistrations, tutorRegistrations]);
-
-  const handleMatch = (personId: string) => {
-    if (!selectedRegistration) return;
-    console.log('Assigned:', personId, 'to:', selectedRegistration.id);
-    alert('Đã phân công thành công! (Mockup)');
-    closePopup();
-  };
-
   return (
     <div className="space-y-8 py-6">
+      <MatchingRecommendationsPanel />
       <MatchedSessionsPanel
         data={paginatedTopData}
         currentPage={topCurrentPage}
@@ -145,24 +103,10 @@ export function ResultTab() {
         searchSubject={searchSubject}
         onSearchNameChange={setSearchName}
         onSearchSubjectChange={setSearchSubject}
-        currentPage={bottomCurrentPage}
-        totalPages={Math.ceil(filteredBottomRequests.length / ITEMS_PER_PAGE_BOTTOM)}
-        onPageChange={setBottomCurrentPage}
-        onAssign={openAssignPopup}
-        onConfirm={() => {
-          alert('Xác nhận tạo lớp thành công...');
-          setTimeout(() => { window.location.href = '/dashboard'; }, 1000);
-        }}
+        currentPage={1}
+        totalPages={1}
+        onPageChange={() => undefined}
       />
-      {isAssignPopupOpen && (
-        <MatchingPopupOverlay
-          selectedRegistration={selectedRegistration}
-          availablePeople={availableMatches.people}
-          label={availableMatches.label}
-          onClose={closePopup}
-          onMatch={handleMatch}
-        />
-      )}
     </div>
   );
 }

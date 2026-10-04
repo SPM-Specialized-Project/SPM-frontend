@@ -2,12 +2,13 @@ import { useMemo, useState } from 'react';
 
 import { mockLanguages, mockLocations, pastRegistrationStore, type PastRegistration } from '@/components/data/~mock-register';
 import { tutorRegistrationStore } from '@/components/data/~mock-tutor-register';
-import useLockBodyScroll from '@/hooks/use-lock-body-scroll';
+import { api } from '@/services/api-client';
 import { useDataStore } from '@/services/use-data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { DataFilters } from './data-filters';
 import { DataRequestTable } from './data-request-table';
-import { AssignPopupOverlay, FilterPopupOverlay } from './data-tab-popups';
+import { FilterPopupOverlay } from './data-tab-popups';
 import { type FilterState } from './filter-popup';
 import type { UnifiedRegistration } from './result-types';
 
@@ -19,11 +20,10 @@ export function DataTab() {
   const [searchName, setSearchName] = useState('');
   const [searchSubject, setSearchSubject] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [isAssignPopupOpen, setIsAssignPopupOpen] = useState(false);
-  const [selectedRegistration, setSelectedRegistration] = useState<UnifiedRegistration | null>(null);
   const [isFilterPopupOpen, setIsFilterPopupOpen] = useState(false);
+  const [reviewingTutorId, setReviewingTutorId] = useState('');
+  const [actionError, setActionError] = useState('');
   const [filters, setFilters] = useState<FilterState>({ locations: {}, language: '', role: '', sessionType: '' });
-  useLockBodyScroll(isAssignPopupOpen || isFilterPopupOpen);
 
   const allRequests = useMemo<UnifiedRegistration[]>(() => {
     const toRequest = (registration: PastRegistration, role: UnifiedRegistration['role']): UnifiedRegistration => ({
@@ -73,37 +73,6 @@ export function DataTab() {
     return filteredRequests.slice(start, start + ITEMS_PER_PAGE);
   }, [filteredRequests, currentPage]);
 
-  const availableMatches = useMemo(() => {
-    if (!selectedRegistration) return { people: [] as PastRegistration[], label: '' };
-    const courseCode = selectedRegistration.courseCode;
-    if (selectedRegistration.role === 'Student') {
-      return {
-        people: tutorRegistrations.filter((tutor) => tutor.subjects?.some((subject) => subject?.name?.includes(courseCode))),
-        label: 'Tutor',
-      };
-    }
-    return {
-      people: studentRegistrations.filter((student) => (student.subjects?.[0]?.name.split('(')?.[1]?.replace(')', '') ?? '') === courseCode),
-      label: 'Student',
-    };
-  }, [selectedRegistration, studentRegistrations, tutorRegistrations]);
-
-  const openAssignPopup = (registration: UnifiedRegistration) => {
-    setSelectedRegistration(registration);
-    setIsAssignPopupOpen(true);
-  };
-  const closeAssignPopup = () => {
-    setSelectedRegistration(null);
-    setIsAssignPopupOpen(false);
-  };
-  const handleMatch = (personId: string) => {
-    if (!selectedRegistration) return;
-    const store = selectedRegistration.role === 'Student' ? pastRegistrationStore : tutorRegistrationStore;
-    store.update(selectedRegistration.id, { status: 'Approved' });
-    console.log('Assigned person id:', personId, 'for registration:', selectedRegistration.id);
-    alert('Đã phân công thành công!');
-    closeAssignPopup();
-  };
   const applyFilters = (newFilters: FilterState) => {
     setFilters(newFilters);
     setCurrentPage(1);
@@ -111,6 +80,30 @@ export function DataTab() {
   };
   const hasActiveFilters = Object.values(filters.locations || {}).some(Boolean)
     || Boolean(filters.language) || Boolean(filters.role) || Boolean(filters.sessionType);
+
+  const approveTutor = async (registrationId: string) => {
+    const tutor = tutorRegistrationStore.getById(registrationId);
+    if (!tutor || !Number.isInteger(tutor.matchingProfile?.maxActiveStudents)
+      || (tutor.matchingProfile?.maxActiveStudents ?? 0) < 1) {
+      setActionError('Tutor cần đăng ký lại hồ sơ và tự xác nhận sức chứa trước khi được duyệt ghép cặp. Hồ sơ cũ không được tự gán sức chứa.');
+      return;
+    }
+    setReviewingTutorId(registrationId);
+    setActionError('');
+    try {
+      const response = await api.updateRegistration({
+        ...getCurrentViewerContext(),
+        registrationType: 'tutor',
+        registrationId,
+        patch: { status: 'Approved' },
+      });
+      tutorRegistrationStore.upsert(response.data.item);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Không duyệt được hồ sơ tutor.');
+    } finally {
+      setReviewingTutorId('');
+    }
+  };
 
   return (
     <div>
@@ -127,15 +120,10 @@ export function DataTab() {
         currentPage={currentPage}
         totalPages={totalPages}
         onPageChange={setCurrentPage}
-        onAssign={openAssignPopup}
+        onApproveTutor={(request) => void approveTutor(request.id)}
+        reviewingTutorId={reviewingTutorId}
       />
-      <AssignPopupOverlay
-        selectedRegistration={isAssignPopupOpen ? selectedRegistration : null}
-        availablePeople={availableMatches.people}
-        label={availableMatches.label}
-        onClose={closeAssignPopup}
-        onMatch={handleMatch}
-      />
+      {actionError && <p role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-700">{actionError}</p>}
       <FilterPopupOverlay
         open={isFilterPopupOpen}
         initialState={hasActiveFilters ? filters : undefined}

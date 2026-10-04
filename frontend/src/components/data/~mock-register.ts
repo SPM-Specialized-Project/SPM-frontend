@@ -41,7 +41,19 @@ export type PastRegistration = {
   sessionTypes: DropdownOption[]; // 'hybrid' | 'online'
   locations: DropdownOption[]; // Danh sách địa điểm
   meetLink?: string; // Optional meet link for hybrid sessions
+  achievements?: string;
   specialRequest: string;
+  matchingProfile?: {
+    requestedModes?: string[];
+    acceptedModes?: string[];
+    locationIds?: string[];
+    availability?: {
+      timezone?: string;
+      windows: Array<{ dayOfWeek: number; startTime: string; endTime: string }>;
+    };
+    maxActiveStudents?: number;
+    topicCompetencies?: Array<{ topicId: string; level?: string }>;
+  };
   declineReason?: string;
   status: 'Pending' | 'Approved' | 'Declined';
   createdAt: string; // ISO date string
@@ -151,18 +163,18 @@ export const pastRegistrationStore = createRemoteDataStore(
 // --- Helpers to create new registrations ---
 /**
  * Create and store a new PastTutorRegistration.
- * If Name/email are not provided, a random name from NAMES_POOL is used
- * and an email generated.
+ * A real authenticated student name/email must be provided; profile data is never fabricated.
  */
-export function createPastRegistration(input: Partial<PastRegistration> & {
+export async function createPastRegistration(input: Partial<PastRegistration> & {
   course: DropdownOption;
   language: DropdownOption;
   sessionType: DropdownOption;
   location?: DropdownOption;
   specialRequest: string;
-}): PastRegistration {
-  const name = input.Name ?? NAMES_POOL[Math.floor(Math.random() * NAMES_POOL.length)].name;
-  const email = input.Email ?? createFakeEmail(name);
+}): Promise<PastRegistration> {
+  const name = String(input.Name ?? '').trim();
+  const email = String(input.Email ?? '').trim();
+  if (!name || !email) throw new Error('Thiếu tên hoặc email từ hồ sơ tài khoản đã xác thực.');
   const id = `reg-${Date.now()}`;
   const record: PastRegistration = {
     id,
@@ -171,12 +183,19 @@ export function createPastRegistration(input: Partial<PastRegistration> & {
     subjects: [input.course],
     languages: [input.language],
     sessionTypes: [input.sessionType],
-    locations: [input.location ?? { id: 'hybrid', name: 'hybrid' }],
+    locations: input.location ? [input.location] : [],
     specialRequest: input.specialRequest,
+    matchingProfile: input.matchingProfile,
     status: 'Pending',
     createdAt: new Date().toISOString(),
   };
-  return pastRegistrationStore.create(record);
+  const response = await api.createRegistration({
+    ...getCurrentViewerContext(),
+    registrationType: 'student',
+    item: { ...record, ownerRole: 'student', ownerEmail: record.Email },
+  });
+  pastRegistrationStore.upsert(response.data.item);
+  return response.data.item;
 }
 
 export function deletePastRegistration(id: string): boolean {

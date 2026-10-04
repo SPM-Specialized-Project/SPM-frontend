@@ -10,6 +10,7 @@ import {
 } from '@/components/data/~mock-register';
 import { useDataStore } from '@/services/use-data-store';
 
+import { MatchingAvailabilityFields, type AvailabilityWindow } from './matching-availability-fields';
 import { FormDropdown, FormSection, FormTextArea, type DropdownOption } from './tutor-register-form';
 
 // SVG cho Môn học
@@ -85,6 +86,9 @@ export function StudentRegister() {
     ``
   );
   const [desiredScore, setDesiredScore] = useState<number | null>(4.0);
+  const [availabilityWindows, setAvailabilityWindows] = useState<AvailabilityWindow[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState('');
 
   const navigate = useNavigate();
 
@@ -170,6 +174,7 @@ export function StudentRegister() {
               </FormSection>
             )}
 
+            <MatchingAvailabilityFields windows={availabilityWindows} onChange={setAvailabilityWindows} />
 
             {/* Yêu cầu đặc biệt */}
             <FormSection title="Yêu cầu đặc biệt">
@@ -219,9 +224,12 @@ export function StudentRegister() {
             </button>
             <button
               type="button"
+              disabled={isSubmitting}
               className="rounded-lg bg-blue-700 px-6 py-2 text-sm font-medium text-white shadow-sm hover:bg-blue-800"
-              onClick={() => {
+              onClick={async () => {
                 // Create and save registration
+                setIsSubmitting(true);
+                setSubmitError('');
                 try {
                   const rawUserStore = localStorage.getItem('userStore');
                   const userStore = rawUserStore ? JSON.parse(rawUserStore as string) : null;
@@ -229,7 +237,7 @@ export function StudentRegister() {
                   const userLocalStore = State?.user ?? null;
                   const stuName = userLocalStore?.firstName ?? '';
                   const stuEmail = userLocalStore?.email ?? '';
-                  createPastRegistration({
+                  await createPastRegistration({
                     // course: subject,
                     // language,
                     // sessionType,
@@ -241,21 +249,28 @@ export function StudentRegister() {
                     course: subject,
                     language,
                     sessionType,
+                    location: sessionType.id === 'online' ? undefined : location,
                     specialRequest,
+                    matchingProfile: {
+                      requestedModes: [sessionType.id === 'hybrid' ? 'HYBRID' : 'ONLINE'],
+                      locationIds: sessionType.id === 'online' ? [] : location ? [location.id] : [],
+                      availability: { timezone: 'Asia/Ho_Chi_Minh', windows: availabilityWindows },
+                    },
                     status: 'Pending',
                     createdAt: `${new Date().toISOString()}`,
                   });
+                  navigate({ to: '/registration-history' });
                 } catch (err) {
-                  console.error(err);
+                  setSubmitError(err instanceof Error ? err.message : 'Không lưu được đăng ký.');
+                } finally {
+                  setIsSubmitting(false);
                 }
-
-                // Navigate to registration history
-                navigate({ to: '/registration-history' });
               }}
             >
-              Đăng ký
+              {isSubmitting ? 'Đang lưu…' : 'Đăng ký'}
             </button>
           </div>
+          {submitError && <p role="alert" className="px-6 pb-5 text-sm text-red-700">{submitError}</p>}
         </form>
       </main>
     </div>

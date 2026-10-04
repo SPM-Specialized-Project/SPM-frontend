@@ -134,6 +134,62 @@ export type ApiResourceResponse<T> = {
 
 export type SessionListResponse = BackendListResponse<Session>;
 export type RegistrationListResponse = BackendListResponse<PastRegistration>;
+export type MatchingCandidate = {
+  tutorRegistrationId: string;
+  rankingScore: number | null;
+  features: Record<string, number>;
+  reasons: Array<{
+    code: string;
+    value?: string | string[];
+    evidence?: { student: string[]; tutor: string[] };
+  }>;
+  hardConstraints: Array<{ constraint: string; passed: boolean; reason: string }>;
+};
+export type MatchingExclusion = {
+  tutorRegistrationId: string;
+  reasons: Array<{ constraint: string; passed: boolean; reason: string }>;
+};
+export type MatchingRecommendation = {
+  id: string;
+  studentRegistrationId: string;
+  createdAt: string;
+  updatedAt?: string;
+  status: 'PENDING_COORDINATOR_DECISION' | 'ACCEPTED' | 'REJECTED';
+  matchingSchemaVersion: number;
+  extractionVersion: string;
+  model: 'TFIDF' | 'BGE_M3';
+  modelVersion: string;
+  ranking: string;
+  scoreSemantics: 'ranking_score_not_probability';
+  reviewWarnings: string[];
+  candidates: MatchingCandidate[];
+  excluded: MatchingExclusion[];
+  decidedTutorRegistrationIds?: string[];
+  counts: { evaluated: number; eligible: number; excluded: number };
+};
+export type MatchingAssignment = {
+  id: string;
+  recommendationId: string;
+  decisionId: string;
+  studentRegistrationId: string;
+  tutorRegistrationId: string;
+  studentName: string | null;
+  tutorName: string | null;
+  status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  createdAt: string;
+};
+export type MatchingDecisionResponse = {
+  decision: {
+    id: string;
+    recommendationId: string;
+    studentRegistrationId: string;
+    tutorRegistrationId: string;
+    assignmentId: string | null;
+    decision: 'ACCEPT' | 'REJECT';
+    reason: string | null;
+    decidedAt: string;
+  };
+};
 export type CourseRequestListResponse = BackendListResponse<CourseCreationRequest>;
 export type CourseListResponse = BackendListResponse<ApiCourse>;
 
@@ -148,6 +204,18 @@ export type UpdateSessionRequest = ApiMutationRequest & {
 
 export type RegistrationQuery = ApiListQuery & {
   registrationType?: 'student' | 'tutor';
+};
+
+export type CreateMatchingRecommendationRequest = {
+  studentRegistrationId: string;
+  model?: 'TFIDF' | 'BGE_M3';
+  topK?: number;
+};
+
+export type MatchingDecisionRequest = {
+  tutorRegistrationId: string;
+  decision: 'ACCEPT' | 'REJECT';
+  reason?: string;
 };
 
 export type CreateRegistrationRequest = ApiMutationRequest & {
