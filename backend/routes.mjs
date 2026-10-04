@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { PORT } from './config.mjs';
 import {
   COURSE_CATALOG,
@@ -35,6 +36,8 @@ import {
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
 import { getCodePulseClassrooms, getCodePulseSubmissionContext, handleCodePulse } from './codepulse.mjs';
+import { evaluateHardConstraints } from './matching/hard-constraints.mjs';
+import { createMatchingService, withExtractedProfile } from './matching/service.mjs';
 
 const isMembershipRoute = (parts) =>
   parts[0] === 'api' &&
@@ -64,6 +67,33 @@ const isAssignedLecturer = (courseId, email) => {
 };
 
 const isActiveRecord = (record) => String(record.status).toUpperCase() === 'ACTIVE';
+
+const matchingService = createMatchingService();
+let matchingMutationQueue = Promise.resolve();
+
+function withMatchingMutationLock(task) {
+  const operation = matchingMutationQueue.then(task);
+  matchingMutationQueue = operation.then(() => undefined, () => undefined);
+  return operation;
+}
+
+const isCoordinator = (role) => role === 'coordinator' || role === 'chairman';
+const registrationStatus = (record) => String(record?.status ?? '').trim().toUpperCase();
+const approvedTutor = (record) => registrationStatus(record) === 'APPROVED';
+const openStudentRequest = (record) => !['DECLINED', 'CLOSED', 'CANCELLED', 'CANCELED'].includes(registrationStatus(record));
+
+function matchingDecisionView(decision) {
+  return {
+    id: decision.id,
+    recommendationId: decision.recommendationId,
+    studentRegistrationId: decision.studentRegistrationId,
+    tutorRegistrationId: decision.tutorRegistrationId,
+    assignmentId: decision.assignmentId ?? null,
+    decision: decision.decision,
+    reason: decision.reason,
+    decidedAt: decision.decidedAt,
+  };
+}
 
 const isCodePulseMembershipFor = (membership, classroom) =>
   membership.classroomId === classroom.id ||
@@ -251,6 +281,247 @@ async function handleRequest(request, response) {
     && !isDsaLabCatalogRoute
     && !isDsaLabSubmissionRoute) {
     throw apiError(403, 'FORBIDDEN', 'Vai trò này không có quyền truy cập API khóa học.');
+  }
+
+  if (parts[0] === 'api' && parts[1] === 'matching') {
+    const feedbackRoute = parts[2] === 'feedback';
+    const feedbackActor = ['coordinator', 'chairman', 'student', 'lecturer'].includes(viewerRole);
+    if (feedbackRoute ? !feedbackActor : !isCoordinator(viewerRole)) {
+      throw apiError(403, 'FORBIDDEN', feedbackRoute
+        ? 'Vai trò này không được gửi phản hồi matching.'
+        : 'Chỉ điều phối viên được sử dụng chức năng ghép tutor.');
+    }
+
+    if (request.method === 'POST' && parts[2] === 'recommendations' && !parts[3]) {
+      const body = await readRequestBody(request);
+      const studentRegistrationId = String(body.studentRegistrationId ?? '').trim();
+      if (!studentRegistrationId) throw apiError(400, 'STUDENT_REGISTRATION_REQUIRED', 'Cần chọn đăng ký student.');
+      const topK = body.topK === undefined ? 10 : Number(body.topK);
+      if (!Number.isInteger(topK) || topK < 1 || topK > 50) {
+        throw apiError(400, 'INVALID_TOP_K', 'topK phải là số nguyên từ 1 đến 50.');
+      }
+      const registrations = await readCollection('registrations');
+      const studentRecord = registrations.find((record) => record.id === studentRegistrationId
+        && record.registrationType === 'student');
+      if (!studentRecord) throw apiError(404, 'STUDENT_REGISTRATION_NOT_FOUND', 'Không tìm thấy đăng ký student.');
+      if (!openStudentRequest(studentRecord)) {
+        throw apiError(409, 'STUDENT_REQUEST_CLOSED', 'Đăng ký student đã đóng hoặc bị từ chối.');
+      }
+      if ((await readCollection('matchingAssignments')).some((assignment) => assignment.studentRegistrationId === studentRecord.id
+        && assignment.status === 'ACTIVE')) {
+        throw apiError(409, 'STUDENT_ALREADY_ASSIGNED', 'Student đã có tutor đang hoạt động.');
+      }
+      const tutorRegistrations = registrations.filter((record) => record.registrationType === 'tutor');
+      const approvedTutors = tutorRegistrations.filter(approvedTutor);
+      const recommendation = await matchingService.recommend({
+        studentRecord,
+        tutorRecords: approvedTutors,
+        assignments: await readCollection('matchingAssignments'),
+        topK,
+        model: body.model,
+      });
+      const inactiveTutorExclusions = tutorRegistrations
+        .filter((record) => !approvedTutor(record))
+        .map((record) => ({
+          tutorRegistrationId: record.id,
+          reasons: [{ constraint: 'registrationStatus', passed: false, reason: 'tutor_not_approved' }],
+        }));
+      const now = new Date().toISOString();
+      const item = {
+        id: `match-rec-${randomUUID()}`,
+        studentRegistrationId,
+        createdAt: now,
+        createdBy: viewerEmail,
+        status: 'PENDING_COORDINATOR_DECISION',
+        matchingSchemaVersion: recommendation.matchingSchemaVersion,
+        extractionVersion: recommendation.extractionVersion,
+        model: recommendation.model,
+        modelVersion: recommendation.modelVersion,
+        ranking: recommendation.ranking,
+        scoreSemantics: recommendation.scoreSemantics,
+        reviewWarnings: recommendation.reviewWarnings,
+        candidates: recommendation.candidates,
+        excluded: [...recommendation.excluded, ...inactiveTutorExclusions],
+        counts: {
+          ...recommendation.counts,
+          evaluated: tutorRegistrations.length,
+          excluded: recommendation.excluded.length + inactiveTutorExclusions.length,
+        },
+      };
+      const records = await readCollection('matchingRecommendations');
+      await saveCollection('matchingRecommendations', [...records, item]);
+      sendJson(response, 201, { item });
+      return;
+    }
+
+    if (request.method === 'GET' && parts[2] === 'recommendations' && !parts[3]) {
+      const records = await readCollection('matchingRecommendations');
+      const studentRegistrationId = requestUrl.searchParams.get('studentRegistrationId');
+      const items = records.filter((record) => !studentRegistrationId
+        || record.studentRegistrationId === studentRegistrationId);
+      sendJson(response, 200, { items, total: items.length });
+      return;
+    }
+
+    if (request.method === 'GET' && parts[2] === 'assignments' && !parts[3]) {
+      const assignments = await readCollection('matchingAssignments');
+      const registrations = await readCollection('registrations');
+      const studentRegistrationId = requestUrl.searchParams.get('studentRegistrationId');
+      const tutorRegistrationId = requestUrl.searchParams.get('tutorRegistrationId');
+      const items = assignments
+        .filter((record) => !studentRegistrationId || record.studentRegistrationId === studentRegistrationId)
+        .filter((record) => !tutorRegistrationId || record.tutorRegistrationId === tutorRegistrationId)
+        .map((record) => ({
+          id: record.id,
+          recommendationId: record.recommendationId,
+          decisionId: record.decisionId,
+          studentRegistrationId: record.studentRegistrationId,
+          tutorRegistrationId: record.tutorRegistrationId,
+          status: record.status,
+          createdAt: record.createdAt,
+          studentName: registrations.find((item) => item.id === record.studentRegistrationId)?.Name ?? null,
+          tutorName: registrations.find((item) => item.id === record.tutorRegistrationId)?.Name ?? null,
+        }));
+      sendJson(response, 200, { items, total: items.length });
+      return;
+    }
+
+    if (request.method === 'POST' && parts[2] === 'recommendations' && parts[3] && parts[4] === 'decision') {
+      const body = await readRequestBody(request);
+      const decisionType = String(body.decision ?? '').toUpperCase();
+      const reason = String(body.reason ?? '').trim();
+      if (!['ACCEPT', 'REJECT'].includes(decisionType)) {
+        throw apiError(400, 'INVALID_MATCHING_DECISION', 'decision phải là ACCEPT hoặc REJECT.');
+      }
+      if (decisionType === 'REJECT' && !reason) {
+        throw apiError(400, 'DECISION_REASON_REQUIRED', 'Cần ghi lý do khi từ chối gợi ý.');
+      }
+      if (reason.length > 1000) throw apiError(400, 'DECISION_REASON_TOO_LONG', 'Lý do tối đa 1000 ký tự.');
+
+      const result = await withMatchingMutationLock(async () => {
+        const recommendations = await readCollection('matchingRecommendations');
+        const recommendation = recommendations.find((record) => record.id === parts[3]);
+        if (!recommendation) throw apiError(404, 'RECOMMENDATION_NOT_FOUND', 'Không tìm thấy gợi ý ghép cặp.');
+        if (recommendation.status !== 'PENDING_COORDINATOR_DECISION') {
+          throw apiError(409, 'RECOMMENDATION_ALREADY_DECIDED', 'Gợi ý này đã được xử lý.');
+        }
+        const tutorRegistrationId = String(body.tutorRegistrationId ?? '').trim();
+        const candidate = recommendation.candidates.find((item) => item.tutorRegistrationId === tutorRegistrationId);
+        if (!candidate) throw apiError(400, 'TUTOR_NOT_IN_RECOMMENDATION', 'Tutor không thuộc danh sách gợi ý này.');
+
+        const registrations = await readCollection('registrations');
+        const student = registrations.find((record) => record.id === recommendation.studentRegistrationId
+          && record.registrationType === 'student');
+        const tutor = registrations.find((record) => record.id === tutorRegistrationId
+          && record.registrationType === 'tutor' && approvedTutor(record));
+        if (!student || !openStudentRequest(student) || !tutor) {
+          throw apiError(409, 'MATCHING_PROFILE_CHANGED', 'Hồ sơ đã thay đổi trạng thái; hãy tạo gợi ý mới.');
+        }
+        const assignments = await readCollection('matchingAssignments');
+        const decisions = await readCollection('matchingDecisions');
+        if (decisions.some((item) => item.recommendationId === recommendation.id
+          && item.tutorRegistrationId === tutorRegistrationId)) {
+          throw apiError(409, 'CANDIDATE_ALREADY_DECIDED', 'Tutor này đã được điều phối viên xem xét.');
+        }
+        if (decisionType === 'ACCEPT') {
+          if (assignments.some((assignment) => assignment.studentRegistrationId === student.id && assignment.status === 'ACTIVE')) {
+            throw apiError(409, 'STUDENT_ALREADY_ASSIGNED', 'Student đã có tutor đang hoạt động.');
+          }
+          const studentProfile = withExtractedProfile(student, 'STUDENT');
+          const tutorProfile = withExtractedProfile(tutor, 'TUTOR');
+          const activeTutorCount = assignments.filter((assignment) => assignment.tutorRegistrationId === tutor.id
+            && assignment.status === 'ACTIVE').length;
+          const feasibility = evaluateHardConstraints(studentProfile, tutorProfile, activeTutorCount);
+          if (!feasibility.eligible) {
+            throw apiError(409, 'MATCH_NO_LONGER_FEASIBLE', 'Các điều kiện bắt buộc không còn thỏa mãn; hãy tạo gợi ý mới.', {
+              constraints: Object.fromEntries(Object.entries(feasibility.constraints).map(([key, value]) => [key, value.reason])),
+            });
+          }
+        }
+
+        const decidedAt = new Date().toISOString();
+        const assignmentId = decisionType === 'ACCEPT' ? `match-assignment-${randomUUID()}` : null;
+        const decision = {
+          id: `match-decision-${randomUUID()}`,
+          recommendationId: recommendation.id,
+          studentRegistrationId: student.id,
+          tutorRegistrationId,
+          assignmentId,
+          decision: decisionType,
+          reason: reason || null,
+          decidedAt,
+          decidedBy: viewerEmail,
+        };
+        if (decisionType === 'ACCEPT') {
+          const assignment = {
+            id: assignmentId,
+            recommendationId: recommendation.id,
+            decisionId: decision.id,
+            studentRegistrationId: student.id,
+            tutorRegistrationId,
+            status: 'ACTIVE',
+            createdAt: decidedAt,
+            createdBy: viewerEmail,
+          };
+          await saveCollection('matchingAssignments', [...assignments, assignment]);
+        }
+        await saveCollection('matchingDecisions', [...decisions, decision]);
+        const decidedTutorIds = new Set([
+          ...decisions.filter((item) => item.recommendationId === recommendation.id).map((item) => item.tutorRegistrationId),
+          tutorRegistrationId,
+        ]);
+        const decidedTutorRegistrationIds = [...decidedTutorIds];
+        const nextStatus = decisionType === 'ACCEPT'
+          ? 'ACCEPTED'
+          : recommendation.candidates.every((item) => decidedTutorIds.has(item.tutorRegistrationId))
+            ? 'REJECTED'
+            : 'PENDING_COORDINATOR_DECISION';
+        const updatedRecommendations = recommendations.map((record) => record.id === recommendation.id
+          ? { ...record, status: nextStatus, lastDecisionId: decision.id, decidedTutorRegistrationIds, updatedAt: decidedAt }
+          : record);
+        await saveCollection('matchingRecommendations', updatedRecommendations);
+        return { decision: matchingDecisionView(decision) };
+      });
+      sendJson(response, 201, result);
+      return;
+    }
+
+    if (request.method === 'POST' && parts[2] === 'feedback' && !parts[3]) {
+      const body = await readRequestBody(request);
+      const assignmentId = String(body.assignmentId ?? '').trim();
+      const outcome = String(body.outcome ?? '').toUpperCase();
+      const comment = String(body.comment ?? '').trim();
+      if (!['SUCCESSFUL', 'PARTIAL', 'UNSUCCESSFUL'].includes(outcome)) {
+        throw apiError(400, 'INVALID_FEEDBACK_OUTCOME', 'outcome phải là SUCCESSFUL, PARTIAL hoặc UNSUCCESSFUL.');
+      }
+      if (comment.length > 2000) throw apiError(400, 'FEEDBACK_TOO_LONG', 'Nhận xét tối đa 2000 ký tự.');
+      const assignments = await readCollection('matchingAssignments');
+      const assignment = assignments.find((record) => record.id === assignmentId && record.status === 'ACTIVE');
+      if (!assignment) throw apiError(404, 'ASSIGNMENT_NOT_FOUND', 'Không tìm thấy phân công đang hoạt động.');
+      if (!isCoordinator(viewerRole)) {
+        const registrations = await readCollection('registrations');
+        const student = registrations.find((record) => record.id === assignment.studentRegistrationId);
+        const tutor = registrations.find((record) => record.id === assignment.tutorRegistrationId);
+        if (![student?.Email, tutor?.Email].some((email) => normalizeEmail(email) === normalizeEmail(viewerEmail))) {
+          throw apiError(403, 'FORBIDDEN', 'Chỉ người tham gia phân công được gửi phản hồi.');
+        }
+      }
+      const item = {
+        id: `match-feedback-${randomUUID()}`,
+        assignmentId,
+        outcome,
+        comment: comment || null,
+        createdAt: new Date().toISOString(),
+        createdByRole: viewerRole,
+        createdByEmail: viewerEmail,
+      };
+      const feedback = await readCollection('matchingFeedback');
+      await saveCollection('matchingFeedback', [...feedback, item]);
+      sendJson(response, 201, { item: { ...item, createdByEmail: undefined } });
+      return;
+    }
+
+    throw apiError(404, 'MATCHING_ROUTE_NOT_FOUND', 'Không tìm thấy matching API endpoint.');
   }
 
   if (isMembershipRoute(parts)) {
@@ -647,38 +918,46 @@ async function handleRequest(request, response) {
 
   if (parts[0] === 'api' && parts[1] === 'registrations' && parts[2] && request.method === 'PATCH') {
     const body = await readRequestBody(request);
-    const records = await readCollection('registrations');
-    const index = records.findIndex((record) => record.id === parts[2]);
-    if (index < 0) throw apiError(404, 'REGISTRATION_NOT_FOUND', `Không tìm thấy registration ${parts[2]}.`);
-    const current = records[index];
-    const permissions = getResourcePermissions({
-      viewerRole,
-      ownerRole: current.ownerRole,
-      ownerEmail: current.ownerEmail,
-      viewerEmail,
+    const updated = await withMatchingMutationLock(async () => {
+      const records = await readCollection('registrations');
+      const index = records.findIndex((record) => record.id === parts[2]);
+      if (index < 0) throw apiError(404, 'REGISTRATION_NOT_FOUND', `Không tìm thấy registration ${parts[2]}.`);
+      const current = records[index];
+      const permissions = getResourcePermissions({
+        viewerRole,
+        ownerRole: current.ownerRole,
+        ownerEmail: current.ownerEmail,
+        viewerEmail,
+      });
+      if (!permissions.canEdit) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền chỉnh sửa registration này.');
+      const { id: ignoredId, ownerRole: ignoredRole, ownerEmail: ignoredEmail, ...patch } = clone(body.patch ?? {});
+      const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
+      records[index] = next;
+      await saveCollection('registrations', records);
+      return next;
     });
-    if (!permissions.canEdit) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền chỉnh sửa registration này.');
-    const { id: ignoredId, ownerRole: ignoredRole, ownerEmail: ignoredEmail, ...patch } = clone(body.patch ?? {});
-    const updated = { ...current, ...patch, updatedAt: new Date().toISOString() };
-    records[index] = updated;
-    await saveCollection('registrations', records);
     sendJson(response, 200, { item: toResource(updated, viewerRole, viewerEmail, 'registration') });
     return;
   }
 
   if (parts[0] === 'api' && parts[1] === 'registrations' && parts[2] && request.method === 'DELETE') {
-    const body = await readRequestBody(request);
-    const records = await readCollection('registrations');
-    const current = records.find((record) => record.id === parts[2]);
-    if (!current) throw apiError(404, 'REGISTRATION_NOT_FOUND', `Không tìm thấy registration ${parts[2]}.`);
-    const permissions = getResourcePermissions({
-      viewerRole,
-      ownerRole: current.ownerRole,
-      ownerEmail: current.ownerEmail,
-      viewerEmail,
+    await withMatchingMutationLock(async () => {
+      const records = await readCollection('registrations');
+      const current = records.find((record) => record.id === parts[2]);
+      if (!current) throw apiError(404, 'REGISTRATION_NOT_FOUND', `Không tìm thấy registration ${parts[2]}.`);
+      const permissions = getResourcePermissions({
+        viewerRole,
+        ownerRole: current.ownerRole,
+        ownerEmail: current.ownerEmail,
+        viewerEmail,
+      });
+      if (!permissions.canDelete) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền xóa registration này.');
+      if ((await readCollection('matchingAssignments')).some((assignment) => assignment.status === 'ACTIVE'
+        && (assignment.studentRegistrationId === current.id || assignment.tutorRegistrationId === current.id))) {
+        throw apiError(409, 'REGISTRATION_HAS_ACTIVE_ASSIGNMENT', 'Không thể xóa registration đang có phân công hoạt động.');
+      }
+      await saveCollection('registrations', records.filter((record) => record.id !== parts[2]));
     });
-    if (!permissions.canDelete) throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền xóa registration này.');
-    await saveCollection('registrations', records.filter((record) => record.id !== parts[2]));
     sendJson(response, 200, { deleted: true });
     return;
   }
