@@ -164,6 +164,14 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.match(incompletePublish.data.errors.memoryLimitMb, /lớn hơn 0/);
   assert.match(incompletePublish.data.errors.testCases, /ít nhất một test case/);
 
+  const zeroWeightCases = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
+    patch: { testCases: [{ id: 'zero-weight', input: '1', expectedOutput: '1', hidden: false, weight: 0 }] },
+  });
+  assert.equal(zeroWeightCases.status, 200);
+  const zeroWeightPublish = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');
+  assert.equal(zeroWeightPublish.status, 422);
+  assert.match(zeroWeightPublish.data.errors['testCases.0.weight'], /lớn hơn 0/);
+
   const completeDraft = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, lecturer, 'PATCH', {
     patch: {
       title: 'Sum two numbers',
