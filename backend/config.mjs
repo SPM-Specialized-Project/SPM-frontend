@@ -20,3 +20,4 @@ export const TERMS_FILE = path.join(DATA_DIRECTORY, 'codepulse-terms.json');
 export const ASSIGNMENTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-assignments.json');
 export const LABS_FILE = path.join(DATA_DIRECTORY, 'codepulse-labs.json');
 export const ASSIGNMENT_VERSIONS_FILE = path.join(DATA_DIRECTORY, 'codepulse-assignment-versions.json');
+export const STUDENT_SUBMISSIONS_DIRECTORY = path.join(DATA_DIRECTORY, 'codepulse-student-submissions');
