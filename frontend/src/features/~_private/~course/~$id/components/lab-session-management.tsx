@@ -102,6 +102,16 @@ export function LabSessionManagement({
     () => new Set(selectedProblems.map((item) => item.assignmentVersionId)),
     [selectedProblems],
   );
+  const versionsByProblem = useMemo(() => {
+    const grouped = new Map<string, CodePulseAssignmentVersion[]>();
+    for (const version of versions) {
+      const problemVersions = grouped.get(version.assignmentId) ?? [];
+      problemVersions.push(version);
+      grouped.set(version.assignmentId, problemVersions);
+    }
+    return [...grouped.values()].map((problemVersions) =>
+      problemVersions.sort((left, right) => right.version - left.version));
+  }, [versions]);
 
   const addProblem = (version: CodePulseAssignmentVersion) => {
     setSelectedProblems((items) => [
@@ -361,18 +371,31 @@ export function LabSessionManagement({
                 </span>
               </div>
               <div className="mt-2 flex flex-wrap gap-2">
-                {versions
-                  .filter((version) => !selectedIds.has(version.id))
-                  .map((version) => (
-                    <button
-                      key={version.id}
-                      type="button"
-                      onClick={() => addProblem(version)}
-                      className="rounded-full border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100"
-                    >
-                      + {version.title} · v{version.version}
-                    </button>
-                  ))}
+                {versionsByProblem.map((problemVersions) => {
+                  const latest = problemVersions[0];
+                  return (
+                    <section key={latest.assignmentId} className="w-full border-t border-gray-200 py-3 first:border-0">
+                      <h6 className="mb-2 text-sm font-semibold text-gray-800">{latest.title}</h6>
+                      <div className="flex flex-wrap gap-2">
+                        {problemVersions.map((version) => {
+                          const alreadyAdded = selectedIds.has(version.id);
+                          return (
+                            <button
+                              key={version.id}
+                              type="button"
+                              onClick={() => addProblem(version)}
+                              disabled={alreadyAdded}
+                              className="rounded border border-blue-200 bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-800 hover:bg-blue-100 disabled:cursor-not-allowed disabled:border-gray-200 disabled:bg-gray-100 disabled:text-gray-500"
+                              title={`Published ${formatDateTime(version.publishedAt)}`}
+                            >
+                              {alreadyAdded ? 'Added' : 'Add'} · v{version.version}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </section>
+                  );
+                })}
                 {versions.length === 0 && (
                   <p className="text-sm text-amber-700">
                     Classroom chưa có bài đã publish.
