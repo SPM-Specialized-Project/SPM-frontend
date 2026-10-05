@@ -1,5 +1,6 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -11,8 +12,16 @@ import {
   ASSIGNMENTS_FILE,
   LABS_FILE,
   ASSIGNMENT_VERSIONS_FILE,
+  STUDENT_SUBMISSIONS_DIRECTORY,
   WORKSPACES_FILE,
 } from './config.mjs';
+import {
+  assignmentRepositoryName,
+  commitRepositoryFile,
+  createAssignmentRepository,
+  createVersionBranch,
+  isGiteaConfigured,
+} from './gitea.mjs';
 import {
   DSA_CLASSROOM_ASSIGNMENTS,
   DSA_COURSE_ID,
@@ -32,6 +41,7 @@ const workspaceFile = WORKSPACES_FILE;
 const assignmentFile = ASSIGNMENTS_FILE;
 const labFile = LABS_FILE;
 const assignmentVersionFile = ASSIGNMENT_VERSIONS_FILE;
+const studentSubmissionsDirectory = STUDENT_SUBMISSIONS_DIRECTORY;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -140,6 +150,108 @@ function mutate(file, initial, callback) {
   return result;
 }
 
+const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
+  ...structuredClone(assignment),
+  id,
+  assignmentId: assignment.id,
+  classroomId: assignment.classroomId,
+  version,
+  testCases: normalizeTestCases(assignment.testCases),
+  comparator: normalizeComparator(assignment.comparator),
+  status: 'PUBLISHED',
+  publishedAt: publication.publishedAt ?? new Date().toISOString(),
+  usedAt: publication.usedAt ?? null,
+  giteaRepository: publication.giteaRepository ?? null,
+  giteaBranch: publication.giteaBranch ?? null,
+});
+
+const studentAccountKey = (email) => createHash('sha256').update(normalizeEmail(email)).digest('hex');
+
+let studentSubmissionQueue = Promise.resolve();
+async function readStudentSubmissions(email) {
+  const file = path.join(studentSubmissionsDirectory, `${studentAccountKey(email)}.json`);
+  try {
+    const submissions = JSON.parse(await readFile(file, 'utf8'));
+    if (!Array.isArray(submissions)) throw new Error(`Invalid submission ledger: ${file}`);
+    return submissions;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return [];
+    throw error;
+  }
+}
+
+async function readAllStudentSubmissions() {
+  await mkdir(studentSubmissionsDirectory, { recursive: true });
+  const files = await readdir(studentSubmissionsDirectory);
+  const ledgers = await Promise.all(files
+    .filter((file) => file.endsWith('.json'))
+    .map(async (file) => {
+      const submissions = JSON.parse(await readFile(path.join(studentSubmissionsDirectory, file), 'utf8'));
+      if (!Array.isArray(submissions)) throw new Error(`Invalid submission ledger: ${file}`);
+      return submissions;
+    }));
+  return ledgers.flat();
+}
+
+function saveStudentSubmission(email, submission) {
+  const result = studentSubmissionQueue.then(async () => {
+    const accountKey = studentAccountKey(email);
+    const file = path.join(studentSubmissionsDirectory, `${accountKey}.json`);
+    await mkdir(studentSubmissionsDirectory, { recursive: true });
+    const submissions = await readStudentSubmissions(email);
+    submissions.push(submission);
+    await writeFile(file, `${JSON.stringify(submissions, null, 2)}\n`, 'utf8');
+    return { accountKey, submissions };
+  });
+  studentSubmissionQueue = result.catch(() => {});
+  return result;
+}
+
+async function preparePublishedVersion(assignment, previousVersions) {
+  const publishedVersions = previousVersions
+    .filter((item) => item.assignmentId === assignment.id && item.status === 'PUBLISHED')
+    .sort((left, right) => Number(right.version) - Number(left.version));
+  const previous = publishedVersions[0];
+  const versionNumber = (Number(previous?.version) || 0) + 1;
+  const versionId = `${assignment.id}-v${versionNumber}`;
+  const publishedAt = new Date().toISOString();
+  let repositoryName = previous?.giteaRepository;
+  let branchName = null;
+
+  if (isGiteaConfigured) {
+    repositoryName ??= assignmentRepositoryName(assignment.id);
+    let repository;
+    if (!previous?.giteaRepository) {
+      repository = await createAssignmentRepository(repositoryName, `CodePulse assignment ${assignment.title}`);
+    }
+    branchName = `version/${versionNumber}`;
+    await createVersionBranch(repositoryName, branchName, previous?.giteaBranch ?? repository?.default_branch ?? 'main');
+    const snapshot = assignmentSnapshot(assignment, versionNumber, versionId, {
+      publishedAt,
+      giteaRepository: repositoryName,
+      giteaBranch: branchName,
+    });
+    await commitRepositoryFile(
+      repositoryName,
+      branchName,
+      'assignment-version.json',
+      `${JSON.stringify(snapshot, null, 2)}\n`,
+      `Publish ${assignment.title} v${versionNumber}`,
+    );
+    return snapshot;
+  }
+
+  return assignmentSnapshot(assignment, versionNumber, versionId, { publishedAt });
+}
+
+async function markAssignmentVersionUsed(versionId) {
+  return mutate(assignmentVersionFile, initialAssignmentVersions, (records) => {
+    const version = records.find((record) => record.id === versionId);
+    if (version && !version.usedAt) version.usedAt = new Date().toISOString();
+    return version;
+  });
+}
+
 const assignmentFields = [
   'title',
   'description',
@@ -151,6 +263,7 @@ const assignmentFields = [
   'runtime',
   'referenceSolution',
   'testCases',
+  'comparator',
 ];
 
 const normalizeTestCases = (value) => (Array.isArray(value) ? value.map((test, index) => ({
@@ -159,7 +272,13 @@ const normalizeTestCases = (value) => (Array.isArray(value) ? value.map((test, i
   expectedOutput: typeof test?.expectedOutput === 'string' ? test.expectedOutput : '',
   hidden: Boolean(test?.hidden),
   verified: Boolean(test?.verified),
+  weight: test?.weight === undefined ? 1 : Number(test.weight),
 })) : []);
+
+const normalizeComparator = (value) => ({
+  normalizeLineEndings: value?.normalizeLineEndings !== false,
+  trimTrailingNewline: value?.trimTrailingNewline !== false,
+});
 
 const normalizeAssignmentInput = (body = {}) => ({
   title: typeof body.title === 'string' ? body.title.trim() : '',
@@ -172,6 +291,7 @@ const normalizeAssignmentInput = (body = {}) => ({
   runtime: typeof body.runtime === 'string' ? body.runtime.toUpperCase() : '',
   referenceSolution: typeof body.referenceSolution === 'string' ? body.referenceSolution.trim() : '',
   testCases: normalizeTestCases(body.testCases),
+  comparator: normalizeComparator(body.comparator),
 });
 
 const normalizeAssignmentPatch = (patch = {}) => {
@@ -180,6 +300,8 @@ const normalizeAssignmentPatch = (patch = {}) => {
     if (!Object.hasOwn(patch, field)) continue;
     if (field === 'testCases') {
       normalized[field] = normalizeTestCases(patch[field]);
+    } else if (field === 'comparator') {
+      normalized[field] = normalizeComparator(patch[field]);
     } else if (['title', 'description', 'constraints', 'inputFormat', 'outputFormat', 'referenceSolution'].includes(field)) {
       normalized[field] = typeof patch[field] === 'string' ? patch[field].trim() : '';
     } else if (field === 'runtime') {
@@ -231,6 +353,7 @@ const validatePublishableAssignment = (assignment) => {
     assignment.testCases.forEach((test, index) => {
       if (typeof test.input !== 'string') errors[`testCases.${index}.input`] = 'Input test case phải là chuỗi.';
       if (typeof test.expectedOutput !== 'string') errors[`testCases.${index}.expectedOutput`] = 'Expected output phải là chuỗi.';
+      if (!Number.isFinite(test.weight) || test.weight <= 0) errors[`testCases.${index}.weight`] = 'Trọng số test case phải lớn hơn 0.';
       if (!test.verified) errors[`testCases.${index}.verified`] = 'Test case chưa được verify bằng reference solution.';
     });
   }
@@ -239,15 +362,25 @@ const validatePublishableAssignment = (assignment) => {
 };
 
 const publicAssignment = (assignment, viewerRole) => {
-  if (viewerRole !== 'student') return assignment;
-  const { rawRunnerTrace, referenceSolution, verificationStatus, verifiedAt, verifiedBy, ...safeAssignment } = assignment;
+  const normalizedAssignment = {
+    ...assignment,
+    testCases: normalizeTestCases(assignment.testCases),
+    comparator: normalizeComparator(assignment.comparator),
+  };
+  if (viewerRole !== 'student') return normalizedAssignment;
+  const { rawRunnerTrace, referenceSolution, verificationStatus, verifiedAt, verifiedBy, ...safeAssignment } = normalizedAssignment;
   return {
     ...safeAssignment,
-    testCases: assignment.testCases.filter((test) => !test.hidden),
+    testCases: normalizedAssignment.testCases.filter((test) => !test.hidden),
   };
 };
 
-const normalizeRunOutput = (value) => String(value ?? '').replace(/\r\n/g, '\n').trimEnd();
+const normalizeRunOutput = (value, comparator = {}) => {
+  let output = String(value ?? '');
+  if (comparator.normalizeLineEndings !== false) output = output.replace(/\r\n/g, '\n');
+  if (comparator.trimTrailingNewline !== false) output = output.replace(/\n+$/, '');
+  return output;
+};
 
 const runProcess = (command, args, { cwd, input = '', timeoutMs }) => new Promise((resolve, reject) => {
   const child = spawn(command, args, { cwd, windowsHide: true });
@@ -374,8 +507,8 @@ const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => 
           input: testCase.input,
           timeoutMs,
         });
-      const actualOutput = normalizeRunOutput(result.stdout);
-      const expectedOutput = normalizeRunOutput(testCase.expectedOutput);
+      const actualOutput = normalizeRunOutput(result.stdout, assignment.comparator);
+      const expectedOutput = normalizeRunOutput(testCase.expectedOutput, assignment.comparator);
       const status = result.timedOut
         ? 'TIMEOUT'
         : result.outputLimitReached
@@ -385,6 +518,8 @@ const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => 
             : 'RUNTIME_ERROR';
       results.push({
         testCaseId: testCase.id,
+        weight: testCase.weight ?? 1,
+        hidden: Boolean(testCase.hidden),
         input: testCase.input,
         expectedOutput: testCase.expectedOutput,
         actualOutput: result.stdout,
@@ -632,6 +767,41 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       }));
     return [...storedVersions, ...derivedVersions];
   };
+  const latestPublishedAssignmentVersion = (assignment) => {
+    const storedVersion = assignmentVersions
+      .filter((item) => item.assignmentId === assignment.id && item.status === 'PUBLISHED')
+      .sort((left, right) => Number(right.version) - Number(left.version))[0];
+    if (!storedVersion) return assignmentSnapshot(assignment, Number(assignment.version) || 1, `${assignment.id}-v${Number(assignment.version) || 1}`);
+    if (Array.isArray(storedVersion.testCases)) return storedVersion;
+    return assignmentSnapshot(assignment, storedVersion.version, storedVersion.id, {
+      publishedAt: storedVersion.publishedAt,
+      giteaRepository: storedVersion.giteaRepository,
+      giteaBranch: storedVersion.giteaBranch,
+    });
+  };
+  const submissionView = (submission) => ({
+    id: submission.id,
+    assignmentId: submission.assignmentId,
+    assignmentVersionId: submission.assignmentVersionId,
+    version: submission.version,
+    submittedAt: submission.submittedAt,
+    passedCount: submission.passedCount,
+    totalCount: submission.totalCount,
+    earnedWeight: submission.earnedWeight,
+    totalWeight: submission.totalWeight,
+    score: submission.score,
+    commitSha: submission.commitSha ?? null,
+    sourceCode: submission.sourceCode,
+    results: submission.results.map((result) => result.hidden
+      ? {
+        testCaseId: result.testCaseId,
+        weight: result.weight,
+        status: result.status,
+        passed: result.passed,
+        durationMs: result.durationMs,
+      }
+      : result),
+  });
 
   if (parts[2] === 'terms' && request.method === 'GET') {
     const canViewAllCourseTerms = ['admin', 'lecturer'].includes(user.role);
@@ -757,15 +927,50 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
-  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'assignment-versions' && request.method === 'GET') {
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'assignment-versions'
+    && !parts[5] && request.method === 'GET') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
     const items = publishedAssignmentVersions(classroomItem.id).map((version) => {
       if (user.role !== 'student') return version;
-      const { hints = [], starterCode, ...safeVersion } = version;
-      return { ...safeVersion, hintCount: hints.length };
+      const {
+        hints = [],
+        starterCode,
+        referenceSolution,
+        rawRunnerTrace,
+        giteaRepository,
+        giteaBranch,
+        testCases = [],
+        ...safeVersion
+      } = version;
+      return {
+        ...safeVersion,
+        hintCount: hints.length,
+        testCases: normalizeTestCases(testCases).filter((testCase) => !testCase.hidden),
+      };
     });
     sendJson(response, 200, { items });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'assignment-versions'
+    && parts[5] && parts[6] === 'history' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!canManageAssignment(classroomItem)) deny();
+    const version = publishedAssignmentVersions(classroomItem.id)
+      .find((item) => item.id === parts[5] && item.status === 'PUBLISHED');
+    if (!version) notFound();
+    const submissions = await readAllStudentSubmissions();
+    sendJson(response, 200, {
+      item: {
+        ...version,
+        testCases: normalizeTestCases(version.testCases),
+        comparator: normalizeComparator(version.comparator),
+      },
+      submissions: submissions
+        .filter((submission) => submission.assignmentVersionId === version.id)
+        .map((submission) => ({ ...submission, studentEmail: submission.studentEmail ?? null })),
+    });
     return;
   }
 
@@ -912,6 +1117,94 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     && parts[3]
     && ['problems', 'assignments'].includes(parts[4]);
 
+  if (isAssignmentRoute && parts[5] && parts[6] === 'submissions'
+    && (request.method === 'GET' || request.method === 'POST')) {
+    const classroomItem = classroom(parts[3]);
+    if (!canAccessClass(classroomItem)) deny();
+    const assignment = assignments.find((record) =>
+      record.id === parts[5] && record.classroomId === classroomItem.id) ?? notFound();
+    if (user.role !== 'student' || assignment.status !== 'PUBLISHED') {
+      if (user.role === 'student') notFound();
+      deny();
+    }
+
+    if (request.method === 'GET') {
+      const submissions = await readStudentSubmissions(user.email);
+      sendJson(response, 200, {
+        items: submissions
+          .filter((submission) => submission.assignmentId === assignment.id)
+          .map(submissionView),
+      });
+      return;
+    }
+
+    const body = await readRequestBody(request);
+    const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : '';
+    if (!sourceCode.trim()) throw apiError(400, 'SOURCE_CODE_REQUIRED', 'Hãy nhập code trước khi submit.');
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
+    const version = latestPublishedAssignmentVersion(assignment);
+    if (!ALLOWED_RUNTIMES.has(version.runtime)) {
+      throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Assignment chưa có runtime được hỗ trợ để chạy.');
+    }
+    const results = await runAssignmentTestCases({ assignment: version, sourceCode, testCases: version.testCases });
+    const totalWeight = results.reduce((sum, result) => sum + result.weight, 0);
+    const earnedWeight = results.reduce((sum, result) => sum + (result.passed ? result.weight : 0), 0);
+    const submittedAt = new Date().toISOString();
+    const submissionId = `submission-${Date.now()}-${createHash('sha256').update(`${user.email}:${submittedAt}`).digest('hex').slice(0, 10)}`;
+    const accountKey = studentAccountKey(user.email);
+    const submission = {
+      id: submissionId,
+      studentEmail: user.email,
+      assignmentId: assignment.id,
+      assignmentVersionId: version.id,
+      version: version.version,
+      submittedAt,
+      sourceCode,
+      passedCount: results.filter((result) => result.passed).length,
+      totalCount: results.length,
+      earnedWeight,
+      totalWeight,
+      score: totalWeight > 0 ? Math.round((earnedWeight / totalWeight) * 10_000) / 100 : 0,
+      results,
+      commitSha: null,
+    };
+
+    if (isGiteaConfigured && version.giteaRepository && version.giteaBranch) {
+      const previousSubmissions = await readStudentSubmissions(user.email);
+      const commitContent = [...previousSubmissions, submission].map((item) => ({
+        id: item.id,
+        assignmentId: item.assignmentId,
+        assignmentVersionId: item.assignmentVersionId,
+        submittedAt: item.submittedAt,
+        sourceCode: item.sourceCode,
+        score: item.score,
+        passedCount: item.passedCount,
+        totalCount: item.totalCount,
+      }));
+      try {
+        const committed = await commitRepositoryFile(
+          version.giteaRepository,
+          version.giteaBranch,
+          `submissions/${accountKey}.json`,
+          `${JSON.stringify(commitContent, null, 2)}\n`,
+          `Submit ${assignment.title} v${version.version}`,
+          { name: user.email.split('@')[0], email: user.email },
+        );
+        submission.commitSha = committed?.commit?.sha ?? null;
+      } catch (error) {
+        console.error('Unable to commit CodePulse submission to Gitea:', error);
+        throw apiError(502, 'SUBMISSION_COMMIT_FAILED', 'Could not commit the submission to its assignment version.');
+      }
+    }
+
+    await markAssignmentVersionUsed(version.id);
+    await saveStudentSubmission(user.email, submission);
+    sendJson(response, 201, { item: submissionView(submission) });
+    return;
+  }
+
   if (isAssignmentRoute && parts[5] && parts[6] === 'run' && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
@@ -936,9 +1229,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
     }
 
+    const gradingAssignment = assignment.status === 'PUBLISHED'
+      ? latestPublishedAssignmentVersion(assignment)
+      : assignment;
     const visibleTestCases = user.role === 'student'
-      ? assignment.testCases.filter((testCase) => !testCase.hidden)
-      : assignment.testCases;
+      ? gradingAssignment.testCases.filter((testCase) => !testCase.hidden)
+      : gradingAssignment.testCases;
     const requestedTestCaseIds = Array.isArray(body.testCaseIds)
       ? new Set(body.testCaseIds.map((id) => String(id)))
       : null;
@@ -950,14 +1246,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
 
     const results = await runAssignmentTestCases({
-      assignment,
+      assignment: gradingAssignment,
       sourceCode,
       testCases: selectedTestCases,
     });
+    if (user.role === 'student' && assignment.status === 'PUBLISHED') {
+      await markAssignmentVersionUsed(gradingAssignment.id);
+    }
     sendJson(response, 200, {
       item: {
         assignmentId: assignment.id,
-        runtime: assignment.runtime,
+        assignmentVersionId: gradingAssignment.id,
+        runtime: gradingAssignment.runtime,
         results,
         passedCount: results.filter((result) => result.passed).length,
         totalCount: results.length,
@@ -1043,6 +1343,24 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const contentChanged = Object.keys(patch).some((field) =>
       JSON.stringify(current[field]) !== JSON.stringify(patch[field]));
     if (contentChanged) {
+      if (current.status === 'PUBLISHED') {
+        const previousVersion = assignmentVersions
+          .filter((version) => version.assignmentId === current.id && version.status === 'PUBLISHED')
+          .sort((left, right) => Number(right.version) - Number(left.version))[0];
+        if (previousVersion && !Array.isArray(previousVersion.testCases)) {
+          await mutate(assignmentVersionFile, initialAssignmentVersions, (records) => {
+            const storedVersion = records.find((record) => record.id === previousVersion.id);
+            if (storedVersion && !Array.isArray(storedVersion.testCases)) {
+              Object.assign(storedVersion, assignmentSnapshot(current, previousVersion.version, previousVersion.id, {
+                publishedAt: previousVersion.publishedAt,
+                giteaRepository: previousVersion.giteaRepository,
+                giteaBranch: previousVersion.giteaBranch,
+              }));
+            }
+            return storedVersion;
+          });
+        }
+      }
       updated.status = 'DRAFT';
       updated.verificationStatus = 'UNVERIFIED';
       updated.verifiedAt = null;
@@ -1095,6 +1413,21 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const current = assignments.find((record) => record.id === parts[5] && record.classroomId === classroomItem.id) ?? notFound();
     const errors = validatePublishableAssignment(current);
     if (Object.keys(errors).length > 0) throw validationError(apiError, errors);
+    if (current.status === 'PUBLISHED') {
+      sendJson(response, 200, { item: current });
+      return;
+    }
+    let versionSnapshot;
+    try {
+      versionSnapshot = await preparePublishedVersion(current, assignmentVersions);
+    } catch (error) {
+      console.error('Unable to publish CodePulse version:', error);
+      throw apiError(502, 'VERSION_PUBLISH_FAILED', 'Could not create the assignment version in Gitea.');
+    }
+    await mutate(assignmentVersionFile, initialAssignmentVersions, (records) => {
+      if (!records.some((record) => record.id === versionSnapshot.id)) records.push(versionSnapshot);
+      return versionSnapshot;
+    });
     const updated = await mutate(assignmentFile, initialAssignments, (records) => {
       const stored = records.find((record) => record.id === current.id) ?? notFound();
       stored.status = 'PUBLISHED';
