@@ -16,6 +16,7 @@ import {
   type CodePulseClassroom,
   type CodePulseRunResult,
   type CodePulseRunSummary,
+  type CodePulseSubmission,
   type CodePulseTerm,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
@@ -59,9 +60,12 @@ function StudentWorkspaceEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
+  const [submission, setSubmission] = useState<CodePulseSubmission>();
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
+  const [submitError, setSubmitError] = useState<string>();
   const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
 
   useEffect(() => {
@@ -72,6 +76,8 @@ function StudentWorkspaceEditor({
     setSourceCode('');
     setRunSummary(undefined);
     setRunError(undefined);
+    setSubmission(undefined);
+    setSubmitError(undefined);
     setSaveState('loading');
 
     void codePulseApi
@@ -149,6 +155,26 @@ function StudentWorkspaceEditor({
       );
     } finally {
       setRunning(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!workspace) return;
+    setSubmitting(true);
+    setSubmitError(undefined);
+    try {
+      const saved = await persistWorkspace(false);
+      if (!saved) {
+        setSubmitError('Could not save code before submission.');
+        return;
+      }
+      const response = await codePulseApi.submitAssignment(classroomId, assignment.id, sourceCode);
+      setSubmission(response.data.item);
+      toast.success(`Submitted against version ${response.data.item.version}.`);
+    } catch (reason: unknown) {
+      setSubmitError(reason instanceof Error ? reason.message : 'Could not submit this solution.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -238,6 +264,15 @@ function StudentWorkspaceEditor({
             )}
             {running ? 'Đang chạy' : 'Run'}
           </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || running || submitting || loading || !workspace || !sourceCode.trim()}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {submitting ? <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" /> : <CloudArrowUpIcon className="size-4" aria-hidden="true" />}
+            {submitting ? 'Submitting' : 'Submit'}
+          </button>
         </div>
       </div>
 
@@ -287,10 +322,39 @@ function StudentWorkspaceEditor({
               running={running}
               error={runError}
             />
+            <SubmissionReceipt submission={submission} error={submitError} />
           </div>
         </>
       )}
     </section>
+  );
+}
+
+function SubmissionReceipt({ submission, error }: { submission?: CodePulseSubmission; error?: string }) {
+  if (!submission && !error) return null;
+  return (
+    <div className="border-t border-slate-200 px-4 py-3 text-sm" aria-live="polite">
+      {error && <p className="text-rose-700">{error}</p>}
+      {submission && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-slate-900">
+            Version {submission.version} · Score {submission.score}% · {submission.passedCount}/{submission.totalCount} passed
+          </p>
+          <p className="font-mono text-xs text-slate-500" title={submission.commitSha ?? 'Submission stored locally'}>
+            {submission.commitSha ? `commit ${submission.commitSha.slice(0, 7)}` : 'local submission'}
+          </p>
+        </div>
+      )}
+      {submission && (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          {submission.results.map((result, index) => (
+            <li key={result.testCaseId}>
+              Test {index + 1}: <span className={result.passed ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{result.status}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 
