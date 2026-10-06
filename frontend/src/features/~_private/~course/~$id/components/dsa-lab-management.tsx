@@ -14,8 +14,11 @@ import {
   codePulseApi,
   type CodePulseAssignment,
   type CodePulseClassroom,
+  type CodePulseLab,
+  type CodePulseLabAssignment,
   type CodePulseRunResult,
   type CodePulseRunSummary,
+  type CodePulseSubmission,
   type CodePulseTerm,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
@@ -43,10 +46,14 @@ const problemNumber = (index: number) =>
 
 function StudentWorkspaceEditor({
   classroomId,
+  lab,
+  labAssignment,
   assignment,
   mobileTab,
 }: {
   classroomId: string;
+  lab: CodePulseLab;
+  labAssignment: CodePulseLabAssignment;
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
@@ -60,6 +67,8 @@ function StudentWorkspaceEditor({
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
+  const [submission, setSubmission] = useState<CodePulseSubmission>();
+  const [practiceWindow, setPracticeWindow] = useState<CodePulseLabAssignment & { activityContext: 'IN_LAB' | 'OUTSIDE_LAB' | null }>();
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
@@ -71,15 +80,18 @@ function StudentWorkspaceEditor({
     setWorkspace(undefined);
     setSourceCode('');
     setRunSummary(undefined);
+    setSubmission(undefined);
+    setPracticeWindow(undefined);
     setRunError(undefined);
     setSaveState('loading');
 
     void codePulseApi
-      .getStudentWorkspace(classroomId, assignment.id)
+      .getStudentLabWorkspace(classroomId, lab.id, labAssignment.id)
       .then((response) => {
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
+        setPracticeWindow(response.data.practiceWindow);
         setSaveState('saved');
       })
       .catch((reason: unknown) => {
@@ -98,7 +110,7 @@ function StudentWorkspaceEditor({
     return () => {
       active = false;
     };
-  }, [assignment.id, classroomId]);
+  }, [assignment.id, classroomId, lab.id, labAssignment.id]);
 
   const persistWorkspace = async (showToast = true) => {
     if (!workspace) return false;
@@ -141,6 +153,8 @@ function StudentWorkspaceEditor({
         classroomId,
         assignment.id,
         sourceCode,
+        undefined,
+        { labId: lab.id, labAssignmentId: labAssignment.id },
       );
       setRunSummary(response.data.item);
     } catch (reason: unknown) {
@@ -149,6 +163,27 @@ function StudentWorkspaceEditor({
       );
     } finally {
       setRunning(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!workspace || !sourceCode.trim()) return;
+    setSaving(true);
+    setRunError(undefined);
+    try {
+      const response = await codePulseApi.submitLabAssignment(
+        classroomId,
+        lab.id,
+        labAssignment.id,
+        sourceCode,
+      );
+      setSubmission(response.data.item);
+      toast.success(`Đã nộp bài: ${assignment.title}.`);
+    } catch (reason: unknown) {
+      setRunError(reason instanceof Error ? reason.message : 'Không thể nộp bài.');
+      toast.error(reason instanceof Error ? reason.message : 'Không thể nộp bài.');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -176,6 +211,13 @@ function StudentWorkspaceEditor({
     error?.includes('401') ||
     error?.includes('403') ||
     error?.toLowerCase().includes('unauthorized');
+  const practiceOpen = practiceWindow?.practiceAccess === 'OPEN';
+  const activityContext = practiceWindow?.activityContext ?? (
+    Date.now() >= new Date(lab.startAt).getTime() &&
+    Date.now() < new Date(lab.endAt).getTime()
+      ? 'IN_LAB'
+      : 'OUTSIDE_LAB'
+  );
 
   return (
     <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
@@ -205,6 +247,9 @@ function StudentWorkspaceEditor({
           >
             {saveStateLabel[saveState]}
           </span>
+          <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
+            {activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · {practiceOpen ? 'Đang mở' : 'Đã đóng'}
+          </span>
           <button
             type="button"
             onClick={() => void persistWorkspace()}
@@ -213,7 +258,8 @@ function StudentWorkspaceEditor({
               running ||
               loading ||
               !workspace ||
-              saveState === 'saved'
+              saveState === 'saved' ||
+              !practiceOpen
             }
             className="inline-flex h-8 items-center gap-1.5 rounded border border-slate-300 px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-500 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -224,7 +270,7 @@ function StudentWorkspaceEditor({
             type="button"
             onClick={() => void run()}
             disabled={
-              saving || running || loading || !workspace || !sourceCode.trim()
+              saving || running || loading || !workspace || !sourceCode.trim() || !practiceOpen
             }
             className="inline-flex h-8 items-center gap-1.5 rounded bg-teal-700 px-3 text-xs font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
@@ -237,6 +283,14 @@ function StudentWorkspaceEditor({
               <PlayIcon className="size-4" aria-hidden="true" />
             )}
             {running ? 'Đang chạy' : 'Run'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || running || loading || !workspace || !sourceCode.trim() || !practiceOpen}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-blue-700 px-3 text-xs font-semibold text-white transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            Nộp bài
           </button>
         </div>
       </div>
@@ -289,6 +343,11 @@ function StudentWorkspaceEditor({
             />
           </div>
         </>
+      )}
+      {submission && (
+        <p className="border-t border-slate-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
+          Đã chấp nhận lúc {new Date(submission.acceptedAt).toLocaleString('vi-VN')} · {submission.score}% · AI analysis và notification đã được đưa vào hàng đợi.
+        </p>
       )}
     </section>
   );
@@ -523,7 +582,11 @@ function StudentProblemWorkspace({
   classroomId: string;
   classroom?: CodePulseClassroom;
 }) {
-  const [assignments, setAssignments] = useState<CodePulseAssignment[]>([]);
+  const [problems, setProblems] = useState<Array<{
+    lab: CodePulseLab;
+    labAssignment: CodePulseLabAssignment;
+    assignment: CodePulseAssignment;
+  }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -533,13 +596,22 @@ function StudentProblemWorkspace({
     let active = true;
     setLoading(true);
     setError(undefined);
-    void codePulseApi
-      .listAssignments(classroomId, 'student')
-      .then((response) => {
+    void Promise.all([
+      codePulseApi.listLabs(classroomId),
+      codePulseApi.listAssignments(classroomId, 'student'),
+    ])
+      .then(([labsResponse, assignmentsResponse]) => {
         if (!active) return;
-        setAssignments(response.data.items);
+        const assignmentById = new Map(assignmentsResponse.data.items.map((item) => [item.id, item]));
+        const nextProblems = labsResponse.data.items.flatMap((lab) =>
+          lab.assignments.flatMap((labAssignment) => {
+            const assignment = assignmentById.get(labAssignment.assignmentId);
+            return assignment ? [{ lab, labAssignment, assignment }] : [];
+          }),
+        );
+        setProblems(nextProblems);
         setSelectedIndex((current) =>
-          Math.min(current, Math.max(response.data.items.length - 1, 0)),
+          Math.min(current, Math.max(nextProblems.length - 1, 0)),
         );
       })
       .catch((error: unknown) => {
@@ -557,7 +629,8 @@ function StudentProblemWorkspace({
     };
   }, [classroomId]);
 
-  const assignment = assignments[selectedIndex];
+  const problem = problems[selectedIndex];
+  const assignment = problem?.assignment;
   const selectedProblemLabel = assignment
     ? problemNumber(selectedIndex)
     : 'Problem';
@@ -588,25 +661,25 @@ function StudentProblemWorkspace({
               Problem workspace
             </h2>
           </div>
-          {assignments.length > 1 && (
-            <div className="flex gap-2">
-              {assignments.map((item, index) => (
-                <button
-                  key={item.id}
-                  onClick={() => {
-                    setSelectedIndex(index);
-                    setMobileTab('problem');
-                  }}
-                  className={`rounded-md px-4 py-2 text-sm font-semibold transition ${
-                    selectedIndex === index
-                      ? 'bg-teal-700 text-white shadow-sm'
-                      : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                  }`}
-                >
-                  {problemNumber(index)}
-                </button>
-              ))}
-            </div>
+          {problems.length > 1 && (
+            <label className="text-xs text-slate-500">
+              <span className="sr-only">Chọn bài tập</span>
+              <select
+                aria-label="Chọn bài tập"
+                value={selectedIndex}
+                onChange={(event) => {
+                  setSelectedIndex(Number(event.target.value));
+                  setMobileTab('problem');
+                }}
+                className="h-9 min-w-52 rounded border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
+              >
+                {problems.map((item, index) => (
+                  <option key={item.labAssignment.id} value={index}>
+                    {problemNumber(index)} · {item.assignment.title}
+                  </option>
+                ))}
+              </select>
+            </label>
           )}
         </div>
 
@@ -651,13 +724,13 @@ function StudentProblemWorkspace({
             </div>
           </div>
         )}
-        {!loading && assignments.length === 0 && (
+        {!loading && problems.length === 0 && (
           <p className="mt-4 rounded border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
             Chưa có bài tập được publish trong học kỳ hiện tại.
           </p>
         )}
-        {!loading && !error && assignment && (
-          <div className="mt-4 grid grid-cols-1 items-start gap-6 lg:grid-cols-[35%_65%]">
+        {!loading && !error && problem && assignment && (
+          <div className="mt-4 grid grid-cols-1 items-start gap-6">
             <div
               className={mobileTab === 'problem' ? 'block' : 'hidden lg:block'}
             >
@@ -668,6 +741,8 @@ function StudentProblemWorkspace({
             >
               <StudentWorkspaceEditor
                 classroomId={classroomId}
+                lab={problem.lab}
+                labAssignment={problem.labAssignment}
                 assignment={assignment}
                 mobileTab={mobileTab}
               />

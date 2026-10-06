@@ -17,6 +17,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [now, setNow] = useState(() => Date.now());
 
   const assignments = useMemo(
     () =>
@@ -67,13 +68,43 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     void loadWorkspace(selectedWorkspaceId);
   }, [loadWorkspace, selectedWorkspaceId]);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
-  const practiceOpen = selected
-    ? Date.now() >= Date.parse(selected.assignment.practiceStartAt) &&
-      Date.now() <= Date.parse(selected.assignment.practiceEndAt)
-    : false;
+  const openAt = selected
+    ? Date.parse(
+        selected.assignment.openAt ??
+          selected.assignment.open_at ??
+          selected.assignment.practiceStartAt,
+      )
+    : Number.NaN;
+  const closeAt = selected
+    ? Date.parse(
+        selected.assignment.closeAt ??
+          selected.assignment.close_at ??
+          selected.assignment.practiceEndAt,
+      )
+    : Number.NaN;
+  const practiceOpen = Boolean(
+    selected &&
+      selected.assignment.practiceWindowStatus !== 'CLOSED' &&
+      selected.assignment.practiceAccess === 'OPEN' &&
+      Number.isFinite(openAt) &&
+      Number.isFinite(closeAt) &&
+      openAt <= now &&
+      now < closeAt,
+  );
+  const activityContext = selected?.assignment.activityContext ??
+    (selected &&
+    now >= Date.parse(selected.lab.startAt) &&
+    now < Date.parse(selected.lab.endAt)
+      ? 'IN_LAB'
+      : 'OUTSIDE_LAB');
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
@@ -143,9 +174,23 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
           Student practice
         </p>
-        <h4 className="mt-1 text-lg font-bold text-gray-900">
-          Chọn problem trong LAB đang Live
-        </h4>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-lg font-bold text-gray-900">
+            Chọn problem để tiếp tục luyện tập
+          </h4>
+          {selected && (
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                practiceOpen
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} ·{' '}
+              {practiceOpen ? 'Đang mở' : 'Đã đóng'}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="grid min-h-[520px] lg:grid-cols-[280px_1fr]">
@@ -203,8 +248,8 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
 
               {!practiceOpen && (
                 <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Problem hiện nằm ngoài practice window và đang ở chế độ chỉ
-                  đọc.
+                  Practice window chưa mở, đã đóng hoặc học kỳ không còn hiệu
+                  lực. Workspace hiện ở chế độ chỉ đọc.
                 </p>
               )}
 
