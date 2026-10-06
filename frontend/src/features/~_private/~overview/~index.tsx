@@ -5,7 +5,6 @@ import React, { useEffect, useState, useRef } from 'react'
 import StudyLayout from '@/components/study-layout'
 
 import { DataTab } from './components/data-tab'
-import IsMatching from './components/is-matching'
 import { ResultTab } from './components/result-tab'
 
 // --- BIẾN ĐỔI SVG THÀNH COMPONENT ---
@@ -34,7 +33,6 @@ export const Route = createFileRoute('/_private/overview/')({
 
 function RouteComponent() {
   const [activeTab, setActiveTab] = useState<'data' | 'results'>('data')
-  const [isMatching, setIsMatching] = useState(false)
   const prevTitle = useRef<string>(typeof document !== 'undefined' ? document.title : '');
 
   useEffect(() => {
@@ -48,29 +46,15 @@ function RouteComponent() {
 
   useEffect(() => {
     if (typeof document === 'undefined') return;
-    if (isMatching) {
-      document.title = 'Đang khớp — Vui lòng chờ';
-      return;
-    }
-
     if (activeTab === 'data') {
       document.title = 'Đăng ký — Dữ liệu';
     } else if (activeTab === 'results') {
       document.title = 'Đăng ký — Kết quả';
     }
-  }, [activeTab, isMatching]);
-
-  function AIMatching() {
-    //change isMatching to true and wait 5 seconds and then change isMatching to false and  activetab to result
-    setIsMatching(true);
-    setActiveTab('results');
-    setTimeout(() => {
-      setIsMatching(false);
-    }, 5000);
-  }
+  }, [activeTab]);
 
   function handleMatching() {
-    AIMatching();
+    setActiveTab('results');
   }
 
   return (
@@ -102,14 +86,12 @@ function RouteComponent() {
             onClick={() => handleMatching()}
             className="rounded-lg border border-blue-600 bg-white px-5 py-2.5 text-sm font-medium text-blue-600 shadow-sm hover:bg-blue-600 hover:text-white"
           >
-            Gợi ý AI
+            Gợi ý ghép cặp
           </button>
         </header>
 
         {activeTab === 'data' ? (
           <DataTab />
-        ) : isMatching ? (
-          <IsMatching />
         ) : (
           <ResultTab />
         )}

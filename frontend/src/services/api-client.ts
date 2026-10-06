@@ -17,11 +17,16 @@ import type {
   CourseRequestQuery,
   CreateCourseRequestRequest,
   CreateRegistrationRequest,
+  CreateMatchingRecommendationRequest,
   CreateSessionRequest,
   LoginRequest,
   LoginResponse,
   MembershipListResponse,
   MembershipMutationResponse,
+  MatchingDecisionRequest,
+  MatchingDecisionResponse,
+  MatchingAssignment,
+  MatchingRecommendation,
   MembershipQuery,
   RevokeMembershipRequest,
   RegistrationListResponse,
@@ -261,6 +266,32 @@ export const api = {
         { data: mutation },
       ),
     );
+  },
+
+  createMatchingRecommendation(
+    matchingRequest: CreateMatchingRecommendationRequest,
+  ): Promise<ApiResponse<{ item: MatchingRecommendation }>> {
+    return request(() => apiClient.post<{ item: MatchingRecommendation }>('/matching/recommendations', matchingRequest));
+  },
+
+  decideMatchingRecommendation(
+    recommendationId: string,
+    decision: MatchingDecisionRequest,
+  ): Promise<ApiResponse<MatchingDecisionResponse>> {
+    return request(() => apiClient.post<MatchingDecisionResponse>(
+      `/matching/recommendations/${encodeURIComponent(recommendationId)}/decision`,
+      decision,
+    ));
+  },
+
+  getMatchingRecommendations(studentRegistrationId?: string): Promise<ApiResponse<{ items: MatchingRecommendation[]; total: number }>> {
+    return request(() => apiClient.get<{ items: MatchingRecommendation[]; total: number }>('/matching/recommendations', {
+      params: studentRegistrationId ? { studentRegistrationId } : undefined,
+    }));
+  },
+
+  getMatchingAssignments(): Promise<ApiResponse<{ items: MatchingAssignment[]; total: number }>> {
+    return request(() => apiClient.get<{ items: MatchingAssignment[]; total: number }>('/matching/assignments'));
   },
 
   getCourseCreationRequests(

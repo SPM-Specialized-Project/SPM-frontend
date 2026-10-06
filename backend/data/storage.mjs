@@ -3,6 +3,10 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import {
   COURSE_REQUESTS_FILE,
   MEMBERSHIPS_FILE,
+  MATCHING_RECOMMENDATIONS_FILE,
+  MATCHING_ASSIGNMENTS_FILE,
+  MATCHING_DECISIONS_FILE,
+  MATCHING_FEEDBACK_FILE,
   DATA_DIRECTORY,
   REGISTRATIONS_FILE,
   SESSIONS_FILE,
@@ -27,6 +31,10 @@ const collectionConfig = {
   registrations: { file: REGISTRATIONS_FILE, seed: INITIAL_REGISTRATIONS },
   courseRequests: { file: COURSE_REQUESTS_FILE, seed: INITIAL_COURSE_REQUESTS },
   memberships: { file: MEMBERSHIPS_FILE, seed: INITIAL_MEMBERSHIPS },
+  matchingRecommendations: { file: MATCHING_RECOMMENDATIONS_FILE, seed: [] },
+  matchingAssignments: { file: MATCHING_ASSIGNMENTS_FILE, seed: [] },
+  matchingDecisions: { file: MATCHING_DECISIONS_FILE, seed: [] },
+  matchingFeedback: { file: MATCHING_FEEDBACK_FILE, seed: [] },
 };
 
 async function readCollection(name) {

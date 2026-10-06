@@ -36,7 +36,7 @@ Generated Android/iOS runners are present. Android `android/app/build.gradle.kts
 
 Backend defaults to port 4000 and binds to `127.0.0.1`. Vite proxies `/api` to `http://127.0.0.1:4000` in local development, which makes same-origin web calls convenient. On a physical phone, `127.0.0.1` points back to the phone, not the developer machine or server. A mobile build therefore needs a reachable HTTPS API base URL and deployment/TLS configuration; changing the client URL alone cannot expose a loopback-bound server.
 
-The frontend also polls `http://localhost:5000/api/stats` for system metrics. No matching API was found in this backend. It is not safe to treat that local monitor as a mobile backend contract.
+The frontend also polls `http://localhost:5000/api/stats` for system metrics; that monitor endpoint remains unconfirmed in this backend. Matching APIs were added after the initial Flutter source audit; see [the matching API and model contract](../../ai-matching-research/05-api-design.md). They use this JSON-backed backend and are not yet production-transactional.
 
 ## Confidence and revalidation
 

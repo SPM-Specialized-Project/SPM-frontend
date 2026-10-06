@@ -1,7 +1,7 @@
 import { Link } from '@tanstack/react-router';
 
 import type { UnifiedRegistration } from './result-types';
-import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
+import { Pagination, StatusBadge, TableCell, TableHeader } from './result-ui';
 
 export function DataRequestTable({
   requests,
@@ -9,14 +9,16 @@ export function DataRequestTable({
   currentPage,
   totalPages,
   onPageChange,
-  onAssign,
+  onApproveTutor,
+  reviewingTutorId,
 }: {
   requests: UnifiedRegistration[];
   totalResults: number;
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
-  onAssign: (request: UnifiedRegistration) => void;
+  onApproveTutor: (request: UnifiedRegistration) => void;
+  reviewingTutorId: string;
 }) {
   return (
     <div className="overflow-hidden rounded-lg bg-white shadow">
@@ -26,7 +28,7 @@ export function DataRequestTable({
             <tr>
               <TableHeader>Mã môn học</TableHeader><TableHeader>Họ tên</TableHeader><TableHeader>Ngôn ngữ</TableHeader>
               <TableHeader>Hình thức</TableHeader><TableHeader>Role</TableHeader><TableHeader>Địa điểm</TableHeader>
-              <TableHeader>Yêu cầu đặc biệt</TableHeader><TableHeader>Trạng thái</TableHeader><TableHeader><span className="sr-only">Assign</span></TableHeader>
+              <TableHeader>Yêu cầu đặc biệt</TableHeader><TableHeader>Trạng thái</TableHeader><TableHeader>Thao tác</TableHeader>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200 bg-white">
@@ -38,7 +40,18 @@ export function DataRequestTable({
                 <TableCell>{request.location}</TableCell>
                 <TableCell><span className="block w-32 truncate" title={request.request}>{request.request.substring(0, 20)}...</span></TableCell>
                 <TableCell><StatusBadge status={request.status} /></TableCell>
-                <TableCell><button onClick={() => onAssign(request)} className="rounded-lg border border-gray-600 p-2 text-gray-500 hover:text-blue-600"><UserPlusIcon className="size-5 text-gray-600" /></button></TableCell>
+                <TableCell>
+                  {request.role === 'Tutor' && request.status.toLowerCase() === 'pending' && (
+                    <button
+                      type="button"
+                      disabled={Boolean(reviewingTutorId)}
+                      onClick={() => onApproveTutor(request)}
+                      className="rounded bg-blue-700 px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {reviewingTutorId === request.id ? 'Đang lưu…' : 'Duyệt tutor'}
+                    </button>
+                  )}
+                </TableCell>
               </tr>
             ))}
           </tbody>

@@ -1,7 +1,7 @@
 import { MagnifyingGlassIcon } from '@heroicons/react/24/solid';
 
 import type { UnifiedRegistration } from './result-types';
-import { Pagination, StatusBadge, TableCell, TableHeader, UserPlusIcon } from './result-ui';
+import { Pagination, StatusBadge, TableCell, TableHeader } from './result-ui';
 
 export function UnmatchedRequestsPanel({
   requests,
@@ -12,8 +12,6 @@ export function UnmatchedRequestsPanel({
   currentPage,
   totalPages,
   onPageChange,
-  onAssign,
-  onConfirm,
 }: {
   requests: UnifiedRegistration[];
   searchName: string;
@@ -23,8 +21,6 @@ export function UnmatchedRequestsPanel({
   currentPage: number;
   totalPages: number;
   onPageChange: (page: number) => void;
-  onAssign: (registration: UnifiedRegistration) => void;
-  onConfirm: () => void;
 }) {
   return (
     <div>
@@ -40,7 +36,7 @@ export function UnmatchedRequestsPanel({
               <tr>
                 <TableHeader>Mã môn học</TableHeader><TableHeader>Họ tên</TableHeader><TableHeader>Ngôn ngữ</TableHeader>
                 <TableHeader>Hình thức</TableHeader><TableHeader>Role</TableHeader><TableHeader>Địa điểm</TableHeader>
-                <TableHeader>Yêu cầu đặc biệt</TableHeader><TableHeader>Trạng thái</TableHeader><TableHeader><span className="sr-only">Assign</span></TableHeader>
+              <TableHeader>Yêu cầu đặc biệt</TableHeader><TableHeader>Trạng thái</TableHeader>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
@@ -52,16 +48,12 @@ export function UnmatchedRequestsPanel({
                   <TableCell className="px-2">{request.role}</TableCell><TableCell className="max-w-32 truncate">{request.location}</TableCell>
                   <TableCell className="max-w-48"><span className="block w-full truncate" title={request.request}>{request.request}</span></TableCell>
                   <TableCell><StatusBadge status={request.status} /></TableCell>
-                  <TableCell><button onClick={() => onAssign(request)} className="rounded-lg border border-gray-600 p-2 text-gray-500 hover:text-blue-600"><UserPlusIcon className="size-5" /></button></TableCell>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
         <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={onPageChange} />
-      </div>
-      <div className="flex justify-end">
-        <button onClick={onConfirm} className="mt-4 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700">Xác nhận tạo lớp</button>
       </div>
     </div>
   );

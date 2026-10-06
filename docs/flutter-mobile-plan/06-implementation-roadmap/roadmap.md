@@ -65,10 +65,10 @@ This roadmap is a future plan; **no implementation phase has started**. Expected
 - **Prerequisites:** Phase 2 auth and capability model; Phase 4 course context; backend persistence, state transitions, idempotency, audit and authorization tests for each domain.
 - **Expected modules/files:** `features/codepulse/`, `features/schedule/`, `features/registrations/`, `features/coordination/`; editor/lifecycle state and domain-specific contract tests.
 - **Screens:** CodePulse student assignment/workspace/live lab; lecturer assignment authoring/publish/lab management; admin term/classroom management; schedule agenda/session/request/history; registrations/history; coordinator course request/matching review.
-- **APIs:** CodePulse `/api/codepulse/*`; sessions list/create/update/delete; registrations list/create/update/delete; course requests; matching/assignment persistence API is **not confirmed**.
+- **APIs:** CodePulse `/api/codepulse/*`; sessions list/create/update/delete; registrations list/create/update/delete; course requests; matching `POST/GET /api/matching/recommendations`, `POST /api/matching/recommendations/:id/decision`, `GET /api/matching/assignments`, and `POST /api/matching/feedback`. See [exact matching contract](../../ai-matching-research/05-api-design.md).
 - **Acceptance / DoD:** each vertical slice has owner/role path tests, recovery/conflict behavior, server-confirmed state and audit; hidden test/workspace isolation verified; no role toggle; matching result explainable, persisted and manually reviewable.
-- **Risks:** CodePulse sandbox and mobile editor performance; schedule request/attendance local-only paths; generic registration schemas; “Gợi ý AI” is not currently a backend AI call.
-- **Not included:** launching matching as AI without algorithm approval; system monitor; push/chat; local-only session request mutations.
+- **Risks:** CodePulse sandbox and mobile editor performance; schedule request/attendance local-only paths; generic registration schemas; matching persistence is JSON/process-local and matching quality has no HCMUT benchmark.
+- **Not included:** automatic tutor assignment; claiming benchmarked AI quality; third-party inference without governance; system monitor; push/chat; local-only session request mutations.
 
 ## Phase 6 — UX polish, accessibility and resilience
 
