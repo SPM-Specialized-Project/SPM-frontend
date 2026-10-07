@@ -15,6 +15,8 @@ test('publishes immutable versions and commits student submissions to Gitea bran
   const dataDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-version-test-'));
   const giteaRequests = [];
   const gitFiles = new Map();
+  const gitFileShas = new Map();
+  let commitCount = 0;
   const gitea = createServer(async (request, response) => {
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
@@ -33,15 +35,25 @@ test('publishes immutable versions and commits student submissions to Gitea bran
       return;
     }
     if (request.method === 'GET' && request.url.includes('/contents/')) {
-      response.writeHead(404);
-      response.end(JSON.stringify({ message: 'not found' }));
+      const url = new URL(request.url, 'http://localhost');
+      const key = `${url.searchParams.get('ref')}:${decodeURIComponent(url.pathname)}`;
+      response.writeHead(gitFiles.has(key) ? 200 : 404);
+      response.end(JSON.stringify(gitFiles.has(key) ? { sha: gitFileShas.get(key) } : { message: 'not found' }));
       return;
     }
     if (request.method === 'PUT' && request.url.includes('/contents/')) {
       const commitPath = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
-      gitFiles.set(`${body.branch}:${commitPath}`, Buffer.from(body.content, 'base64').toString('utf8'));
+      const key = `${body.branch}:${commitPath}`;
+      if (gitFiles.has(key) && body.sha !== gitFileShas.get(key)) {
+        response.writeHead(422);
+        response.end(JSON.stringify({ message: 'stale file SHA' }));
+        return;
+      }
+      const sha = `sha-${++commitCount}`;
+      gitFiles.set(key, Buffer.from(body.content, 'base64').toString('utf8'));
+      gitFileShas.set(key, sha);
       response.writeHead(201);
-      response.end(JSON.stringify({ commit: { sha: `sha-${gitFiles.size}` } }));
+      response.end(JSON.stringify({ commit: { sha } }));
       return;
     }
     response.writeHead(404);
@@ -212,4 +224,87 @@ test('publishes immutable versions and commits student submissions to Gitea bran
   assert.equal(ledgerFiles.length, 2);
   assert.ok(gitFiles.has(`version/1:/api/v1/repos/codepulse/codepulse-${assignmentId}/contents/submissions/${studentKey('student@gmail.com')}.json`));
   assert.ok(gitFiles.has(`version/2:/api/v1/repos/codepulse/codepulse-${assignmentId}/contents/submissions/${studentKey('student@gmail.com')}.json`));
+
+  const labsPath = '/api/codepulse/classrooms/class-1/labs';
+  const now = Date.now();
+  const createdLab = await api(labsPath, lecturer, 'POST', {
+    name: 'Pinned v1 regression LAB',
+    startAt: new Date(now - 60_000).toISOString(),
+    endAt: new Date(now + 3_600_000).toISOString(),
+    assignments: [{
+      assignmentVersionId: version1.id,
+      mandatory: true,
+      openAt: new Date(now - 60_000).toISOString(),
+      closeAt: new Date(now + 3_600_000).toISOString(),
+    }],
+  });
+  assert.equal(createdLab.status, 201, JSON.stringify(createdLab.data));
+  const labId = createdLab.data.item.id;
+  const labAssignmentId = createdLab.data.item.assignments[0].id;
+  const labAssignmentPath = `${labsPath}/${labId}/assignments/${labAssignmentId}`;
+  const runPath = `/api/codepulse/classrooms/class-1/assignments/${assignmentId}/run?labId=${labId}&labAssignmentId=${labAssignmentId}`;
+  const ledgerKey = `version/1:/api/v1/repos/codepulse/codepulse-${assignmentId}/contents/submissions/${studentKey('student@gmail.com')}.json`;
+
+  await t.test('LAB run and submission use selected v1 after v2 is published', async () => {
+    const pinnedRun = await api(runPath, student, 'POST', { sourceCode: 'print(input())' });
+    assert.equal(pinnedRun.status, 200, JSON.stringify(pinnedRun.data));
+    assert.equal(pinnedRun.data.item.assignmentVersionId, version1.id);
+    assert.equal(pinnedRun.data.item.passedCount, 1);
+
+    const labSubmission = await api(`${labAssignmentPath}/submit`, student, 'POST', { sourceCode: 'print(input())' });
+    assert.equal(labSubmission.status, 201, JSON.stringify(labSubmission.data));
+    assert.equal(labSubmission.data.item.assignmentVersionId, version1.id);
+    assert.equal(labSubmission.data.item.version, 1);
+    assert.equal(labSubmission.data.item.score, 40);
+    assert.equal(labSubmission.data.item.totalWeight, 5);
+    assert.ok(labSubmission.data.item.commitSha);
+    assert.equal(labSubmission.data.item.activityContext, 'IN_LAB');
+    assert.equal(labSubmission.data.item.notification.status, 'QUEUED');
+    assert.equal(JSON.stringify(labSubmission.data).includes('secret output'), false);
+
+    const history = await api(`${labAssignmentPath}/submissions`, student);
+    assert.equal(history.status, 200);
+    assert.equal(history.data.items.length, 1);
+    assert.equal(JSON.stringify(history.data).includes('secret input'), false);
+    const versionHistory = await api(`/api/codepulse/classrooms/class-1/assignment-versions/${version1.id}/history`, lecturer);
+    assert.equal(versionHistory.data.submissions.length, 2);
+    assert.ok(versionHistory.data.submissions.some((item) => item.id === labSubmission.data.item.id));
+    const committed = JSON.parse(gitFiles.get(ledgerKey));
+    assert.equal(committed.length, 2);
+    assert.ok(committed.every((item) => item.assignmentVersionId === version1.id));
+
+    const mismatchedRun = await api(`/api/codepulse/classrooms/class-1/assignments/problem-1/run?labId=${labId}&labAssignmentId=${labAssignmentId}`, student, 'POST', { sourceCode: 'print(input())' });
+    assert.equal(mismatchedRun.status, 404);
+  });
+
+  await t.test('concurrent LAB submissions retain both Gitea and local ledger entries', async () => {
+    const submissions = await Promise.all([
+      api(`${labAssignmentPath}/submit`, student, 'POST', { sourceCode: 'print(input())' }),
+      api(`${labAssignmentPath}/submit`, student, 'POST', { sourceCode: 'print(input())' }),
+    ]);
+    assert.ok(submissions.every((item) => item.status === 201), JSON.stringify(submissions));
+    const ids = submissions.map((item) => item.data.item.id);
+    assert.notEqual(ids[0], ids[1]);
+    const committed = JSON.parse(gitFiles.get(ledgerKey));
+    const local = JSON.parse(await readFile(path.join(ledgerDirectory, `${studentKey('student@gmail.com')}.json`), 'utf8'));
+    for (const id of ids) {
+      assert.ok(committed.some((item) => item.id === id));
+      assert.ok(local.some((item) => item.id === id));
+    }
+  });
+
+  await t.test('direct assignment submit cannot bypass a closed LAB practice window', async () => {
+    const directSubmission = await api(`/api/codepulse/classrooms/class-1/assignments/${assignmentId}/submissions`, student, 'POST', { sourceCode: 'print(input())' });
+    assert.equal(directSubmission.status, 400);
+    assert.equal(directSubmission.data.code, 'LAB_CONTEXT_REQUIRED');
+    const closed = await api(`${labAssignmentPath}/practice-window`, lecturer, 'PATCH', {
+      status: 'CLOSED',
+      expectedVersion: createdLab.data.item.assignments[0].practiceWindowVersion,
+    });
+    assert.equal(closed.status, 200);
+    const blockedDirect = await api(`/api/codepulse/classrooms/class-1/assignments/${assignmentId}/submissions`, student, 'POST', { sourceCode: 'print(input())' });
+    assert.equal(blockedDirect.status, 403);
+    assert.equal(blockedDirect.data.code, 'PRACTICE_WINDOW_CLOSED');
+    assert.equal((await api(`${labAssignmentPath}/submit`, student, 'POST', { sourceCode: 'print(input())' })).status, 403);
+  });
 });
