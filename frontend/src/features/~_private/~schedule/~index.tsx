@@ -13,7 +13,7 @@ import { dayIndexFromISO, getWeekLabels, toHHMM, type CalendarItemData } from '.
 
 export const Route = createFileRoute('/_private/schedule/')({
   beforeLoad: async () => {
-    document.title = 'Schedule -  Tutor Support System';
+    document.title = 'Schedule - Code Pulse';
   },
   component: RouteComponent,
 });
@@ -75,7 +75,7 @@ function RouteComponent() {
 
         <div className="relative bg-white pb-12 pt-6">
           <div className="px-4 sm:px-6 lg:px-8">
-            <h1 className="text-4xl font-bold text-gray-900">Calendar - Tutor System</h1>
+            <h1 className="text-4xl font-bold text-gray-900">Calendar - Code Pulse</h1>
           </div>
           <BannerWave />
         </div>

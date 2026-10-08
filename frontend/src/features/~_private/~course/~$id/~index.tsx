@@ -19,7 +19,7 @@ import { DsaLabManagement } from './components/dsa-lab-management';
 
 export const Route = createFileRoute('/_private/course/$id/')({
   beforeLoad: async () => {
-    document.title = 'Chi tiết khóa học - Tutor Support System';
+    document.title = 'Chi tiết khóa học - Code Pulse';
   },
   component: CourseDetailsComponent,
 });

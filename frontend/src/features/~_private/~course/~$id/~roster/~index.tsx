@@ -20,7 +20,7 @@ import { getCourseHeaderVisibility } from '../components/course-header-tabs';
 
 export const Route = createFileRoute('/_private/course/$id/roster/')({
   beforeLoad: async () => {
-    document.title = 'Danh sách lớp - Tutor Support System';
+    document.title = 'Danh sách lớp - Code Pulse';
   },
   component: ClassroomRosterPage,
 });

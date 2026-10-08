@@ -11,7 +11,7 @@ import { TutorRegister } from './components/tutor-register';
 
 export const Route = createFileRoute('/_private/register-session/')({
   beforeLoad: async () => {
-    document.title = 'Register Tutor Program -  Tutor Support System';
+    document.title = 'Register Tutor Program - Code Pulse';
   },
   component: RouteComponent,
 })
@@ -26,7 +26,7 @@ function getFormComponent(role: 'lecturer' | 'student') {
 function RouteComponent() {
 
   useEffect(() => {
-    document.title = 'Register Tutor Program -  Tutor Support System';
+    document.title = 'Register Tutor Program - Code Pulse';
   }, []);
 
 

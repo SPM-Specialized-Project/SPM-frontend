@@ -96,11 +96,11 @@ Nếu `SPM-frontend` public thì `SPM_CHECKOUT_TOKEN` có thể không cần; wo
 
 ## 4. Cách workflow hoạt động
 
-`.github/workflows/staging-e2e.yml` trong `SPM-frontend` chạy khi:
-
-- Có push vào `staging`.
-- Có PR `staging -> main`.
-- Chạy thủ công bằng `workflow_dispatch`.
+`.github/workflows/staging-e2e.yml` trong `SPM-frontend` chạy khi mở, cập nhật,
+mở lại hoặc chuyển PR vào `main` sang trạng thái ready for review.
+Chỉ PR `staging -> main` trong cùng repository được deploy staging rồi chạy E2E.
+Push vào `staging` không tạo lượt chạy **Staging Deploy** riêng. Có thể deploy
+thủ công bằng **Actions → Staging Deploy → Run workflow** trên nhánh `staging`.
 
 Workflow gửi payload chứa:
 
