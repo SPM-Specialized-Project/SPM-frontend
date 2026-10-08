@@ -156,6 +156,8 @@ export type CodePulseLabAssignment = {
   lastReopenedAt?: string | null;
   lastReopenedBy?: string | null;
   practiceAccess?: 'OPEN' | 'CLOSED';
+  practiceAccessReason?: 'NOT_OPEN_YET' | 'MANUALLY_CLOSED' | 'EXPIRED' | 'TERM_INACTIVE' | 'CLASSROOM_ARCHIVED' | 'INVALID_WINDOW' | null;
+  serverTime?: string;
   activityContext?: 'IN_LAB' | 'OUTSIDE_LAB' | null;
   workspaceId?: string;
   hintCount?: number;
@@ -193,6 +195,7 @@ export type CreateCodePulseLabInput = {
 
 export type CodePulsePracticeWindowPatch = {
   status?: 'OPEN' | 'CLOSED';
+  openNow?: boolean;
   openAt?: string;
   closeAt?: string;
   expectedVersion: number;
@@ -375,7 +378,7 @@ export const codePulseApi = {
     apiClient.delete<{ deleted: boolean }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}`)),
   getWorkspace: (id: string) => request(() =>
-    apiClient.get<{ item: CodePulseWorkspace }>(`/codepulse/workspaces/${encodeURIComponent(id)}`)),
+    apiClient.get<{ item: CodePulseWorkspace; practiceWindow?: CodePulseLabAssignment }>(`/codepulse/workspaces/${encodeURIComponent(id)}`)),
   getStudentWorkspace: (classroomId: string, assignmentId: string) => request(() =>
     apiClient.get<{ item: CodePulseWorkspace }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/workspace`,
