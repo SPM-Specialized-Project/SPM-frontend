@@ -128,11 +128,22 @@ Quick Tunnel needs no domain or Cloudflare credential, but its hostname
 changes on restart. Use the latest Summary URL without `:8080`. Stable
 Gitea clone URLs require a domain and Named Tunnel later.
 
+Nginx returns a relative `Location: /git/` when `/git` is opened without the
+trailing slash. `absolute_redirect off` in both site configurations preserves
+the browser's public HTTPS origin instead of exposing HTTP or the staging
+origin port `8080`. Deployment checks follow `/git` with HTTPS-only redirects.
+
 ## Deployment tests for maintainers
 
 `npm run deploy:test` runs in backend PR quality and staging deployment.
 It checks invalid inputs, database/volume continuity, URL normalization,
 Compose dollar escaping, protected settings and repository-check cleanup.
+
+`npm run deploy:test:nginx` requires Docker and runs the actual main and
+staging Nginx configurations in an isolated `nginx:stable-alpine` container.
+It simulates the HTTP hop from the HTTPS tunnel, checks that `/git` redirects
+to the same public HTTPS origin, and removes only its own test container.
+Backend PR quality runs this regression test before merge.
 
 The optional harness uses real Gitea 1.27.3, PostgreSQL 17 and Redis 8;
 systemd/Nginx/cloudflared are stubbed. It cannot prove actual Debian service

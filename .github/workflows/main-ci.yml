@@ -205,6 +205,9 @@ jobs:
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --location --proto '=https' --proto-redir '=https' \
+              --connect-timeout 5 --max-time 15 "$public_url/git" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/git/api/v1/version" >/dev/null 2>&1; then
@@ -218,6 +221,8 @@ jobs:
             echo "::error::Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
+            curl --fail --show-error --location --proto '=https' --proto-redir '=https' \
+              --max-time 15 "$public_url/git" >/dev/null || true
             curl --fail --show-error --max-time 15 "$public_url/git/" || true
             curl --fail --show-error --max-time 15 "$public_url/git/api/v1/version" || true
             exit 1
