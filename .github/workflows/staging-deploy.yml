@@ -10,6 +10,15 @@ on:
         description: Git ref or commit to deploy
         required: false
         type: string
+    secrets:
+      GITEA_ADMIN_PASSWORD:
+        required: true
+      RUNNER_SUDO_PASSWORD:
+        required: false
+      POSTGRES_PASSWORD:
+        required: false
+      GITEA_API_TOKEN:
+        required: false
     outputs:
       public_url:
         description: Public URL of the deployed staging application
@@ -44,6 +53,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Validate staging secrets and runner permissions
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+        run: node deploy/actions/run-staging-setup.mjs check
+
       - name: Build staging frontend
         env:
           VITE_BACKEND_URL: /api
@@ -57,6 +75,20 @@ jobs:
       - name: Test staging backend
         run: npm run backend:test
 
+      - name: Test staging deployment configuration
+        run: npm run deploy:test
+
+      - name: Configure staging services and Gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+        run: node deploy/actions/run-staging-setup.mjs setup
+
       - name: Deploy staging release
         shell: bash
         run: |
@@ -65,7 +97,7 @@ jobs:
 
           if [[ ! -x /usr/local/sbin/spm-staging-deploy ]]; then
             echo '::error::/usr/local/sbin/spm-staging-deploy is missing or not executable on the local runner.'
-            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
+            echo '::error::The Configure staging services and Gitea step must complete successfully before deployment.'
             exit 1
           fi
 
@@ -96,7 +128,7 @@ jobs:
           started_at="$(date -u --iso-8601=seconds)"
           if ! sudo -n systemctl restart spm-staging-quick-tunnel.service; then
             echo '::error::The persistent spm-staging-quick-tunnel.service is not installed or cannot be restarted.'
-            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
+            echo '::error::Check Configure staging services and Gitea for service installation errors.'
             exit 1
           fi
 
@@ -118,14 +150,37 @@ jobs:
             exit 1
           fi
 
+          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Staging URL::$public_url"
+
+      - name: Configure Gitea public URL
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+          SPM_STAGING_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: node deploy/actions/run-staging-setup.mjs public
+
+      - name: Verify public staging and Gitea
+        env:
+          STAGING_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: |
+          set -euo pipefail
+          public_url="$STAGING_PUBLIC_URL"
           reachable=0
-          for _ in $(seq 1 60); do
+          for _ in $(seq 1 30); do
             if curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/api/v1/version" >/dev/null 2>&1; then
               reachable=1
               break
             fi
@@ -137,11 +192,9 @@ jobs:
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
             curl --fail --show-error --max-time 15 "$public_url/git/" || true
+            curl --fail --show-error --max-time 15 "$public_url/git/api/v1/version" || true
             exit 1
           fi
-
-          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Staging URL::$public_url"
 
       - name: Publish staging URL to job summary
         if: ${{ success() && steps.cloudflare.outputs.public_url != '' }}
@@ -164,6 +217,8 @@ jobs:
             echo
             echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
             echo "- Gitea: [$STAGING_URL/git/]($STAGING_URL/git/)"
+            echo '- Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.'
+            echo '- Backend Gitea token: verified by private repository/branch/file writes and saved on the runner.'
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
             echo '- The public URL is HTTPS; do not append the runner origin port (for example `:8080`).'
             echo "- Backend service: spm-staging-backend.service"
