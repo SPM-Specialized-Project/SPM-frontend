@@ -5,7 +5,7 @@ import StudyLayout from '@/components/study-layout'
 
 export const Route = createFileRoute('/_private/library/')({
   beforeLoad: async () => {
-    document.title = 'Library -  Tutor Support System';
+    document.title = 'Library - Code Pulse';
   },
   component: RouteComponent,
 })
@@ -132,7 +132,7 @@ function RouteComponent() {
             <div className="flex items-center space-x-3">
               <img src="bachkhoa.png" alt="Logo BK" className="h-10" />
               <span className="text-xl font-bold text-[#0329E9]">
-                Tutor System
+                Code Pulse
               </span>
             </div>
           </header> */}

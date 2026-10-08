@@ -15,7 +15,7 @@ import { ResultTab } from './components/result-tab'
 // --- Định nghĩa Type --- (moved into DataTab)
 export const Route = createFileRoute('/_private/overview/')({
   beforeLoad: async () => {
-    document.title = 'Overview -  Tutor Support System';
+    document.title = 'Overview - Code Pulse';
     if (!localStorage.getItem('userStore')) {
       window.location.assign('/login');
     };

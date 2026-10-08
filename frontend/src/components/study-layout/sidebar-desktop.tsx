@@ -34,7 +34,7 @@ const SidebarDesktop = ({ opened }: SidebarDesktopProps) => {
           />
           {opened && (
             <div className="shrink-0 select-none text-xl font-bold text-[#0329E9]">
-              Tutor System
+              Code Pulse
             </div>
           )}
         </div>
