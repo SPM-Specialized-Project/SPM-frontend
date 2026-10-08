@@ -38,6 +38,11 @@ jobs:
     if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
+    concurrency:
+      group: spm-git-platform-deploy
+      cancel-in-progress: false
+    env:
+      SPM_DEPLOY_ENVIRONMENT: staging
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
     steps:
@@ -60,7 +65,7 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
-        run: node deploy/actions/run-staging-setup.mjs check
+        run: node deploy/actions/run-deployment-setup.mjs check
 
       - name: Build staging frontend
         env:
@@ -87,7 +92,7 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
-        run: node deploy/actions/run-staging-setup.mjs setup
+        run: node deploy/actions/run-deployment-setup.mjs setup
 
       - name: Deploy staging release
         shell: bash
@@ -154,6 +159,7 @@ jobs:
           echo "::notice title=Staging URL::$public_url"
 
       - name: Configure Gitea public URL
+        id: gitea
         env:
           RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
           GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
@@ -162,8 +168,8 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
-          SPM_STAGING_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
-        run: node deploy/actions/run-staging-setup.mjs public
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: node deploy/actions/run-deployment-setup.mjs public
 
       - name: Verify public staging and Gitea
         env:
@@ -201,6 +207,7 @@ jobs:
         shell: bash
         env:
           STAGING_URL: ${{ steps.cloudflare.outputs.public_url }}
+          GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
         run: |
           set -euo pipefail
 
@@ -216,7 +223,7 @@ jobs:
             echo '```'
             echo
             echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
-            echo "- Gitea: [$STAGING_URL/git/]($STAGING_URL/git/)"
+            echo "- Shared Gitea: [$GITEA_URL]($GITEA_URL)"
             echo '- Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.'
             echo '- Backend Gitea token: verified by private repository/branch/file writes and saved on the runner.'
             echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'

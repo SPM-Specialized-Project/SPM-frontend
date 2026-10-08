@@ -4,17 +4,16 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSyn
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  assertVolumeContinuity, composeOverride, configurationFromEnvironment, giteaRequest,
-  parseUsers, publicRootUrl, readEnvironmentValue, selectDatabasePassword,
+  assertVolumeContinuity, composeOverride, configurationFromEnvironment, deploymentFor, giteaRequest,
+  parseUsers, readEnvironmentValue, selectDatabasePassword, selectPublicState,
   updateEnvironment, verifyRepositoryWrites,
-} from './staging-lib.mjs';
+} from './deployment-lib.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const stack = '/srv/git-platform';
 const baseFile = stack + '/compose.yml';
 const overrideFile = stack + '/actions.override.json';
 const stateFile = stack + '/actions-state.json';
-const backendEnvironment = '/etc/spm-frontend/staging.env';
 const apiUrl = 'http://127.0.0.1:8211/api/v1';
 const redactions = new Set();
 const redact = (value) => {
@@ -54,6 +53,8 @@ async function waitForVersion() {
 }
 
 async function setup(config) {
+  const deployment = deploymentFor(config.deployment);
+  const backendEnvironment = deployment.environmentFile;
   run('docker', ['info']);
   run('docker', ['compose', 'version']);
   const containers = { postgres: inspect('git-postgres'), gitea: inspect('gitea') };
@@ -91,16 +92,16 @@ async function setup(config) {
   const havePackages = ['nginx', 'rsync', 'curl'].every((command) => {
     try { run('sh', ['-c', 'command -v "$1"', 'sh', command]); return true; } catch { return false; }
   });
-  run('bash', ['deploy/install-staging-local.sh'], {
+  run('bash', [deployment.installer], {
     env: { ...process.env, RUNNER_USER: config.runnerUser, SPM_SKIP_PACKAGE_INSTALL: havePackages ? '1' : '0' },
   });
-  const runtimeDirectory = '/opt/spm-frontend-staging/runtime';
+  const runtimeDirectory = deployment.appRoot + '/runtime';
   mkdirSync(runtimeDirectory, { recursive: true, mode: 0o755 });
   const runtimeTemporary = runtimeDirectory + '/node.tmp-' + randomUUID();
   copyFileSync(process.execPath, runtimeTemporary);
   chmodSync(runtimeTemporary, 0o755);
   renameSync(runtimeTemporary, runtimeDirectory + '/node');
-  const backendUnit = '/etc/systemd/system/spm-staging-backend.service';
+  const backendUnit = '/etc/systemd/system/' + deployment.backendUnit;
   atomicWrite(backendUnit, readFileSync(backendUnit, 'utf8')
     .replace('Environment=PATH=', 'Environment=PATH=' + runtimeDirectory + ':'), 0o644);
   const dockerPath = run('sh', ['-c', 'command -v docker']).trim();
@@ -155,7 +156,7 @@ async function setup(config) {
   }
   if (!token) {
     const result = run('docker', ['exec', 'gitea', 'gitea', '--config', '/etc/gitea/app.ini', 'admin', 'user',
-      'generate-access-token', '--username', config.owner, '--token-name', 'spm-staging-' + randomUUID(),
+      'generate-access-token', '--username', config.owner, '--token-name', 'spm-' + deployment.name + '-' + randomUUID(),
       '--scopes', 'write:repository,write:user', '--raw']);
     token = result.split(/\r?\n/).findLast((line) => /^[a-f0-9]{40}$/i.test(line.trim()))?.trim();
     if (!token) throw new Error('Gitea did not return an access token.');
@@ -166,31 +167,37 @@ async function setup(config) {
     GITEA_API_URL: apiUrl, GITEA_OWNER: config.owner, GITEA_API_TOKEN: token,
   }), 0o640);
   run('chown', ['root:spm', backendEnvironment]);
-  atomicWrite(stateFile, JSON.stringify({ project }) + '\n');
+  const previousState = existsSync(stateFile) ? JSON.parse(readFileSync(stateFile, 'utf8')) : {};
+  atomicWrite(stateFile, JSON.stringify({ ...previousState, project }) + '\n');
   // Start the persistent oneshot unit after initialization to mark it active.
   run('systemctl', ['start', 'gitea-stack.service']);
   console.log('Gitea initialized; private repository, branch and file create/update checks passed.');
-  console.log('Backend Gitea configuration saved with root:spm ownership and mode 0640.');
+  console.log(deployment.name + ' backend Gitea configuration saved with root:spm ownership and mode 0640.');
 }
 
 async function configurePublic(config) {
-  const rootUrl = publicRootUrl(config.publicUrl);
-  const state = JSON.parse(readFileSync(stateFile, 'utf8'));
+  const state = selectPublicState(JSON.parse(readFileSync(stateFile, 'utf8')), config.deployment, config.publicUrl);
+  const rootUrl = state.rootUrl;
   if (!/^[a-z0-9][a-z0-9_-]*$/.test(state.project)) throw new Error('Invalid managed Compose project.');
   const override = JSON.parse(readFileSync(overrideFile, 'utf8'));
+  const changed = override.services.gitea.environment.GITEA__server__ROOT_URL !== rootUrl;
   Object.assign(override.services.gitea.environment, {
     GITEA__server__DOMAIN: new URL(rootUrl).hostname,
     GITEA__server__SSH_DOMAIN: new URL(rootUrl).hostname,
     GITEA__server__ROOT_URL: rootUrl,
   });
-  atomicWrite(overrideFile, JSON.stringify(override, null, 2) + '\n');
-  run('docker', ['compose', '-p', state.project, '-f', baseFile, '-f', overrideFile, 'up', '-d', '--no-deps', 'gitea']);
+  if (changed) {
+    atomicWrite(overrideFile, JSON.stringify(override, null, 2) + '\n');
+    run('docker', ['compose', '-p', state.project, '-f', baseFile, '-f', overrideFile, 'up', '-d', '--no-deps', 'gitea']);
+  }
   await waitForVersion();
-  console.log('Gitea public URL configured: ' + rootUrl);
+  atomicWrite(stateFile, JSON.stringify(state) + '\n');
+  console.log('Gitea canonical public URL uses ' + state.canonicalEnvironment + '.');
+  console.log('GITEA_PUBLIC_URL=' + rootUrl);
 }
 
 try {
-  if (process.platform !== 'linux' || process.getuid() !== 0) throw new Error('Staging setup must run as root on the Linux runner.');
+  if (process.platform !== 'linux' || process.getuid() !== 0) throw new Error('Deployment setup must run as root on the Linux runner.');
   const [phase, file] = process.argv.slice(2);
   const input = JSON.parse(readFileSync(file, 'utf8'));
   const config = configurationFromEnvironment({
@@ -198,6 +205,7 @@ try {
     GITEA_ADMIN_PASSWORD: input.adminPassword, GITEA_OWNER: input.owner,
     POSTGRES_PASSWORD: input.postgresPassword, GITEA_API_TOKEN: input.apiToken,
     SPM_RUNNER_USER: input.runnerUser,
+    SPM_DEPLOY_ENVIRONMENT: input.deployment,
   });
   for (const secret of [config.adminPassword, config.postgresPassword, config.apiToken]) redactions.add(secret);
   if (phase === 'setup') await setup(config);

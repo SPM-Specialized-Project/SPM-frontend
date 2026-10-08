@@ -94,8 +94,21 @@ GITEA_API_TOKEN="<generated-on-the-runner>"
 
 It installs a Node 22 runtime outside the runner home directory, refreshes
 Nginx, systemd units and the deploy helper, and enables services at boot.
-After obtaining the Quick Tunnel URL, it updates Gitea `ROOT_URL` to
-`<public-url>/git/` before checking the public endpoints.
+Main and staging share one Gitea/PostgreSQL stack. Staging uses the
+`codepulse-bot` account; main defaults to `codepulse-bot-main` so identical
+assignment IDs do not conflict. Main can override its owner with the optional
+`GITEA_MAIN_OWNER` variable and its token with `GITEA_MAIN_API_TOKEN`.
+
+Before main has deployed, the staging Quick Tunnel supplies Gitea's
+`ROOT_URL`. Once main publishes a URL, that main URL owns `ROOT_URL`.
+Later staging deployments retain the main URL and do not recreate Gitea
+just to change its hostname. Both Actions summaries show the shared Gitea
+URL. See [main deployment](local-deploy-debian.md) for the promotion flow.
+
+Both deploy jobs use the same GitHub concurrency group, and the shared
+`run-deployment-setup.mjs` helper serializes setup/public changes with `flock`
+on the host. It configures separate backend environment files and Node
+runtimes for each environment.
 
 | Component | Address/path |
 | --- | --- |
@@ -134,6 +147,7 @@ docker run --rm --network host \
 ~~~
 
 The harness refuses existing named containers. It deletes only the unique
-test project it creates, and checks installation recovery, actual API
-writes, repeat setup/token reuse, unchanged volumes and preserved repository
-data after the public URL update.
+test project it creates. It checks installation recovery, real API writes,
+shared database/volumes, separate repository owners for identical assignment
+IDs, preserved application data/environment values, parallel setup with the
+host lock, token reuse and main URL priority after later staging deployments.

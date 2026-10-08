@@ -1,11 +1,27 @@
 import { randomUUID } from 'node:crypto';
 
+export function deploymentFor(name = 'staging') {
+  if (name === 'staging') return {
+    name, appRoot: '/opt/spm-frontend-staging', environmentFile: '/etc/spm-frontend/staging.env',
+    installer: 'deploy/install-staging-local.sh', backendUnit: 'spm-staging-backend.service',
+    defaultOwner: 'codepulse-bot',
+  };
+  if (name === 'main') return {
+    name, appRoot: '/opt/spm-frontend', environmentFile: '/etc/spm-frontend/backend.env',
+    installer: 'deploy/install-local.sh', backendUnit: 'spm-backend.service',
+    defaultOwner: 'codepulse-bot-main',
+  };
+  throw new Error('SPM_DEPLOY_ENVIRONMENT must be staging or main.');
+}
+
 export function configurationFromEnvironment(env) {
+  const deployment = deploymentFor(env.SPM_DEPLOY_ENVIRONMENT || 'staging');
   const config = {
+    deployment: deployment.name,
     adminUser: env.GITEA_ADMIN_USERNAME?.trim() || 'spm-admin',
     adminEmail: env.GITEA_ADMIN_EMAIL?.trim() || 'spm-admin@example.com',
     adminPassword: env.GITEA_ADMIN_PASSWORD || '',
-    owner: env.GITEA_OWNER?.trim() || 'codepulse-bot',
+    owner: env.GITEA_OWNER?.trim() || deployment.defaultOwner,
     postgresPassword: env.POSTGRES_PASSWORD || '',
     apiToken: env.GITEA_API_TOKEN?.trim() || '',
     runnerUser: env.SPM_RUNNER_USER || '',
@@ -36,12 +52,21 @@ export function selectDatabasePassword(existing, supplied, generate) {
 
 export function publicRootUrl(value) {
   let url;
-  try { url = new URL(value); } catch { throw new Error('Invalid staging public URL.'); }
+  try { url = new URL(value); } catch { throw new Error('Invalid deployment public URL.'); }
   if (url.protocol !== 'https:' || !/^[a-z0-9-]+\.trycloudflare\.com$/.test(url.hostname)
       || url.username || url.password || url.port || url.pathname !== '/' || url.search || url.hash) {
     throw new Error('Expected the HTTPS Quick Tunnel origin, without a port or /git path.');
   }
   return url.origin + '/git/';
+}
+
+export function selectPublicState(state, deployment, origin) {
+  deploymentFor(deployment);
+  publicRootUrl(origin);
+  const publicUrls = { ...state.publicUrls, [deployment]: new URL(origin).origin };
+  const canonicalEnvironment = publicUrls.main ? 'main' : 'staging';
+  const rootUrl = publicRootUrl(publicUrls[canonicalEnvironment]);
+  return { ...state, publicUrls, canonicalEnvironment, rootUrl };
 }
 
 export function composeOverride(password, rootUrl) {

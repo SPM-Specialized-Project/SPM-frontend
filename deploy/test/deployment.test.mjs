@@ -3,9 +3,9 @@ import { createServer } from 'node:http';
 import test from 'node:test';
 import {
   assertVolumeContinuity, composeOverride, configurationFromEnvironment,
-  parseUsers, publicRootUrl, readEnvironmentValue, selectDatabasePassword,
+  deploymentFor, parseUsers, publicRootUrl, readEnvironmentValue, selectDatabasePassword, selectPublicState,
   updateEnvironment, verifyRepositoryWrites,
-} from '../actions/staging-lib.mjs';
+} from '../actions/deployment-lib.mjs';
 
 const environment = { GITEA_ADMIN_PASSWORD: 'integration-test-password', SPM_RUNNER_USER: 'runner' };
 
@@ -15,6 +15,29 @@ test('configuration fails before deployment for missing or unsafe inputs', () =>
   assert.throws(() => configurationFromEnvironment({ ...environment, GITEA_OWNER: 'https://gitea/owner' }), /username/);
   assert.throws(() => configurationFromEnvironment({ ...environment, GITEA_OWNER: 'spm-admin' }), /separate/);
   assert.throws(() => configurationFromEnvironment({ ...environment, POSTGRES_PASSWORD: 'a\nb' }), /single line/);
+});
+
+test('main and staging use separate application settings and repository owners', () => {
+  const staging = configurationFromEnvironment(environment);
+  const main = configurationFromEnvironment({ ...environment, SPM_DEPLOY_ENVIRONMENT: 'main' });
+  assert.equal(staging.owner, 'codepulse-bot');
+  assert.equal(main.owner, 'codepulse-bot-main');
+  assert.equal(deploymentFor(main.deployment).environmentFile, '/etc/spm-frontend/backend.env');
+  assert.notEqual(deploymentFor(main.deployment).appRoot, deploymentFor(staging.deployment).appRoot);
+  assert.throws(() => configurationFromEnvironment({ ...environment, SPM_DEPLOY_ENVIRONMENT: '../../wrong' }), /staging or main/);
+});
+
+test('main owns the shared public URL once deployed, including after later staging deployments', () => {
+  let state = selectPublicState({ project: 'existing' }, 'staging', 'https://stage-one.trycloudflare.com');
+  assert.equal(state.rootUrl, 'https://stage-one.trycloudflare.com/git/');
+  state = selectPublicState(state, 'main', 'https://main-one.trycloudflare.com');
+  const laterStaging = selectPublicState(state, 'staging', 'https://stage-two.trycloudflare.com');
+  assert.equal(laterStaging.rootUrl, 'https://main-one.trycloudflare.com/git/');
+  assert.equal(laterStaging.canonicalEnvironment, 'main');
+  assert.equal(laterStaging.publicUrls.staging, 'https://stage-two.trycloudflare.com');
+  assert.equal(laterStaging.project, 'existing');
+  assert.equal(selectPublicState(laterStaging, 'main', 'https://main-two.trycloudflare.com').rootUrl,
+    'https://main-two.trycloudflare.com/git/');
 });
 
 test('existing database password takes precedence and cannot be replaced accidentally', () => {
