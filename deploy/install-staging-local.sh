@@ -4,8 +4,10 @@ set -euo pipefail
 app_root='/opt/spm-frontend-staging'
 runner_user="${RUNNER_USER:-$(id -un)}"
 
-sudo apt-get update
-sudo apt-get install -y nginx rsync curl
+if [[ "${SPM_SKIP_PACKAGE_INSTALL:-0}" != "1" ]]; then
+  sudo apt-get update
+  sudo apt-get install -y nginx rsync curl
+fi
 
 if ! command -v cloudflared >/dev/null 2>&1; then
   echo 'cloudflared is required for the staging Quick Tunnel.' >&2

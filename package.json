@@ -5,7 +5,8 @@
   "scripts": {
     "backend": "npm --prefix backend run start",
     "backend:watch": "npm --prefix backend run dev",
-    "backend:test": "npm --prefix backend test"
+    "backend:test": "npm --prefix backend test",
+    "deploy:test": "node --test deploy/test/*.test.mjs"
   },
   "main": "index.js",
   "repository": "https://github.com/Tung-Quan/SOFTWARE-ENGINEER-BTL.git",
