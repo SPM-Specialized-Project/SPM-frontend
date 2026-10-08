@@ -61,8 +61,9 @@ Nó giữ Compose project/volume identities và từ chối thay đổi image Gi
 ## Trình tự đưa thay đổi lên main
 
 1. Thêm hai secrets trên GitHub nếu chưa có.
-2. Merge PR chứa cấu hình này vào `staging`, đợi **Staging Deploy** xanh.
-3. Mở PR `staging → main` theo quy trình promotion hiện có; đợi checks/E2E.
+2. Merge PR chứa cấu hình này vào `staging` sau khi quality checks xanh.
+3. Mở PR `staging → main` theo quy trình promotion hiện có; E2E gate sẽ deploy
+   staging trước khi chạy test. Đợi checks/E2E xanh.
 4. Merge PR promotion vào `main`.
 5. Mở **Actions → Main CI → lần chạy mới nhất**.
 6. Đợi quality jobs và **Deploy local Debian** xanh.

@@ -1,6 +1,8 @@
 # Deploy staging and Gitea through GitHub Actions
 
-Merging a PR into `staging` triggers `.github/workflows/staging-deploy.yml`.
+Run `.github/workflows/staging-deploy.yml` manually on `staging`, or let the
+staging-to-main PR E2E gate call it. Pushes and merges into `staging` do not
+start a standalone deployment check.
 Actions configures the Debian runner, initializes Gitea, deploys the app and
 publishes the Quick Tunnel URL. No SSH session, installation form or manual
 token creation is needed for this flow.
@@ -54,10 +56,11 @@ have root sudo permission. Docker Engine, Compose and `cloudflared` are host
 prerequisites already present on the current runner. Actions installs missing
 Nginx, rsync and curl packages and refreshes the application services.
 
-## Merge and check
+## Run and check
 
 1. Add the two secrets before merging and wait for both PR quality jobs.
-2. Merge into `staging`; open **Actions → Staging Deploy → latest run**.
+2. Merge into `staging`; open **Actions → Staging Deploy → Run workflow**,
+   select `staging` and start the workflow.
 3. The first validation checks credentials and sudo before the frontend build.
 4. Wait for Gitea setup, deployment and all verification steps to succeed.
 5. Open the run **Summary** for the app, `/api/health` and `/git/` URLs.
