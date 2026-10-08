@@ -259,3 +259,78 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
   const submissions = JSON.parse(await readFile(path.join(dataDirectory, 'codepulse-submissions.json'), 'utf8'));
   assert.ok(submissions.every((item) => item.acceptedAt));
 });
+
+test('LIVE LAB with a future practice window reports why it is locked and lecturer can open it now', async (t) => {
+  const { baseUrl } = await startBackend(t);
+  const lecturer = await login(baseUrl, 'lecturer@gmail.com', 'lecturer123');
+  const student = await login(baseUrl, 'student@gmail.com', 'student123');
+  const labsRoute = '/api/codepulse/classrooms/class-1/labs';
+  const now = Date.now();
+  const created = await request(baseUrl, labsRoute, lecturer, 'POST', {
+    name: 'Queue with future practice',
+    startAt: new Date(now + 60 * 60_000).toISOString(),
+    endAt: new Date(now + 6 * 60 * 60_000).toISOString(),
+    assignments: [{
+      assignmentVersionId: 'problem-1-v1',
+      mandatory: true,
+      openAt: new Date(now + 60 * 60_000).toISOString(),
+      closeAt: new Date(now + 6 * 60 * 60_000).toISOString(),
+    }],
+  });
+  assert.equal(created.status, 201);
+  const lab = created.data.item;
+  const live = await request(baseUrl, `${labsRoute}/${lab.id}`, lecturer, 'PATCH', {
+    status: 'LIVE', expectedStateVersion: lab.stateVersion,
+  });
+  assert.equal(live.status, 200);
+  const studentLabs = await request(baseUrl, labsRoute, student);
+  const assignment = studentLabs.data.items[0].assignments[0];
+  assert.equal(assignment.practiceAccess, 'CLOSED');
+  assert.equal(assignment.practiceAccessReason, 'NOT_OPEN_YET');
+  assert.equal(assignment.activityContext, null);
+  assert.ok(Date.parse(assignment.serverTime) < Date.parse(assignment.openAt));
+
+  const workspaceRoute = `/api/codepulse/workspaces/${encodeURIComponent(assignment.workspaceId)}`;
+  const practiceRoute = `${labsRoute}/${lab.id}/assignments/${assignment.id}/practice-window`;
+  const locked = await request(baseUrl, workspaceRoute, student);
+  assert.equal(locked.status, 200);
+  assert.equal(locked.data.practiceWindow.practiceAccessReason, 'NOT_OPEN_YET');
+  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', { sourceCode: 'too early' })).data.code, 'PRACTICE_WINDOW_NOT_OPEN');
+  assert.equal((await request(baseUrl, practiceRoute, student, 'PATCH', { openNow: true, expectedVersion: 0 })).status, 403);
+
+  const beforeOpen = Date.now();
+  const opened = await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
+    openNow: true,
+    // Client clock may be wrong; openNow must use server time instead.
+    openAt: '2099-01-01T00:00:00.000Z',
+    expectedVersion: assignment.practiceWindowVersion,
+  });
+  assert.equal(opened.status, 200);
+  assert.ok(Date.parse(opened.data.item.openAt) >= beforeOpen);
+  assert.ok(Date.parse(opened.data.item.openAt) <= Date.now());
+  assert.equal(opened.data.item.closeAt, assignment.closeAt);
+  const fresh = await request(baseUrl, workspaceRoute, student);
+  assert.equal(fresh.data.practiceWindow.practiceAccess, 'OPEN');
+  assert.equal(fresh.data.practiceWindow.practiceAccessReason, null);
+  assert.equal(fresh.data.item.sourceCode, locked.data.item.sourceCode);
+  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', { sourceCode: 'print("queue")' })).status, 200);
+
+  const closed = await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
+    status: 'CLOSED', expectedVersion: opened.data.item.practiceWindowVersion,
+  });
+  assert.equal(closed.status, 200);
+  const closedRead = await request(baseUrl, workspaceRoute, student);
+  assert.equal(closedRead.data.practiceWindow.practiceAccessReason, 'MANUALLY_CLOSED');
+  assert.equal(closedRead.data.item.sourceCode, 'print("queue")');
+  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', { sourceCode: 'after close' })).data.code, 'PRACTICE_WINDOW_CLOSED');
+  assert.equal((await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
+    openNow: true,
+    closeAt: new Date(now - 60_000).toISOString(),
+    expectedVersion: closed.data.item.practiceWindowVersion,
+  })).status, 422);
+  const reopened = await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
+    openNow: true, expectedVersion: closed.data.item.practiceWindowVersion,
+  });
+  assert.equal(reopened.status, 200);
+  assert.equal((await request(baseUrl, workspaceRoute, student)).data.practiceWindow.practiceAccess, 'OPEN');
+});
