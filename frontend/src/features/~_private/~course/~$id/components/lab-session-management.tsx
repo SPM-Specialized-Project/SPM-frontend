@@ -85,7 +85,8 @@ function practiceStatusLabel(assignment: CodePulseLabAssignment) {
   if (assignment.practiceAccess === 'OPEN') {
     return assignment.activityContext === 'OUTSIDE_LAB' ? 'Đang mở · Outside-Lab' : 'Đang mở · In-Lab';
   }
-  if (new Date(assignment.openAt).getTime() > Date.now()) return 'Chưa mở';
+  if (assignment.practiceAccessReason === 'NOT_OPEN_YET') return 'Chưa mở';
+  if (assignment.practiceAccessReason === 'TERM_INACTIVE') return 'Học kỳ không còn hiệu lực';
   return 'Đã hết hạn';
 }
 
@@ -111,11 +112,12 @@ function PracticeWindowControls({
     setCloseAt(toLocalDateTime(new Date(assignment.closeAt)));
   }, [assignment.closeAt, assignment.id, assignment.openAt, assignment.practiceWindowVersion]);
 
-  const update = async (status?: 'OPEN' | 'CLOSED') => {
+  const update = async (status?: 'OPEN' | 'CLOSED', openNow = false) => {
     setSaving(true);
     try {
       await codePulseApi.updatePracticeWindow(classroomId, labId, assignment.id, {
         status,
+        openNow,
         openAt: new Date(openAt).toISOString(),
         closeAt: new Date(closeAt).toISOString(),
         expectedVersion: assignment.practiceWindowVersion,
@@ -155,6 +157,16 @@ function PracticeWindowControls({
         </label>
       </div>
       <div className="mt-2 flex flex-wrap gap-2">
+        {assignment.practiceAccess !== 'OPEN' && (
+          <button
+            type="button"
+            disabled={disabled || saving}
+            onClick={() => void update('OPEN', true)}
+            className="rounded border border-emerald-200 px-2 py-1 text-xs font-semibold text-emerald-700 disabled:opacity-50"
+          >
+            Mở practice ngay
+          </button>
+        )}
         <button
           type="button"
           disabled={disabled || saving}
