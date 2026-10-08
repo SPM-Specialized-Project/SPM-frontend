@@ -44,6 +44,12 @@ export type CodePulseTestCase = {
   expectedOutput: string;
   hidden: boolean;
   verified: boolean;
+  weight: number;
+};
+
+export type CodePulseComparator = {
+  normalizeLineEndings: boolean;
+  trimTrailingNewline: boolean;
 };
 
 export type CodePulseAssignment = {
@@ -58,6 +64,7 @@ export type CodePulseAssignment = {
   memoryLimitMb: number | null;
   runtime: CodePulseRuntime | '';
   referenceSolution: string;
+  comparator: CodePulseComparator;
   verificationStatus: CodePulseVerificationStatus;
   verifiedAt: string | null;
   verifiedBy: string | null;
@@ -118,6 +125,10 @@ export type CodePulseAssignmentVersion = {
   language?: string;
   status: 'PUBLISHED';
   publishedAt: string;
+  testCases?: CodePulseTestCase[];
+  comparator?: CodePulseComparator;
+  giteaBranch?: string | null;
+  usedAt?: string | null;
 };
 
 export type CodePulseLabStatus = 'SCHEDULED' | 'LIVE' | 'PAUSED' | 'ENDED' | 'CANCELLED';
@@ -200,7 +211,7 @@ export type CodePulsePracticeWindowAudit = {
   after: { openAt: string; closeAt: string; status: 'OPEN' | 'CLOSED' };
 };
 
-export type CodePulseSubmission = {
+export type CodePulseLabSubmission = CodePulseSubmission & {
   id: string;
   classroomId: string;
   termId: string;
@@ -218,7 +229,6 @@ export type CodePulseSubmission = {
   score: number;
   aiAnalysis: { status: 'QUEUED' | 'COMPLETED' | 'FAILED'; queuedAt: string; outsideLabSupported: boolean };
   notification: { type: 'SUBMISSION_RECEIVED'; status: 'QUEUED'; queuedAt: string };
-  results: CodePulseRunResult[];
 };
 
 export type CodePulseRunResult = {
@@ -234,10 +244,38 @@ export type CodePulseRunResult = {
 
 export type CodePulseRunSummary = {
   assignmentId: string;
+  assignmentVersionId: string;
   runtime: CodePulseRuntime;
   results: CodePulseRunResult[];
   passedCount: number;
   totalCount: number;
+};
+
+export type CodePulseSubmission = {
+  id: string;
+  assignmentId: string;
+  assignmentVersionId: string;
+  version: number;
+  submittedAt: string;
+  passedCount: number;
+  totalCount: number;
+  earnedWeight: number;
+  totalWeight: number;
+  score: number;
+  commitSha: string | null;
+  sourceCode: string;
+  results: Array<Partial<CodePulseRunResult> & {
+    testCaseId: string;
+    weight: number;
+    status: CodePulseRunResult['status'];
+    passed: boolean;
+    durationMs: number | null;
+  }>;
+};
+
+export type CodePulseVersionHistory = {
+  item: CodePulseAssignmentVersion;
+  submissions: Array<CodePulseSubmission & { studentEmail: string | null }>;
 };
 
 export const codePulseApi = {
@@ -267,6 +305,9 @@ export const codePulseApi = {
   listPublishedAssignmentVersions: (classroomId: string) => request(() =>
     apiClient.get<{ items: CodePulseAssignmentVersion[] }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignment-versions`)),
+  getAssignmentVersionHistory: (classroomId: string, versionId: string) => request(() =>
+    apiClient.get<CodePulseVersionHistory>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignment-versions/${encodeURIComponent(versionId)}/history`)),
   listLabs: (classroomId: string) => request(() =>
     apiClient.get<{ items: CodePulseLab[] }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs`)),
@@ -309,6 +350,13 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseRunSummary }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}/run${context ? `?labId=${encodeURIComponent(context.labId)}&labAssignmentId=${encodeURIComponent(context.labAssignmentId)}` : ''}`,
       { sourceCode, ...(testCaseIds ? { testCaseIds } : {}) })),
+  submitAssignment: (classroomId: string, assignmentId: string, sourceCode: string) => request(() =>
+    apiClient.post<{ item: CodePulseSubmission }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}/submissions`,
+      { sourceCode })),
+  listAssignmentSubmissions: (classroomId: string, assignmentId: string) => request(() =>
+    apiClient.get<{ items: CodePulseSubmission[] }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments/${encodeURIComponent(assignmentId)}/submissions`)),
   createAssignment: (classroomId: string, item: Partial<CodePulseAssignmentInput>) => request(() =>
     apiClient.post<{ item: CodePulseAssignment }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/assignments`, item)),
@@ -337,7 +385,7 @@ export const codePulseApi = {
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/workspace`,
       { params: { labId, labAssignmentId } })),
   submitLabAssignment: (classroomId: string, labId: string, labAssignmentId: string, sourceCode: string) => request(() =>
-    apiClient.post<{ item: CodePulseSubmission }>(
+    apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
   updateWorkspace: (id: string, sourceCode: string) => request(() =>

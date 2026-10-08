@@ -6,8 +6,10 @@ import {
   codePulseApi,
   type CodePulseAssignment,
   type CodePulseAssignmentInput,
+  type CodePulseAssignmentVersion,
   type CodePulseClassroom,
   type CodePulseTestCase,
+  type CodePulseVersionHistory,
 } from '@/services/codepulse-api';
 
 import { MonacoCodeEditor } from './monaco-code-editor';
@@ -28,6 +30,7 @@ const emptyTestCase = (): CodePulseTestCase => ({
   expectedOutput: '',
   hidden: false,
   verified: false,
+  weight: 1,
 });
 
 const emptyForm = (): AssignmentForm => ({
@@ -40,6 +43,7 @@ const emptyForm = (): AssignmentForm => ({
   memoryLimitMb: 128,
   runtime: 'PYTHON',
   referenceSolution: '',
+  comparator: { normalizeLineEndings: true, trimTrailingNewline: true },
   testCases: [emptyTestCase()],
 });
 
@@ -54,6 +58,7 @@ const toForm = (assignment: CodePulseAssignment): AssignmentForm => ({
   memoryLimitMb: assignment.memoryLimitMb,
   runtime: assignment.runtime,
   referenceSolution: assignment.referenceSolution,
+  comparator: assignment.comparator ?? { normalizeLineEndings: true, trimTrailingNewline: true },
   testCases: assignment.testCases,
 });
 
@@ -62,6 +67,10 @@ const statusLabel = (assignment: CodePulseAssignment) =>
 
 export function AssignmentEditor({ classroomId, classroom, canEdit }: AssignmentEditorProps) {
   const [assignments, setAssignments] = useState<CodePulseAssignment[]>([]);
+  const [versions, setVersions] = useState<CodePulseAssignmentVersion[]>([]);
+  const [versionHistory, setVersionHistory] = useState<CodePulseVersionHistory>();
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState<string>();
   const [selectedId, setSelectedId] = useState<string>();
   const [form, setForm] = useState<AssignmentForm>(() => emptyForm());
   const [loading, setLoading] = useState(false);
@@ -71,6 +80,12 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   const selectedAssignment = useMemo(
     () => assignments.find((assignment) => assignment.id === selectedId),
     [assignments, selectedId],
+  );
+  const selectedVersions = useMemo(
+    () => versions
+      .filter((version) => version?.assignmentId === selectedId && Number.isFinite(version.version))
+      .sort((left, right) => right.version - left.version),
+    [selectedId, versions],
   );
 
   const load = useCallback(async () => {
@@ -97,8 +112,50 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
   useEffect(() => { void load(); }, [load]);
 
   useEffect(() => {
+    if (!classroomId) {
+      setVersions([]);
+      return;
+    }
+    let active = true;
+    void codePulseApi.listPublishedAssignmentVersions(classroomId)
+      .then((response) => {
+        if (active) setVersions(response.data.items);
+      })
+      .catch(() => {
+        if (active) setVersions([]);
+      });
+    return () => { active = false; };
+  }, [classroomId]);
+
+  useEffect(() => {
     if (selectedAssignment) setForm(toForm(selectedAssignment));
   }, [selectedAssignment]);
+
+  const viewVersionHistory = async (versionId: string) => {
+    if (!classroomId) return;
+    setHistoryLoading(true);
+    setHistoryError(undefined);
+    try {
+      const response = await codePulseApi.getAssignmentVersionHistory(classroomId, versionId);
+      const history = response.data;
+      if (!history?.item || !Number.isFinite(history.item.version)) {
+        throw new Error('Version snapshot is unavailable. Refresh the page and try again.');
+      }
+      setVersionHistory({
+        ...history,
+        item: {
+          ...history.item,
+          testCases: Array.isArray(history.item.testCases) ? history.item.testCases : [],
+        },
+        submissions: Array.isArray(history.submissions) ? history.submissions : [],
+      });
+    } catch (reason: unknown) {
+      setVersionHistory(undefined);
+      setHistoryError(reason instanceof Error ? reason.message : 'Could not load version history.');
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
 
   const updateField = <K extends keyof AssignmentForm>(field: K, value: AssignmentForm[K]) => {
     setForm((current) => ({ ...current, [field]: value }));
@@ -109,7 +166,7 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
     });
   };
 
-  const updateTestCase = (index: number, field: keyof CodePulseTestCase, value: string | boolean) => {
+  const updateTestCase = (index: number, field: keyof CodePulseTestCase, value: string | boolean | number) => {
     setForm((current) => ({
       ...current,
       testCases: current.testCases.map((test, testIndex) =>
@@ -214,6 +271,10 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
     updateField(field, value);
   };
 
+  const handleWeightChange = (index: number, event: ChangeEvent<HTMLInputElement>) => {
+    updateTestCase(index, 'weight', Number(event.target.value));
+  };
+
   if (!classroomId) return null;
 
   return (
@@ -243,6 +304,76 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
 
           {canEdit && (
             <form onSubmit={(event) => { event.preventDefault(); void saveDraft(); }} className="space-y-4">
+              {selectedVersions.length > 0 && (
+                <section aria-label="Published assignment versions" className="border-b border-gray-200 pb-4">
+                  <h4 className="font-semibold text-gray-900">Published versions</h4>
+                  <ol className="mt-2 divide-y divide-gray-100 border-y border-gray-200">
+                    {selectedVersions.map((version) => {
+                      const testCases = version.testCases ?? [];
+                      const publicCount = testCases.filter((testCase) => !testCase.hidden).length;
+                      const hiddenCount = testCases.filter((testCase) => testCase.hidden).length;
+                      return (
+                        <li key={version.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                          <span className="font-medium text-gray-800">Version {version.version}</span>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-gray-500">
+                            <span>
+                              {new Date(version.publishedAt).toLocaleString()} · {publicCount} public / {hiddenCount} hidden tests
+                              {version.giteaBranch ? ` · ${version.giteaBranch}` : ''}
+                            </span>
+                            <button type="button" onClick={() => void viewVersionHistory(version.id)} className="font-semibold text-blue-700 hover:text-blue-900">
+                              View test cases and submissions
+                            </button>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                  {historyLoading && <p className="mt-3 text-sm text-gray-500">Loading version history...</p>}
+                  {historyError && <p className="mt-3 text-sm text-red-700" role="alert">{historyError}</p>}
+                  {versionHistory?.item && (
+                    <section className="mt-4 space-y-5 border-t border-gray-200 pt-4" aria-label={`Version ${versionHistory.item.version} history`}>
+                      <div>
+                        <h5 className="font-semibold text-gray-900">Version {versionHistory.item.version} test suite</h5>
+                        <p className="mt-1 text-xs text-gray-500">
+                          {versionHistory.item.usedAt ? `Locked after use: ${new Date(versionHistory.item.usedAt).toLocaleString()}` : 'No runs or submissions recorded'}
+                          {versionHistory.item.comparator ? ` · CRLF/LF normalization ${versionHistory.item.comparator.normalizeLineEndings ? 'on' : 'off'}, trailing newline trim ${versionHistory.item.comparator.trimTrailingNewline ? 'on' : 'off'}` : ''}
+                        </p>
+                        <div className="mt-3 space-y-3">
+                          {(versionHistory.item.testCases ?? []).map((testCase, index) => (
+                            <article key={testCase.id} className="rounded border border-gray-200 p-3 text-sm">
+                              <h6 className="font-semibold text-gray-800">Test {index + 1} · {testCase.hidden ? 'Hidden' : 'Public'} · weight {testCase.weight}</h6>
+                              <div className="mt-2 grid gap-3 md:grid-cols-2">
+                                <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-50 p-2"><strong>Input</strong>{'\n'}{testCase.input}</pre>
+                                <pre className="overflow-x-auto whitespace-pre-wrap rounded bg-gray-50 p-2"><strong>Expected output</strong>{'\n'}{testCase.expectedOutput}</pre>
+                              </div>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <h5 className="font-semibold text-gray-900">Submissions ({versionHistory.submissions.length})</h5>
+                        {versionHistory.submissions.length === 0 && <p className="mt-2 text-sm text-gray-500">No student runs or submissions for this version.</p>}
+                        <div className="mt-3 space-y-3">
+                          {versionHistory.submissions.map((submission) => (
+                            <article key={submission.id} className="rounded border border-gray-200 p-3 text-sm">
+                              <div className="flex flex-wrap justify-between gap-2">
+                                <span className="font-semibold text-gray-800">{submission.studentEmail ?? 'Student'} · {submission.score}% ({submission.passedCount}/{submission.totalCount})</span>
+                                <time className="text-xs text-gray-500">{new Date(submission.submittedAt).toLocaleString()}</time>
+                              </div>
+                              <pre className="mt-2 max-h-56 overflow-auto whitespace-pre-wrap rounded bg-gray-950 p-3 text-xs text-gray-100">{submission.sourceCode}</pre>
+                              <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                                {submission.results.map((result) => (
+                                  <li key={result.testCaseId}>{result.testCaseId}: {result.status} ({result.passed ? 'passed' : 'failed'})</li>
+                                ))}
+                              </ul>
+                            </article>
+                          ))}
+                        </div>
+                      </div>
+                    </section>
+                  )}
+                </section>
+              )}
               <Field label="Title" error={fieldErrors.title}>
                 <input value={form.title} onChange={(event) => updateField('title', event.target.value)} className={editorInputClass} />
               </Field>
@@ -284,6 +415,26 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                 height="280px"
               />
 
+              <fieldset className="flex flex-wrap gap-x-6 gap-y-2 border-y border-gray-200 py-3 text-sm text-gray-700">
+                <legend className="px-1 font-semibold">Output comparison</legend>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={form.comparator.normalizeLineEndings}
+                    onChange={(event) => updateField('comparator', { ...form.comparator, normalizeLineEndings: event.target.checked })}
+                  />
+                  Normalize CRLF/LF
+                </label>
+                <label className="flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={form.comparator.trimTrailingNewline}
+                    onChange={(event) => updateField('comparator', { ...form.comparator, trimTrailingNewline: event.target.checked })}
+                  />
+                  Ignore trailing newline
+                </label>
+              </fieldset>
+
               <div>
                 <div className="mb-2 flex items-center justify-between gap-3">
                   <div>
@@ -299,10 +450,12 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                         <span className="text-sm font-semibold text-gray-700">Test case {index + 1}</span>
                         <div className="flex items-center gap-3 text-xs">
                           <label className="flex items-center gap-1.5 text-gray-600"><input type="checkbox" checked={test.hidden} onChange={(event) => updateTestCase(index, 'hidden', event.target.checked)} /> Hidden</label>
+                          <label className="flex items-center gap-1.5 text-gray-600">Weight <input type="number" min="0.01" step="any" value={test.weight} onChange={(event) => handleWeightChange(index, event)} className="w-20 rounded border border-gray-300 px-2 py-1 text-gray-900" /></label>
                           <span className={test.verified ? 'font-semibold text-green-700' : 'text-gray-500'}>{test.verified ? 'Verified' : 'Not verified'}</span>
                           <button type="button" onClick={() => setForm((current) => ({ ...current, testCases: current.testCases.filter((_, testIndex) => testIndex !== index) }))} className="font-semibold text-red-600">Remove</button>
                         </div>
                       </div>
+                      {fieldErrors[`testCases.${index}.weight`] && <p className="mb-2 text-xs text-red-600">{fieldErrors[`testCases.${index}.weight`]}</p>}
                       <div className="grid gap-3 md:grid-cols-2">
                         <MonacoCodeEditor
                           label="Input"

@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: main-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   frontend-quality:
@@ -60,6 +60,9 @@ jobs:
       - name: Test Node.js backend
         run: npm run backend:test
 
+      - name: Test deployment configuration
+        run: npm run deploy:test
+
   deploy-local:
     name: Deploy local Debian
     if: github.ref == 'refs/heads/main'
@@ -71,8 +74,10 @@ jobs:
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
     concurrency:
-      group: local-deploy
+      group: spm-git-platform-deploy
       cancel-in-progress: false
+    env:
+      SPM_DEPLOY_ENVIRONMENT: main
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -84,6 +89,15 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Validate main secrets and runner permissions
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+        run: node deploy/actions/run-deployment-setup.mjs check
+
       - name: Build production frontend
         env:
           VITE_BACKEND_URL: /api
@@ -91,6 +105,17 @@ jobs:
           npm ci
           npm run build
         working-directory: frontend
+
+      - name: Configure main services and shared Gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_MAIN_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+        run: node deploy/actions/run-deployment-setup.mjs setup
 
       - name: Deploy atomic release
         shell: bash
@@ -100,6 +125,7 @@ jobs:
 
           if [[ ! -x /usr/local/sbin/spm-deploy ]]; then
             echo '::error::/usr/local/sbin/spm-deploy is missing or not executable on the local runner.'
+            echo '::error::Check Configure main services and shared Gitea for installation errors.'
             exit 1
           fi
 
@@ -128,7 +154,7 @@ jobs:
           started_at="$(date -u --iso-8601=seconds)"
           if ! sudo -n systemctl restart spm-quick-tunnel.service; then
             echo '::error::The persistent spm-quick-tunnel.service is not installed or cannot be restarted.'
-            echo '::error::Run deploy/install-local.sh on the Debian host first.'
+            echo '::error::Check Configure main services and shared Gitea for service installation errors.'
             exit 1
           fi
 
@@ -136,6 +162,7 @@ jobs:
           for _ in $(seq 1 30); do
             public_url="$(sudo -n journalctl -u spm-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
               | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
+              | grep -vE '^https://api\.trycloudflare\.com$' \
               | tail -n 1 || true)"
             if [[ -n "$public_url" ]]; then
               break
@@ -149,6 +176,28 @@ jobs:
             exit 1
           fi
 
+          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
+          echo "::notice title=Public deployment URL::$public_url"
+
+      - name: Configure shared Gitea canonical URL
+        id: gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_MAIN_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: node deploy/actions/run-deployment-setup.mjs public
+
+      - name: Verify public main and shared Gitea
+        env:
+          MAIN_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        run: |
+          set -euo pipefail
+          public_url="$MAIN_PUBLIC_URL"
           reachable=0
           for _ in $(seq 1 30); do
             if curl --fail --silent --show-error --retry 1 --retry-all-errors \
@@ -156,7 +205,9 @@ jobs:
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
               --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
                curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1 && \
+               curl --fail --silent --show-error --retry 1 --retry-all-errors \
+              --location --connect-timeout 5 --max-time 15 "$public_url/git/api/v1/version" >/dev/null 2>&1; then
               reachable=1
               break
             fi
@@ -168,17 +219,24 @@ jobs:
             curl --fail --show-error --max-time 15 "$public_url/" || true
             curl --fail --show-error --max-time 15 "$public_url/api/health" || true
             curl --fail --show-error --max-time 15 "$public_url/git/" || true
+            curl --fail --show-error --max-time 15 "$public_url/git/api/v1/version" || true
             exit 1
           fi
 
-          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Public deployment URL::$public_url"
+      - name: Publish main and shared Gitea URLs
+        env:
+          MAIN_URL: ${{ steps.cloudflare.outputs.public_url }}
+          GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
+        run: |
+          set -euo pipefail
           {
             echo '### Public deployment URL'
             echo
-            echo "- Frontend: $public_url/"
-            echo "- Backend health: $public_url/api/health"
-            echo "- Gitea: [$public_url/git/]($public_url/git/)"
+            echo "- Frontend: [$MAIN_URL/]($MAIN_URL/)"
+            echo "- Backend health: [$MAIN_URL/api/health]($MAIN_URL/api/health)"
+            echo "- Shared Gitea: [$GITEA_URL]($GITEA_URL)"
+            echo '- Repository owner for main: configured GITEA_MAIN_OWNER, or codepulse-bot-main.'
+            echo '- Gitea uses the same PostgreSQL database and volumes as staging.'
             echo
             echo '> The public URL is HTTPS. Do not append the runner origin port (for example `:8080`).'
           } >> "$GITHUB_STEP_SUMMARY"

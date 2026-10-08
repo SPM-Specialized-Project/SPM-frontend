@@ -199,6 +199,8 @@ Object.assign(COURSE_OWNERSHIPS, {
   [DSA_COURSE_ID]: createCourseOwnership(DSA_COURSE_ID, 'lecturer', 'tutor@gmail.com'),
 });
 
+const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
+
 const PROVISIONED_STUDENT_ACCOUNTS = [
   { id: 'student-account-1', name: 'Student User', email: 'student@gmail.com' },
   ...Object.values(COURSE_CATALOG).flatMap((course) =>
@@ -291,24 +293,33 @@ const normalizeCourse13Memberships = (records) => {
   const existingCourse13Memberships = records.filter(
     isCourse13Membership,
   );
+  const canonicalByEmail = new Map(
+    canonicalMemberships.map((membership) => [normalizeEmail(membership.studentEmail ?? membership.userEmail), membership]),
+  );
 
-  const normalizedCourse13Memberships = canonicalMemberships.map((canonical) => {
-    const existing = existingCourse13Memberships.find(
-      (membership) => membership.studentEmail === canonical.studentEmail,
-    );
+  const normalizedCourse13Memberships = [
+    ...canonicalMemberships.map((canonical) => {
+      const existing = existingCourse13Memberships.find(
+        (membership) => normalizeEmail(membership.studentEmail ?? membership.userEmail) === normalizeEmail(canonical.studentEmail ?? canonical.userEmail),
+      );
 
-    return existing
-      ? {
-        ...canonical,
-        ...existing,
-        id: canonical.id,
-        classroomId: DSA_ROSTER_CLASSROOM_ID,
-        studentId: canonical.studentId,
-        studentName: canonical.studentName,
-        studentEmail: canonical.studentEmail,
-      }
-      : canonical;
-  });
+      return existing
+        ? {
+          ...canonical,
+          ...existing,
+          id: canonical.id,
+          classroomId: DSA_ROSTER_CLASSROOM_ID,
+          studentId: canonical.studentId,
+          studentName: canonical.studentName,
+          studentEmail: canonical.studentEmail,
+        }
+        : canonical;
+    }),
+    ...existingCourse13Memberships.filter((membership) => {
+      const email = normalizeEmail(membership.studentEmail ?? membership.userEmail);
+      return email && !canonicalByEmail.has(email);
+    }),
+  ];
 
   return [
     ...records.filter((membership) => !isCourse13Membership(membership)),

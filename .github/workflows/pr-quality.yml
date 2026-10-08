@@ -62,3 +62,6 @@ jobs:
 
       - name: Test Node.js backend
         run: npm run backend:test
+
+      - name: Test staging deployment configuration
+        run: npm run deploy:test

@@ -15,6 +15,7 @@ import {
   type CodePulseAssignment,
   type CodePulseClassroom,
   type CodePulseLab,
+  type CodePulseLabSubmission,
   type CodePulseLabAssignment,
   type CodePulseRunResult,
   type CodePulseRunSummary,
@@ -66,11 +67,13 @@ function StudentWorkspaceEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
-  const [submission, setSubmission] = useState<CodePulseSubmission>();
+  const [submission, setSubmission] = useState<CodePulseLabSubmission>();
   const [practiceWindow, setPracticeWindow] = useState<CodePulseLabAssignment & { activityContext: 'IN_LAB' | 'OUTSIDE_LAB' | null }>();
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
+  const [submitError, setSubmitError] = useState<string>();
   const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
 
   useEffect(() => {
@@ -83,6 +86,7 @@ function StudentWorkspaceEditor({
     setSubmission(undefined);
     setPracticeWindow(undefined);
     setRunError(undefined);
+    setSubmitError(undefined);
     setSaveState('loading');
 
     void codePulseApi
@@ -167,23 +171,22 @@ function StudentWorkspaceEditor({
   };
 
   const submit = async () => {
-    if (!workspace || !sourceCode.trim()) return;
-    setSaving(true);
-    setRunError(undefined);
+    if (!workspace || !sourceCode.trim() || !practiceOpen) return;
+    setSubmitting(true);
+    setSubmitError(undefined);
     try {
-      const response = await codePulseApi.submitLabAssignment(
-        classroomId,
-        lab.id,
-        labAssignment.id,
-        sourceCode,
-      );
+      const saved = await persistWorkspace(false);
+      if (!saved) {
+        setSubmitError('Could not save code before submission.');
+        return;
+      }
+      const response = await codePulseApi.submitLabAssignment(classroomId, lab.id, labAssignment.id, sourceCode);
       setSubmission(response.data.item);
-      toast.success(`Đã nộp bài: ${assignment.title}.`);
+      toast.success(`Submitted against version ${response.data.item.version}.`);
     } catch (reason: unknown) {
-      setRunError(reason instanceof Error ? reason.message : 'Không thể nộp bài.');
-      toast.error(reason instanceof Error ? reason.message : 'Không thể nộp bài.');
+      setSubmitError(reason instanceof Error ? reason.message : 'Could not submit this solution.');
     } finally {
-      setSaving(false);
+      setSubmitting(false);
     }
   };
 
@@ -270,7 +273,7 @@ function StudentWorkspaceEditor({
             type="button"
             onClick={() => void run()}
             disabled={
-              saving || running || loading || !workspace || !sourceCode.trim() || !practiceOpen
+              saving || running || submitting || loading || !workspace || !sourceCode.trim() || !practiceOpen
             }
             className="inline-flex h-8 items-center gap-1.5 rounded bg-teal-700 px-3 text-xs font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
@@ -287,10 +290,11 @@ function StudentWorkspaceEditor({
           <button
             type="button"
             onClick={() => void submit()}
-            disabled={saving || running || loading || !workspace || !sourceCode.trim() || !practiceOpen}
-            className="inline-flex h-8 items-center gap-1.5 rounded bg-blue-700 px-3 text-xs font-semibold text-white transition hover:bg-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+            disabled={saving || running || submitting || loading || !workspace || !sourceCode.trim() || !practiceOpen}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            Nộp bài
+            {submitting ? <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" /> : <CloudArrowUpIcon className="size-4" aria-hidden="true" />}
+            {submitting ? 'Submitting' : 'Submit'}
           </button>
         </div>
       </div>
@@ -341,6 +345,7 @@ function StudentWorkspaceEditor({
               running={running}
               error={runError}
             />
+            <SubmissionReceipt submission={submission} error={submitError} />
           </div>
         </>
       )}
@@ -350,6 +355,34 @@ function StudentWorkspaceEditor({
         </p>
       )}
     </section>
+  );
+}
+
+function SubmissionReceipt({ submission, error }: { submission?: CodePulseSubmission; error?: string }) {
+  if (!submission && !error) return null;
+  return (
+    <div className="border-t border-slate-200 px-4 py-3 text-sm" aria-live="polite">
+      {error && <p className="text-rose-700">{error}</p>}
+      {submission && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-slate-900">
+            Version {submission.version} · Score {submission.score}% · {submission.passedCount}/{submission.totalCount} passed
+          </p>
+          <p className="font-mono text-xs text-slate-500" title={submission.commitSha ?? 'Submission stored locally'}>
+            {submission.commitSha ? `commit ${submission.commitSha.slice(0, 7)}` : 'local submission'}
+          </p>
+        </div>
+      )}
+      {submission && (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          {submission.results.map((result, index) => (
+            <li key={result.testCaseId}>
+              Test {index + 1}: <span className={result.passed ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{result.status}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
   );
 }
 

@@ -4,8 +4,10 @@ set -euo pipefail
 app_root='/opt/spm-frontend'
 runner_user="${RUNNER_USER:-$(id -un)}"
 
-sudo apt-get update
-sudo apt-get install -y nginx rsync curl
+if [[ "${SPM_SKIP_PACKAGE_INSTALL:-0}" != "1" ]]; then
+  sudo apt-get update
+  sudo apt-get install -y nginx rsync curl
+fi
 
 if ! command -v cloudflared >/dev/null 2>&1; then
   echo 'cloudflared is required for the production Quick Tunnel.' >&2
@@ -39,6 +41,16 @@ sudo install -d -o root -g spm -m 0755 \
 sudo install -d -o spm -g spm -m 0750 \
   "$app_root/shared" \
   "$app_root/shared/data"
+sudo install -d -m 0755 /etc/spm-frontend
+
+if [[ ! -f /etc/spm-frontend/backend.env ]]; then
+  printf 'BACKEND_CORS_ORIGIN=http://localhost:3000\n' \
+    | sudo tee /etc/spm-frontend/backend.env >/dev/null
+  sudo chmod 0640 /etc/spm-frontend/backend.env
+  sudo chown root:spm /etc/spm-frontend/backend.env
+else
+  echo 'Preserving existing /etc/spm-frontend/backend.env'
+fi
 
 sudo install -m 0644 deploy/systemd/spm-backend.service \
   /etc/systemd/system/spm-backend.service
