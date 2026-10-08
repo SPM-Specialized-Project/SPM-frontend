@@ -9,6 +9,7 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 
+import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
 import {
   codePulseApi,
@@ -70,7 +71,8 @@ function StudentWorkspaceEditor({
   const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
   const [submission, setSubmission] = useState<CodePulseLabSubmission>();
-  const [practiceWindow, setPracticeWindow] = useState<CodePulseLabAssignment & { activityContext: 'IN_LAB' | 'OUTSIDE_LAB' | null }>();
+  const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
+    usePracticeWindow(workspace?.id);
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [submitError, setSubmitError] = useState<string>();
@@ -84,7 +86,6 @@ function StudentWorkspaceEditor({
     setSourceCode('');
     setRunSummary(undefined);
     setSubmission(undefined);
-    setPracticeWindow(undefined);
     setRunError(undefined);
     setSubmitError(undefined);
     setSaveState('loading');
@@ -95,7 +96,6 @@ function StudentWorkspaceEditor({
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
-        setPracticeWindow(response.data.practiceWindow);
         setSaveState('saved');
       })
       .catch((reason: unknown) => {
@@ -214,13 +214,6 @@ function StudentWorkspaceEditor({
     error?.includes('401') ||
     error?.includes('403') ||
     error?.toLowerCase().includes('unauthorized');
-  const practiceOpen = practiceWindow?.practiceAccess === 'OPEN';
-  const activityContext = practiceWindow?.activityContext ?? (
-    Date.now() >= new Date(lab.startAt).getTime() &&
-    Date.now() < new Date(lab.endAt).getTime()
-      ? 'IN_LAB'
-      : 'OUTSIDE_LAB'
-  );
 
   return (
     <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
@@ -251,7 +244,8 @@ function StudentWorkspaceEditor({
             {saveStateLabel[saveState]}
           </span>
           <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
-            {activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · {practiceOpen ? 'Đang mở' : 'Đã đóng'}
+            {activityContext && `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
+            {practiceStatus}
           </span>
           <button
             type="button"
@@ -323,11 +317,17 @@ function StudentWorkspaceEditor({
       )}
       {!loading && !error && workspace && (
         <>
+          {!practiceOpen && (
+            <p className="mx-4 mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {practiceMessage} Workspace hiện ở chế độ chỉ đọc.
+            </p>
+          )}
           <div
             className={`${mobileTab === 'code' ? 'block' : 'hidden'} p-3 lg:block`}
           >
             <MonacoCodeEditor
               label="Code"
+              readOnly={!practiceOpen}
               language={editorLanguage}
               value={sourceCode}
               onChange={(value) => {
