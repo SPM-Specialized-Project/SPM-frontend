@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
+import { usePracticeWindow } from '@/hooks/use-practice-window';
 import {
   codePulseApi,
   type CodePulseLab,
@@ -17,7 +18,8 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
-  const [now, setNow] = useState(() => Date.now());
+  const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
+    usePracticeWindow(workspace?.id);
 
   const assignments = useMemo(
     () =>
@@ -40,71 +42,43 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     }
   }, [assignments, selectedWorkspaceId]);
 
-  const loadWorkspace = useCallback(async (workspaceId: string) => {
+  useEffect(() => {
+    let active = true;
+    const workspaceId = selectedWorkspaceId;
     if (!workspaceId) {
       setWorkspace(undefined);
       return;
     }
-    setLoading(true);
-    setMessage('');
-    setWorkspace(undefined);
-    try {
-      const result = await codePulseApi.getWorkspace(workspaceId);
-      setWorkspace(result.data.item);
-      setDrafts((current) => ({
-        ...current,
-        [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
-      }));
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : 'Không thể tải workspace.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWorkspace(selectedWorkspaceId);
-  }, [loadWorkspace, selectedWorkspaceId]);
-
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
+    const loadWorkspace = async () => {
+      setLoading(true);
+      setMessage('');
+      setWorkspace(undefined);
+      try {
+        const result = await codePulseApi.getWorkspace(workspaceId);
+        if (!active) return;
+        setWorkspace(result.data.item);
+        setDrafts((current) => ({
+          ...current,
+          [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
+        }));
+      } catch (error) {
+        if (!active) return;
+        setMessage(
+          error instanceof Error ? error.message : 'Không thể tải workspace.',
+        );
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void loadWorkspace();
+    return () => {
+      active = false;
+    };
+  }, [selectedWorkspaceId]);
 
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
-  const openAt = selected
-    ? Date.parse(
-        selected.assignment.openAt ??
-          selected.assignment.open_at ??
-          selected.assignment.practiceStartAt,
-      )
-    : Number.NaN;
-  const closeAt = selected
-    ? Date.parse(
-        selected.assignment.closeAt ??
-          selected.assignment.close_at ??
-          selected.assignment.practiceEndAt,
-      )
-    : Number.NaN;
-  const practiceOpen = Boolean(
-    selected &&
-      selected.assignment.practiceWindowStatus !== 'CLOSED' &&
-      selected.assignment.practiceAccess === 'OPEN' &&
-      Number.isFinite(openAt) &&
-      Number.isFinite(closeAt) &&
-      openAt <= now &&
-      now < closeAt,
-  );
-  const activityContext = selected?.assignment.activityContext ??
-    (selected &&
-    now >= Date.parse(selected.lab.startAt) &&
-    now < Date.parse(selected.lab.endAt)
-      ? 'IN_LAB'
-      : 'OUTSIDE_LAB');
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
@@ -186,8 +160,9 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   : 'bg-amber-100 text-amber-800'
               }`}
             >
-              {activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} ·{' '}
-              {practiceOpen ? 'Đang mở' : 'Đã đóng'}
+              {activityContext &&
+                `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
+              {practiceStatus}
             </span>
           )}
         </div>
@@ -248,8 +223,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
 
               {!practiceOpen && (
                 <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Practice window chưa mở, đã đóng hoặc học kỳ không còn hiệu
-                  lực. Workspace hiện ở chế độ chỉ đọc.
+                  {practiceMessage} Workspace hiện ở chế độ chỉ đọc.
                 </p>
               )}
 
