@@ -17,8 +17,8 @@ import {
 
 export const Route = createFileRoute('/_private/schedule/request/')({
   beforeLoad: async () => {
-    document.title = 'Tạo buổi học mới -  Tutor Support System';
-    if (localStorage.getItem('role') !== 'tutor') {
+    document.title = 'Tạo buổi học mới - Code Pulse';
+    if (localStorage.getItem('role') !== 'lecturer') {
       throw new Response('Redirect', {
         status: 302,
         headers: { Location: '/schedule' },

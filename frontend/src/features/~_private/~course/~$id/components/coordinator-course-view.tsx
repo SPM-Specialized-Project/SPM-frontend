@@ -1,12 +1,19 @@
 import { Link } from '@tanstack/react-router';
+import type { ReactNode } from 'react';
 
 import type { Course } from '@/components/data/~mock-courses';
-import ArrowLeft from '@/components/icons/arrow-left';
+import { getCurrentViewerContext } from '@/services/viewer-context';
+
+import { CoursePageHeader } from './course-detail-header';
+import { getCourseHeaderVisibility, type CourseHeaderActiveTab } from './course-header-tabs';
 
 type CoordinatorCourseViewProps = {
   course: Course;
   onBack: () => void;
   onRate: () => void;
+  onOverview?: () => void;
+  activeTab?: CourseHeaderActiveTab;
+  children?: ReactNode;
 };
 
 const statisticCards = [
@@ -19,44 +26,36 @@ export function CoordinatorCourseView({
   course,
   onBack,
   onRate,
+  onOverview,
+  activeTab = 'overview',
+  children,
 }: CoordinatorCourseViewProps) {
+  const { viewerRole } = getCurrentViewerContext();
+  const { showTermsTab, showManagerTabs } = getCourseHeaderVisibility(course.id, viewerRole);
+
   return (
     <div>
-      <button
-        onClick={onBack}
-        className="mb-6 flex items-center gap-2 text-[#3D4863] transition hover:text-blue-700"
-      >
-        <ArrowLeft className="size-5" />
-        <span className="font-medium">Quay lại</span>
-      </button>
+      <CoursePageHeader
+        course={course}
+        id={course.id}
+        active={activeTab}
+        showTermsTab={showTermsTab}
+        showManagerTabs={showManagerTabs}
+        backAction={onBack}
+        onOverview={onOverview}
+        onRating={onRate}
+      />
 
-      <div
-        className="relative mb-8 rounded-lg p-8 text-white shadow-lg"
-        style={{
-          backgroundImage: `url(${course.bgImage})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          minHeight: '250px',
-        }}
-      >
-        <div className="relative z-10">
-          <p className="mb-2 text-sm font-medium text-gray-200">{course.code}</p>
-          <h1 className="mb-3 text-4xl font-bold">{course.title}</h1>
-          <p className="text-lg text-gray-100">Giảng viên: {course.instructor}</p>
-          <div className="mt-6 flex gap-4">
-            <button className="rounded-lg bg-[#0329E9] px-4 py-2 font-medium backdrop-blur-sm transition hover:bg-[#0329E9]/80">
-              Tổng quan
-            </button>
-            <button
-              onClick={onRate}
-              className="rounded-lg bg-white px-4 py-2 font-medium text-[#0329E9] backdrop-blur-sm transition hover:bg-white/80"
-            >
-              Đánh giá
-            </button>
-          </div>
-        </div>
+      <div className="mt-6">
+        {children ?? <CoordinatorCourseOverviewContent course={course} />}
       </div>
+    </div>
+  );
+}
 
+export function CoordinatorCourseOverviewContent({ course }: { course: Course }) {
+  return (
+    <>
       <div className="mb-8 grid grid-cols-1 gap-6 md:grid-cols-4">
         {statisticCards.map(({ key, label, className }) => (
           <div
@@ -155,11 +154,11 @@ export function CoordinatorCourseView({
           </div>
         </InfoCard>
       </div>
-    </div>
+    </>
   );
 }
 
-function InfoCard({ title, children }: { title: string; children: React.ReactNode }) {
+function InfoCard({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div
       className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm"
@@ -171,7 +170,7 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
   );
 }
 
-function TableHeader({ children }: { children: React.ReactNode }) {
+function TableHeader({ children }: { children: ReactNode }) {
   return (
     <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">
       {children}
@@ -184,7 +183,7 @@ function TableCell({
   centered = false,
   muted = false,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
   centered?: boolean;
   muted?: boolean;
 }) {

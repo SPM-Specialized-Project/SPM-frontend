@@ -1,0 +1,49 @@
+[
+  {
+    "id": "lab-1790744799755",
+    "classroomId": "class-1",
+    "name": "LAB 01 - Linked structures",
+    "description": "Ba bài cấu trúc liên kết trong một buổi thực hành 5 giờ.",
+    "startAt": "2026-09-30T06:05:00.000Z",
+    "endAt": "2026-09-30T11:05:00.000Z",
+    "status": "CANCELLED",
+    "createdBy": "lecturer@gmail.com",
+    "createdAt": "2026-09-30T05:06:39.755Z",
+    "updatedAt": "2026-09-30T07:10:32.901Z",
+    "assignments": [
+      {
+        "id": "lab-assignment-lab-1790744799755-1",
+        "assignmentId": "problem-1",
+        "assignmentVersionId": "problem-1-v1",
+        "version": 1,
+        "title": "Singly Linked List",
+        "order": 1,
+        "mandatory": true,
+        "practiceStartAt": "2026-09-30T06:05:00.000Z",
+        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+      },
+      {
+        "id": "lab-assignment-lab-1790744799755-2",
+        "assignmentId": "problem-2",
+        "assignmentVersionId": "problem-2-v2",
+        "version": 2,
+        "title": "Doubly Linked List",
+        "order": 2,
+        "mandatory": true,
+        "practiceStartAt": "2026-09-30T06:05:00.000Z",
+        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+      },
+      {
+        "id": "lab-assignment-lab-1790744799755-3",
+        "assignmentId": "problem-3",
+        "assignmentVersionId": "problem-3-v1",
+        "version": 1,
+        "title": "Queue implementation",
+        "order": 3,
+        "mandatory": true,
+        "practiceStartAt": "2026-09-30T06:05:00.000Z",
+        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+      }
+    ]
+  }
+]

@@ -1,7 +1,7 @@
 [
   {
     "id": "s-1",
-    "ownerRole": "tutor",
+    "ownerRole": "lecturer",
     "ownerEmail": "tutor@gmail.com",
     "courseId": "1",
     "courseTitle": "Computer Network",
@@ -36,7 +36,7 @@
   },
   {
     "id": "s-2",
-    "ownerRole": "tutor",
+    "ownerRole": "lecturer",
     "ownerEmail": "tutor@gmail.com",
     "courseId": "2",
     "courseTitle": "Database System",
@@ -71,7 +71,7 @@
   },
   {
     "id": "s-3",
-    "ownerRole": "tutor",
+    "ownerRole": "lecturer",
     "ownerEmail": "tutor@gmail.com",
     "courseId": "2",
     "courseTitle": "Database System",

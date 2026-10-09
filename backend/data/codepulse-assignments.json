@@ -1,0 +1,62 @@
+[
+  {
+    "id": "problem-1",
+    "classroomId": "class-1",
+    "title": "Hello World",
+    "description": "Read one line and print it unchanged.",
+    "constraints": "The input contains one non-empty line.",
+    "inputFormat": "A single line of text.",
+    "outputFormat": "Print the same line.",
+    "cpuTimeLimitMs": 1000,
+    "memoryLimitMb": 128,
+    "runtime": "PYTHON",
+    "referenceSolution": "print(input())",
+    "verificationStatus": "VERIFIED",
+    "verifiedAt": "2026-09-28T16:37:47.384Z",
+    "verifiedBy": "tutor@gmail.com",
+    "status": "PUBLISHED",
+    "testCases": [
+      {
+        "id": "public-1",
+        "input": "Hello",
+        "expectedOutput": "Hello",
+        "hidden": false,
+        "verified": true
+      },
+      {
+        "id": "hidden-1",
+        "input": "secret input",
+        "expectedOutput": "secret output",
+        "hidden": true,
+        "verified": true
+      }
+    ],
+    "rawRunnerTrace": "internal runner trace"
+  },
+  {
+    "id": "assignment-1790613122803",
+    "classroomId": "class-1",
+    "title": "Read two integers and print their sum.",
+    "description": "Read two integers and print their sum.",
+    "constraints": "-10^9 <= a, b <= 10^9",
+    "inputFormat": "Two integers a and b.",
+    "outputFormat": "Print a + b.",
+    "cpuTimeLimitMs": 1000,
+    "memoryLimitMb": 128,
+    "runtime": "PYTHON",
+    "referenceSolution": "a, b = map(int, input().split())\r\nprint(a + b)",
+    "testCases": [
+      {
+        "id": "test-1790613075377",
+        "input": "1 2",
+        "expectedOutput": "3",
+        "hidden": false,
+        "verified": true
+      }
+    ],
+    "status": "PUBLISHED",
+    "verificationStatus": "VERIFIED",
+    "verifiedAt": "2026-09-28T17:37:11.070Z",
+    "verifiedBy": "tutor@gmail.com"
+  }
+]

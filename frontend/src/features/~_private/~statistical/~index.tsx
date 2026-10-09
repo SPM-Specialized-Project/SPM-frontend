@@ -16,7 +16,7 @@ import { useDataStore } from '@/services/use-data-store';
 
 export const Route = createFileRoute('/statistical/' as any)({
   beforeLoad: async () => {
-    document.title = 'Dashboard -  Tutor Support System';
+    document.title = 'Dashboard - Code Pulse';
     if (!localStorage.getItem('userStore')) {
       window.location.assign('/login');
     };

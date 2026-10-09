@@ -11,7 +11,7 @@ import { ManagerHistoryView, StudentHistoryView } from './history-detail-views';
 
 export const Route = createFileRoute('/_private/schedule/history/$id/')({
   beforeLoad: async () => {
-    document.title = 'Chi tiết buổi học -  Tutor Support System';
+    document.title = 'Chi tiết buổi học - Code Pulse';
   },
   component: RouteComponent,
 });
@@ -26,7 +26,7 @@ function RouteComponent() {
 
   useEffect(() => {
     try {
-      setIsManager(localStorage.getItem('role') === 'tutor');
+      setIsManager(localStorage.getItem('role') === 'lecturer');
     } catch (error) {
       console.error('Failed to read role from localStorage', error);
       setIsManager(false);

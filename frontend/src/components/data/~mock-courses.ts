@@ -3,6 +3,8 @@ import bgGreen from '@/assets/bg-dashboard-green.png';
 import bgRed from '@/assets/bg-dashboard-red.png';
 import { api } from '@/services/api-client';
 import { createRemoteDataStore } from '@/services/data-store';
+import { getCurrentViewerContext } from '@/services/viewer-context';
+import type { ResourcePermissions } from '@/types/backend';
 import type { CourseDetail } from '@/types/course-content';
 
 
@@ -11,6 +13,10 @@ export type Course = {
   code: string;
   title: string;
   instructor: string;
+  ownerRole?: 'lecturer' | 'coordinator' | 'chairman' | 'admin';
+  ownerEmail?: string;
+  ownershipLocked?: boolean;
+  permissions?: ResourcePermissions;
   stats: {
     documents: number;
     links: number;
@@ -18,7 +24,7 @@ export type Course = {
   };
   bgImage: string;
   numberTotalSessions?: number;
-  students: Array<{ name: string; email: string; numberOfSubmissions?: number ; numberOfJoinedSessions?: number; averageScore?: number }>;
+  students: Array<{ id?: string; name: string; email: string; numberOfSubmissions?: number ; numberOfJoinedSessions?: number; averageScore?: number }>;
   sessionsOrganized: number;
 };
 
@@ -205,16 +211,20 @@ export const withCoursePresentation = (serverCourse: Omit<Course, 'bgImage'>): C
     ...(localCourse ?? mockCourses[0]),
     ...serverCourse,
     stats: { ...(localCourse?.stats ?? serverCourse.stats), ...serverCourse.stats },
-    students: serverCourse.students?.length
+    students: Array.isArray(serverCourse.students)
       ? serverCourse.students
       : (localCourse?.students ?? []),
     bgImage: localCourse?.bgImage ?? bgBlue,
   };
 };
 
-export const courseStore = createRemoteDataStore(mockCourses, {
-  list: async () =>
-    (await api.getCourses({ viewerRole: 'coordinator' })).data.items.map(withCoursePresentation),
+// Do not seed the rendered store with the full mock catalog: the API response
+// is the source of truth for the courses assigned to the authenticated user.
+export const courseStore = createRemoteDataStore([] as Course[], {
+  list: async () => {
+    const viewer = getCurrentViewerContext();
+    return (await api.getCourses(viewer)).data.items.map(withCoursePresentation);
+  },
 });
 export type DataCourses = CourseDetail;
 

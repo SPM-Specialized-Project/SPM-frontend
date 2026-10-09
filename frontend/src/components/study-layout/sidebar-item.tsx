@@ -12,6 +12,7 @@ type SidebarItemProps = {
   opened: boolean;
   current: string;
   iconClassName: string;
+  onNavigate?: () => void;
 };
 
 export function SidebarItem({
@@ -22,6 +23,7 @@ export function SidebarItem({
   opened,
   current,
   iconClassName,
+  onNavigate,
 }: SidebarItemProps) {
   const selected = useMemo(() => current.startsWith(route), [current, route]);
   const className =
@@ -36,7 +38,9 @@ export function SidebarItem({
     return (
       <div className={className + ' cursor-not-allowed select-none'}>
         <Icon className={iconClassName} />
-        <span className={(opened ? 'flex' : 'hidden') + ' overflow-hidden truncate'}>
+        <span
+          className={(opened ? 'flex' : 'hidden') + ' overflow-hidden truncate'}
+        >
           <span className="flex group-hover:hidden">{name}</span>
           <span className="hidden font-bold uppercase opacity-0 group-hover:flex group-hover:opacity-100">
             SẮP RA MẮT
@@ -47,9 +51,13 @@ export function SidebarItem({
   }
 
   return (
-    <Link to={route} className={className}>
+    <Link to={route} className={className} onClick={onNavigate}>
       <Icon className={iconClassName} />
-      <span className={(opened ? 'flex' : 'hidden') + ' overflow-hidden truncate'}>{name}</span>
+      <span
+        className={(opened ? 'flex' : 'hidden') + ' overflow-hidden truncate'}
+      >
+        {name}
+      </span>
     </Link>
   );
 }

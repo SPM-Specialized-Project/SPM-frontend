@@ -16,6 +16,9 @@ type CourseDetailViewProps = {
   changing: boolean;
   setChanging: Dispatch<SetStateAction<boolean>>;
   isManager: boolean;
+  showManagerTabs: boolean;
+  showTermsTab: boolean;
+  termsContent?: ReactNode;
   onBack: () => void;
   onRate: () => void;
   renderSectionContent: (item: CourseContent, index: number) => ReactNode;
@@ -29,11 +32,17 @@ export function CourseDetailView({
   changing,
   setChanging,
   isManager,
+  showManagerTabs,
+  showTermsTab,
+  termsContent,
   onBack,
   onRate,
   renderSectionContent,
 }: CourseDetailViewProps) {
   const [activeTab, setActiveTab] = useState('');
+  const [activeView, setActiveView] = useState<'overview' | 'terms'>(
+    typeof window !== 'undefined' && window.location.hash === '#terms' ? 'terms' : 'overview',
+  );
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
   const contentContainerRef = useRef<HTMLDivElement>(null);
 
@@ -42,6 +51,10 @@ export function CourseDetailView({
       setActiveTab(courseDetail.content[0].type + '-0');
     }
   }, [courseDetail, activeTab]);
+
+  useEffect(() => {
+    if (!showTermsTab) setActiveView('overview');
+  }, [showTermsTab]);
 
   useEffect(() => {
     const container = contentContainerRef.current;
@@ -93,32 +106,38 @@ export function CourseDetailView({
   };
 
   return (
-    <div className="font-['Archivo']">
+    <div className="w-full min-w-0 font-['Archivo']">
       <CourseDetailHeader
         course={course}
         id={id}
         changing={changing}
         isManager={isManager}
+        showManagerTabs={showManagerTabs}
+        showTermsTab={showTermsTab}
+        activeView={activeView}
         onBack={onBack}
         onRate={onRate}
+        onSelectView={setActiveView}
         onToggleChanging={() => setChanging((value) => !value)}
       />
 
-      <div className="flex items-start gap-6">
-        <CourseContentNavigation
-          content={courseDetail.content}
-          activeTab={activeTab}
-          onSelect={scrollToSection}
-        />
-        <CourseContentPanel
-          courseDetail={courseDetail}
-          changing={changing}
-          contentContainerRef={contentContainerRef}
-          sectionRefs={sectionRefs}
-          onAddMaterial={addMaterial}
-          renderSectionContent={renderSectionContent}
-        />
-      </div>
+      {activeView === 'terms' && showTermsTab ? termsContent : (
+        <div className="flex min-w-0 flex-col items-stretch gap-6 lg:flex-row lg:items-start">
+          <CourseContentNavigation
+            content={courseDetail.content}
+            activeTab={activeTab}
+            onSelect={scrollToSection}
+          />
+          <CourseContentPanel
+            courseDetail={courseDetail}
+            changing={changing}
+            contentContainerRef={contentContainerRef}
+            sectionRefs={sectionRefs}
+            onAddMaterial={addMaterial}
+            renderSectionContent={renderSectionContent}
+          />
+        </div>
+      )}
     </div>
   );
 }

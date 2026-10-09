@@ -15,7 +15,7 @@ type DropdownOption = {
 // Kiểu dữ liệu cho một yêu cầu tạo môn học của COORDINATOR
 export type CourseCreationRequest = {
   id: string;
-  ownerRole?: 'student' | 'tutor' | 'coordinator' | 'chairman';
+  ownerRole?: 'student' | 'lecturer' | 'coordinator' | 'chairman';
   ownerEmail?: string;
   coordinatorName: string;
   coordinatorEmail: string;

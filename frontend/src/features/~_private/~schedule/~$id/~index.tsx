@@ -13,7 +13,7 @@ import { StudentSessionView } from './student-session-view'
 
 export const Route = createFileRoute('/_private/schedule/$id/')({
   beforeLoad: async () => {
-    document.title = 'Chi tiết buổi học -  Tutor Support System';
+    document.title = 'Chi tiết buổi học - Code Pulse';
   },
   component: RouteComponent,
 })
@@ -53,7 +53,7 @@ function RouteComponent() {
   // const State = userStore?.state ?? null;
   // const userLocalStore = State?.user ?? null;
   const rawRole = localStorage.getItem('role');
-  const isManager = rawRole === 'tutor';
+  const isManager = rawRole === 'lecturer';
   // Helpers to convert ISO <-> input[type=datetime-local] value
   const toInputLocal = (iso?: string) => {
     if (!iso) return ''

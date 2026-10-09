@@ -13,7 +13,7 @@ import { dayIndexFromISO, getWeekLabels, toHHMM, type CalendarItemData } from '.
 
 export const Route = createFileRoute('/_private/schedule/')({
   beforeLoad: async () => {
-    document.title = 'Schedule -  Tutor Support System';
+    document.title = 'Schedule - Code Pulse';
   },
   component: RouteComponent,
 });
@@ -21,8 +21,8 @@ export const Route = createFileRoute('/_private/schedule/')({
 function RouteComponent() {
   const sessions = useDataStore(sessionStore);
   const [referenceDate, setReferenceDate] = useState(new Date());
-  const [role, setRole] = useState<'student' | 'tutor'>(
-    localStorage.getItem('role') === 'tutor' ? 'tutor' : 'student',
+  const [role, setRole] = useState<'student' | 'lecturer'>(
+    localStorage.getItem('role') === 'lecturer' ? 'lecturer' : 'student',
   );
 
   const weekLabels = getWeekLabels(referenceDate);
@@ -48,7 +48,7 @@ function RouteComponent() {
       endTime: toHHMM(session.end),
       title: session.title,
       desc: session.desc ?? '',
-      isManager: role === 'tutor',
+      isManager: role === 'lecturer',
     }));
 
   const moveWeek = (offset: number) => {
@@ -60,7 +60,7 @@ function RouteComponent() {
   };
 
   const toggleRole = () => {
-    const nextRole = role === 'student' ? 'tutor' : 'student';
+    const nextRole = role === 'student' ? 'lecturer' : 'student';
     localStorage.setItem('role', nextRole);
     setRole(nextRole);
   };
@@ -75,7 +75,7 @@ function RouteComponent() {
 
         <div className="relative bg-white pb-12 pt-6">
           <div className="px-4 sm:px-6 lg:px-8">
-            <h1 className="text-4xl font-bold text-gray-900">Calendar - Tutor System</h1>
+            <h1 className="text-4xl font-bold text-gray-900">Calendar - Code Pulse</h1>
           </div>
           <BannerWave />
         </div>
@@ -88,10 +88,10 @@ function RouteComponent() {
 
           <div className="mt-6 flex items-center justify-between gap-3">
             <button onClick={toggleRole} className="rounded-md bg-gray-200 px-4 py-2 font-medium text-gray-800 hover:bg-gray-300">
-              Đổi role: {role === 'student' ? 'Student' : 'Tutor'}
+              Đổi role: {role === 'student' ? 'Student' : 'Lecturer'}
             </button>
             <div className="flex items-center gap-4">
-              {role === 'tutor' && (
+              {role === 'lecturer' && (
                 <Link
                   to="/schedule/request"
                   search={{ courseId: '', title: '', desc: '', requestType: '' }}

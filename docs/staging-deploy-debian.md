@@ -1,97 +1,167 @@
-# Staging deployment on Debian 13
+# Deploy staging and Gitea through GitHub Actions
 
-This is a separate staging-only deployment. It does not change the production
-`main` deployment on port 80/4000.
+Run `.github/workflows/staging-deploy.yml` manually on `staging`, or let the
+staging-to-main PR E2E gate call it. Pushes and merges into `staging` do not
+start a standalone deployment check.
+Actions configures the Debian runner, initializes Gitea, deploys the app and
+publishes the Quick Tunnel URL. No SSH session, installation form or manual
+token creation is needed for this flow.
 
-## Runtime layout
+## GitHub settings before merging
 
-- Nginx staging: `127.0.0.1:8080`
-- Node staging backend: `127.0.0.1:4011`
-- Staging data: `/opt/spm-frontend-staging/shared/data`
-- Backend service: `spm-staging-backend.service`
-- Public URL: a generated `https://<random>.trycloudflare.com` link
-- Public `/api/*`: proxied by Nginx to `127.0.0.1:4011`
+Go to **Settings → Secrets and variables → Actions → Secrets** and add:
 
-Port `4011` is intentional. The `test-E2E` runner currently uses `4010` for
-its isolated test process, so the persistent staging service does not collide
-with E2E when both runners are on the same Debian host.
+| Repository secret | Value |
+| --- | --- |
+| `GITEA_ADMIN_PASSWORD` | A strong new Gitea admin password, at least 12 characters |
+| `RUNNER_SUDO_PASSWORD` | Linux password of the runner account, currently `hutieunamvang` |
 
-## One-time setup on Debian
+These are different credentials. The Gitea password is used to create the
+initial administrator; an existing administrator keeps its password. The
+sudo password is passed through stdin. It can be omitted only if the runner
+already permits passwordless root sudo. Keep credentials out of YAML and Git.
 
-Clone or update this repository on the Debian host, then run from the checkout:
+Repository **Variables** are optional:
 
-```bash
-cd /mnt/BigDisk/Tung-quan-private/SPM-frontend
-git fetch origin
-git checkout staging
-git pull --ff-only origin staging
+| Variable | Default |
+| --- | --- |
+| `GITEA_ADMIN_USERNAME` | `spm-admin` |
+| `GITEA_ADMIN_EMAIL` | `spm-admin@example.com` |
+| `GITEA_OWNER` | `codepulse-bot` |
 
-RUNNER_USER=hutieunamvang \\
-  bash deploy/install-staging-local.sh
-```
+Set a real admin email if desired. Keep account names unchanged after the
+first deployment. `GITEA_OWNER` is the separate non-admin service account
+Actions creates for assignment repositories. It must be a username: the
+backend uses `/user/repos`. Do not set it to an organization or URL.
 
-The script installs the staging systemd unit, Nginx site, deploy helper and a
-non-interactive sudo rule for the GitHub Actions runner. It does not copy a
-tunnel credential into the repository.
+These repository secrets are optional:
 
-## Free Quick Tunnel
+- `GITEA_API_TOKEN`: generated automatically, verified against real private
+  repository/branch/file operations and cached on the runner. An explicitly
+  supplied token must belong to the non-admin `GITEA_OWNER`, access private
+  repositories and have `write:repository,write:user` scopes.
+- `POSTGRES_PASSWORD`: recovered from the existing `git-postgres` container,
+  or generated for a new stack. If supplied, it must match the existing
+  database password; changing a container variable does not rotate the
+  stored PostgreSQL role password.
 
-No domain or Cloudflare DNS setup is required for this mode. The staging
-workflow starts a separate Quick Tunnel to port `8080`, while the main
-workflow keeps its own Quick Tunnel to port `80`.
+Keep the existing `E2E_DISPATCH_TOKEN` for the staging-to-main E2E promotion
+workflow. It is not needed for this staging bootstrap.
+No SSH secrets, `PUBLIC_HOST`, `GITEA_API_URL`, `SPM_BACKEND_URL` or
+`SPM_STAGING_PUBLIC_URL` GitHub setting is needed.
 
-```bash
-command -v cloudflared
-sudo systemctl status spm-quick-tunnel.service --no-pager || true
-sudo systemctl status spm-staging-quick-tunnel.service --no-pager || true
-```
+Under **Settings → Actions → Runners**, the runner must be online with
+`self-hosted`, `linux`, `x64` and `local-deploy` labels, and its account must
+have root sudo permission. Docker Engine, Compose and `cloudflared` are host
+prerequisites already present on the current runner. Actions installs missing
+Nginx, rsync and curl packages and refreshes the application services.
 
-`deploy/install-staging-local.sh` grants the local runner permission to start
-`spm-staging-quick-tunnel.service` non-interactively. The workflow prints the
-new public URL in the Actions log and Summary, then verifies both `/` and
-`/api/health` through that URL.
+## Run and check
 
-Quick Tunnel URLs are random and may change after a restart or a later Actions
-run. They are suitable for staging/testing, not a stable production hostname.
-Cloudflare also documents a current limit of 200 in-flight requests and no SLA
-for Quick Tunnels. A named tunnel can be added later if a stable domain is
-available.
+1. Add the two secrets before merging and wait for both PR quality jobs.
+2. Merge into `staging`; open **Actions → Staging Deploy → Run workflow**,
+   select `staging` and start the workflow.
+3. The first validation checks credentials and sudo before the frontend build.
+4. Wait for Gitea setup, deployment and all verification steps to succeed.
+5. Open the run **Summary** for the app, `/api/health` and `/git/` URLs.
+6. Sign into `<public-url>/git/` as `spm-admin` with `GITEA_ADMIN_PASSWORD`.
+   Verify lecturer publication and a student LAB submission in the app.
 
-The repository still contains `deploy/cloudflared/staging-config.yml.example`
-as an optional stable-domain configuration for a later migration.
+If credentials were missing or incorrect, fix them in GitHub and select
+**Re-run failed jobs** on the staging run.
 
-There is no `SPM_STAGING_PUBLIC_URL` variable in Quick Tunnel mode. The URL is
-generated by `cloudflared` at runtime.
+## Automatic setup behavior
 
-## Deployment behavior
+Actions preserves the Compose project, PostgreSQL password and existing
+database/Gitea volume identities; it refuses storage or Gitea image changes.
+The current image is `docker.gitea.com/gitea:1.27.3-rootless`.
 
-Every push to `staging` runs `.github/workflows/staging-deploy.yml`:
+For `INSTALL_LOCK=false`, it migrates the database and creates the admin and
+service account before starting the installed web service. Its root-owned
+Compose override repairs the malformed `https://https://.../git/` URL and
+sets `INSTALL_LOCK=true`. The base file and override are both included in
+the persistent `gitea-stack.service`.
 
-1. Checks out the pushed staging commit.
-2. Builds the frontend with `VITE_BACKEND_URL=/api`.
-3. Installs an atomic release under `/opt/spm-frontend-staging`.
-4. Restarts only `spm-staging-backend.service`.
-5. Reloads Nginx and verifies local `/api/health` and `/` on port 8080.
-6. Starts a staging-only Quick Tunnel to port 8080.
-7. Verifies the generated public staging frontend and backend health URL.
+A uniquely named private check repository verifies branch creation, file
+creation and file update using its SHA. Only that temporary repository is
+deleted. Valid cached tokens are reused on subsequent setups.
 
-The existing `main-ci.yml` production deployment still uses port 80/4000 and
-now also builds with same-origin `/api`. The existing `staging-e2e.yml` remains
-separate; its isolated E2E app uses ports 3010/4010, while this persistent
-staging app uses 8080/4011.
+Actions preserves unrelated settings and stores integration configuration
+only in `/etc/spm-frontend/staging.env` (owner `root:spm`, mode `0640`):
 
-No `SPM_BACKEND_URL` or `SPM_STAGING_PUBLIC_URL` variable is required for this
-two-Quick-Tunnel setup. Both frontend builds use `/api`, so Nginx sends API
-requests to the backend on the same public link.
+~~~dotenv
+GITEA_API_URL="http://127.0.0.1:8211/api/v1"
+GITEA_OWNER="codepulse-bot"
+GITEA_API_TOKEN="<generated-on-the-runner>"
+~~~
 
-## Manual verification
+It installs a Node 22 runtime outside the runner home directory, refreshes
+Nginx, systemd units and the deploy helper, and enables services at boot.
+Main and staging share one Gitea/PostgreSQL stack. Staging uses the
+`codepulse-bot` account; main defaults to `codepulse-bot-main` so identical
+assignment IDs do not conflict. Main can override its owner with the optional
+`GITEA_MAIN_OWNER` variable and its token with `GITEA_MAIN_API_TOKEN`.
 
-```bash
-sudo systemctl status spm-staging-backend --no-pager
-sudo ss -ltnp | grep -E ':8080|:4011'
-curl --fail http://127.0.0.1:8080/api/health
-curl --fail -I http://127.0.0.1:8080/
-```
+Before main has deployed, the staging Quick Tunnel supplies Gitea's
+`ROOT_URL`. Once main publishes a URL, that main URL owns `ROOT_URL`.
+Later staging deployments retain the main URL and do not recreate Gitea
+just to change its hostname. Both Actions summaries show the shared Gitea
+URL. See [main deployment](local-deploy-debian.md) for the promotion flow.
 
-The public staging URL is printed by the `Start staging Cloudflare Quick
-Tunnel` step in GitHub Actions.
+Both deploy jobs use the same GitHub concurrency group, and the shared
+`run-deployment-setup.mjs` helper serializes setup/public changes with `flock`
+on the host. It configures separate backend environment files and Node
+runtimes for each environment.
+
+| Component | Address/path |
+| --- | --- |
+| Staging Nginx/backend | `127.0.0.1:8080` / `127.0.0.1:4011` |
+| Gitea HTTP/SSH | `127.0.0.1:8211` → container `3000` / host `2222` |
+| Backend data | `/opt/spm-frontend-staging/shared/data` |
+| Git platform | `/srv/git-platform/compose.yml` plus `actions.override.json` |
+| Backend/tunnel units | `spm-staging-backend.service` / `spm-staging-quick-tunnel.service` |
+| Public API/Gitea | `<public-url>/api/*` / `<public-url>/git/*` |
+
+Production uses `80/4000`; isolated E2E uses `3010/4010`. This workflow
+configures staging `8080/4011` and the shared Gitea stack.
+Quick Tunnel needs no domain or Cloudflare credential, but its hostname
+changes on restart. Use the latest Summary URL without `:8080`. Stable
+Gitea clone URLs require a domain and Named Tunnel later.
+
+Nginx returns a relative `Location: /git/` when `/git` is opened without the
+trailing slash. `absolute_redirect off` in both site configurations preserves
+the browser's public HTTPS origin instead of exposing HTTP or the staging
+origin port `8080`. Deployment checks follow `/git` with HTTPS-only redirects.
+
+## Deployment tests for maintainers
+
+`npm run deploy:test` runs in backend PR quality and staging deployment.
+It checks invalid inputs, database/volume continuity, URL normalization,
+Compose dollar escaping, protected settings and repository-check cleanup.
+
+`npm run deploy:test:nginx` requires Docker and runs the actual main and
+staging Nginx configurations in an isolated `nginx:stable-alpine` container.
+It simulates the HTTP hop from the HTTPS tunnel, checks that `/git` redirects
+to the same public HTTPS origin, and removes only its own test container.
+Backend PR quality runs this regression test before merge.
+
+The optional harness uses real Gitea 1.27.3, PostgreSQL 17 and Redis 8;
+systemd/Nginx/cloudflared are stubbed. It cannot prove actual Debian service
+or public tunnel behavior. Use a disposable Docker host, with ports
+`8211/2222` free and no `gitea`, `git-postgres` or `git-redis` containers.
+
+~~~bash
+docker build -f deploy/test/Dockerfile.integration \
+  -t spm-gitea-integration-harness .
+docker run --rm --network host \
+  -e SPM_DISPOSABLE_INTEGRATION=1 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v "$PWD:/workspace:ro" \
+  spm-gitea-integration-harness node deploy/test/integration.mjs
+~~~
+
+The harness refuses existing named containers. It deletes only the unique
+test project it creates. It checks installation recovery, real API writes,
+shared database/volumes, separate repository owners for identical assignment
+IDs, preserved application data/environment values, parallel setup with the
+host lock, token reuse and main URL priority after later staging deployments.

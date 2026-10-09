@@ -62,3 +62,9 @@ jobs:
 
       - name: Test Node.js backend
         run: npm run backend:test
+
+      - name: Test staging deployment configuration
+        run: npm run deploy:test
+
+      - name: Test Gitea redirects with Nginx
+        run: npm run deploy:test:nginx
