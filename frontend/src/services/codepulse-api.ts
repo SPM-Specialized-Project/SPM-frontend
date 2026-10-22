@@ -30,6 +30,7 @@ export type CodePulseWorkspace = {
   assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
+  revision: number;
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
@@ -391,12 +392,12 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
-  updateWorkspace: (id: string, sourceCode: string) => request(() =>
+  updateWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
-  executeWorkspace: (id: string, sourceCode: string) => request(() =>
+      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode, baseRevision })),
+  executeWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode })),
+      `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode, baseRevision })),
   revealWorkspaceHint: (id: string, hintId: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/hints/${encodeURIComponent(hintId)}`)),
