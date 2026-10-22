@@ -89,11 +89,42 @@ export type CodePulseWorkspaceHint = {
 
 export type CodePulseWorkspaceProblem = {
   id: string;
+  assignmentId: string;
+  assignmentVersionId: string;
   title: string;
   description: string;
   version: number;
   language: string;
   hints: CodePulseWorkspaceHint[];
+};
+
+export type CodePulseSubmissionStatus = 'PENDING' | 'JUDGING';
+
+export type CodePulseSubmission = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  labId: string;
+  labAssignmentId: string;
+  assignmentId: string;
+  assignmentVersionId: string;
+  assignmentVersion: {
+    id: string;
+    assignmentId: string;
+    version: number;
+    title: string;
+    language: string;
+  };
+  student: {
+    id: string;
+    membershipId: string;
+    name: string;
+    email: string;
+  };
+  sourceCode: string;
+  acceptedAt: string;
+  status: CodePulseSubmissionStatus;
+  gradingAttempts: unknown[];
 };
 
 export type CodePulseProblem = {
@@ -251,6 +282,15 @@ export const codePulseApi = {
   updateWorkspace: (id: string, sourceCode: string) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
+  listWorkspaceSubmissions: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseSubmission[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`)),
+  submitWorkspace: (
+    id: string,
+    input: { sourceCode: string; requestKey: string; assignmentVersionId: string },
+  ) => request(() =>
+    apiClient.post<{ item: CodePulseSubmission; created: boolean }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`, input)),
   executeWorkspace: (id: string, sourceCode: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode })),

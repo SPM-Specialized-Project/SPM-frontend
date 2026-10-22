@@ -1,4 +1,5 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 
 import {
   COURSE_REQUESTS_FILE,
@@ -65,17 +66,39 @@ async function readSubmissions() {
     return Array.isArray(parsed) ? parsed : clone(INITIAL_SUBMISSIONS);
   } catch (error) {
     if (error?.code !== 'ENOENT') throw error;
-    await saveSubmissions(INITIAL_SUBMISSIONS);
     return clone(INITIAL_SUBMISSIONS);
   }
 }
 
+async function writeSubmissionsAtomically(records) {
+  await ensureDataDirectory();
+  const temporaryFile = `${SUBMISSIONS_FILE}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporaryFile, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+  await rename(temporaryFile, SUBMISSIONS_FILE);
+}
+
 function saveSubmissions(records) {
-  writeQueue = writeQueue.then(async () => {
-    await ensureDataDirectory();
-    await writeFile(SUBMISSIONS_FILE, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
-  });
+  const snapshot = clone(records);
+  writeQueue = writeQueue.then(() => writeSubmissionsAtomically(snapshot));
   return writeQueue;
 }
 
-export { ensureDataDirectory, readCollection, saveCollection, readSubmissions, saveSubmissions };
+function mutateSubmissions(callback) {
+  const result = writeQueue.then(async () => {
+    const records = await readSubmissions();
+    const value = await callback(records);
+    await writeSubmissionsAtomically(records);
+    return value;
+  });
+  writeQueue = result.catch(() => {});
+  return result;
+}
+
+export {
+  ensureDataDirectory,
+  readCollection,
+  saveCollection,
+  readSubmissions,
+  saveSubmissions,
+  mutateSubmissions,
+};

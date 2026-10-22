@@ -16,7 +16,9 @@ import {
   type CodePulseClassroom,
   type CodePulseRunResult,
   type CodePulseRunSummary,
+  type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
@@ -50,11 +52,7 @@ function StudentWorkspaceEditor({
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
-  const [workspace, setWorkspace] = useState<{
-    id: string;
-    sourceCode: string;
-    updatedAt?: string;
-  }>();
+  const [workspace, setWorkspace] = useState<CodePulseWorkspace>();
   const [sourceCode, setSourceCode] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -63,6 +61,14 @@ function StudentWorkspaceEditor({
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
+  const [confirmingSubmission, setConfirmingSubmission] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submission, setSubmission] = useState<CodePulseSubmission>();
+  const [submissionError, setSubmissionError] = useState<string>();
+  const [pendingRequest, setPendingRequest] = useState<{
+    sourceCode: string;
+    requestKey: string;
+  }>();
 
   useEffect(() => {
     let active = true;
@@ -73,6 +79,10 @@ function StudentWorkspaceEditor({
     setRunSummary(undefined);
     setRunError(undefined);
     setSaveState('loading');
+    setConfirmingSubmission(false);
+    setSubmission(undefined);
+    setSubmissionError(undefined);
+    setPendingRequest(undefined);
 
     void codePulseApi
       .getStudentWorkspace(classroomId, assignment.id)
@@ -81,6 +91,14 @@ function StudentWorkspaceEditor({
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
         setSaveState('saved');
+        if (response.data.item.problem) {
+          void codePulseApi
+            .listWorkspaceSubmissions(response.data.item.id)
+            .then((history) => {
+              if (active) setSubmission(history.data.items.at(-1));
+            })
+            .catch(() => {});
+        }
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -149,6 +167,42 @@ function StudentWorkspaceEditor({
       );
     } finally {
       setRunning(false);
+    }
+  };
+
+  const createRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() ??
+    `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const submit = async () => {
+    if (!workspace?.problem || submitting) return;
+    const logicalRequest =
+      pendingRequest?.sourceCode === sourceCode
+        ? pendingRequest
+        : { sourceCode, requestKey: createRequestKey() };
+    setPendingRequest(logicalRequest);
+    setSubmitting(true);
+    setSubmissionError(undefined);
+    try {
+      const response = await codePulseApi.submitWorkspace(workspace.id, {
+        sourceCode: logicalRequest.sourceCode,
+        requestKey: logicalRequest.requestKey,
+        assignmentVersionId: workspace.problem.assignmentVersionId,
+      });
+      setSubmission(response.data.item);
+      setPendingRequest(undefined);
+      setConfirmingSubmission(false);
+      toast.success(
+        response.data.created
+          ? `Đã tiếp nhận bài nộp: ${assignment.title}.`
+          : `Đã khôi phục bài nộp: ${assignment.title}.`,
+      );
+    } catch (reason: unknown) {
+      setSubmissionError(
+        reason instanceof Error ? reason.message : 'Không thể nộp bài.',
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -238,8 +292,33 @@ function StudentWorkspaceEditor({
             )}
             {running ? 'Đang chạy' : 'Run'}
           </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSubmissionError(undefined);
+              setConfirmingSubmission(true);
+            }}
+            disabled={
+              saving || running || submitting || loading || !workspace?.problem || !sourceCode.trim()
+            }
+            title={workspace?.problem ? undefined : 'Official Submit is available for an active LAB problem.'}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {submitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+            Submit
+          </button>
         </div>
       </div>
+
+      {submission && (
+        <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600" aria-live="polite">
+          Submission <span className="font-mono">{submission.id}</span>{' '}
+          <span className="font-semibold text-teal-700">
+            {submission.status === 'PENDING' ? 'Pending' : 'Judging'}
+          </span>
+          {' '}· accepted {new Date(submission.acceptedAt).toLocaleString('vi-VN')}
+        </div>
+      )}
 
       {loading && (
         <p className="px-4 py-8 text-sm text-slate-500">Đang tải editor...</p>
@@ -289,6 +368,59 @@ function StudentWorkspaceEditor({
             />
           </div>
         </>
+      )}
+      {confirmingSubmission && workspace?.problem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="submission-confirmation-title"
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+          >
+            <h2 id="submission-confirmation-title" className="text-lg font-semibold text-slate-950">
+              Xác nhận nộp bài chính thức
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Code hiện tại sẽ được lưu thành snapshot bất biến để chấm điểm.
+            </p>
+            <dl className="mt-4 space-y-3 rounded border border-slate-200 bg-slate-50 p-4 text-sm">
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Problem</dt>
+                <dd className="mt-1 font-semibold text-slate-900">{workspace.problem.title}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Pinned version</dt>
+                <dd className="mt-1 font-mono text-slate-900">
+                  v{workspace.problem.version} · {workspace.problem.assignmentVersionId}
+                </dd>
+              </div>
+            </dl>
+            {submissionError && (
+              <p className="mt-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">
+                {submissionError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingSubmission(false)}
+                disabled={submitting}
+                className="rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => void submit()}
+                disabled={submitting}
+                className="inline-flex items-center gap-2 rounded bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+              >
+                {submitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+                {submitting ? 'Đang nộp' : 'Nộp bài'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );

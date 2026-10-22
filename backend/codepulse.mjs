@@ -1,4 +1,5 @@
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
@@ -23,6 +24,7 @@ import {
   normalizeCourse13Memberships,
   USERS,
 } from './data/seeds.mjs';
+import { mutateSubmissions, readSubmissions } from './data/storage.mjs';
 
 const directory = DATA_DIRECTORY;
 const termFile = TERMS_FILE;
@@ -38,6 +40,8 @@ const MAX_CPU_TIME_LIMIT_MS = 10_000;
 const MAX_MEMORY_LIMIT_MB = 1_024;
 const MAX_SOURCE_CODE_LENGTH = 200_000;
 const MAX_RUN_OUTPUT_LENGTH = 32_000;
+const MAX_REQUEST_KEY_LENGTH = 128;
+const REQUEST_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
@@ -589,6 +593,47 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'This problem is outside its practice window.');
     }
   };
+  const assertActiveSubmissionWindow = (context, acceptedAt) => {
+    if (!context.lab || !context.labAssignment) {
+      throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
+    }
+    if (context.lab.status !== 'LIVE') {
+      throw apiError(409, 'LAB_NOT_LIVE', 'Submissions are only accepted while the LAB is Live.');
+    }
+    const acceptanceTime = acceptedAt.getTime();
+    const opensAt = Date.parse(context.labAssignment.practiceStartAt);
+    const closesAt = Date.parse(context.labAssignment.practiceEndAt);
+    if (acceptanceTime < opensAt) {
+      throw apiError(409, 'PRACTICE_WINDOW_NOT_OPEN', 'The practice window has not opened yet.');
+    }
+    if (acceptanceTime >= closesAt) {
+      throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'The practice window is closed.');
+    }
+  };
+  const validateRequestKey = (value) => {
+    if (typeof value !== 'string'
+      || value.length < 8
+      || value.length > MAX_REQUEST_KEY_LENGTH
+      || !REQUEST_KEY_PATTERN.test(value)) {
+      throw apiError(400, 'INVALID_REQUEST_KEY', 'requestKey must be 8-128 URL-safe characters.');
+    }
+    return value;
+  };
+  const codeSubmissionView = (submission) => ({
+    id: submission.id,
+    workspaceId: submission.workspaceId,
+    classroomId: submission.classroomId,
+    labId: submission.labId,
+    labAssignmentId: submission.labAssignmentId,
+    assignmentId: submission.assignmentId,
+    assignmentVersionId: submission.assignmentVersionId,
+    assignmentVersion: submission.assignmentVersion,
+    student: submission.student,
+    sourceCode: submission.sourceCode,
+    acceptedAt: submission.acceptedAt,
+    status: submission.status,
+    gradingAttempts: structuredClone(submission.gradingAttempts ?? []),
+  });
   const workspaceView = (workspace, context) => {
     if (!context.labAssignment) return workspace;
     const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
@@ -597,6 +642,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       executionResult: workspace.executionResult ?? null,
       problem: {
         id: context.labAssignment.id,
+        assignmentId: context.labAssignment.assignmentId,
+        assignmentVersionId: context.labAssignment.assignmentVersionId,
         title: context.labAssignment.title,
         description: context.labAssignment.description ?? '',
         version: context.labAssignment.version,
@@ -884,10 +931,19 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (!assignment) notFound();
 
     const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const liveLabIds = new Set(labs
+      .filter((item) => item.classroomId === classroomItem.id && item.status === 'LIVE')
+      .map((item) => item.id));
     let workspace = currentWorkspaces.find((item) =>
       item.classroomId === classroomItem.id
       && item.assignmentId === assignment.id
-      && item.ownerEmail === user.email);
+      && item.ownerEmail === user.email
+      && item.labId
+      && liveLabIds.has(item.labId))
+      ?? currentWorkspaces.find((item) =>
+        item.classroomId === classroomItem.id
+        && item.assignmentId === assignment.id
+        && item.ownerEmail === user.email);
 
     if (!workspace) {
       workspace = {
@@ -904,7 +960,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       });
     }
 
-    sendJson(response, 200, { item: workspace });
+    sendJson(response, 200, { item: workspaceView(workspace, workspaceContext(workspace)) });
     return;
   }
 
@@ -1133,6 +1189,130 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       return current;
     });
     sendJson(response, 200, { item: workspaceView(updated, context) });
+    return;
+  }
+
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'submissions'
+    && (request.method === 'POST' || request.method === 'GET')) {
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const context = workspaceContext(workspace);
+    const isOwner = user.role === 'student'
+      && normalizeEmail(workspace.ownerEmail) === normalizeEmail(user.email)
+      && isMember(context.classroomItem.id);
+    const lecturerCanRead = isDsaManager(context.classroomItem);
+
+    if (request.method === 'GET') {
+      if (!isOwner && !lecturerCanRead) deny();
+      const records = await readSubmissions();
+      const items = records
+        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id)
+        .map(codeSubmissionView);
+      sendJson(response, 200, { items });
+      return;
+    }
+
+    if (!isOwner) deny();
+    const body = await readRequestBody(request);
+    const requestKey = validateRequestKey(body.requestKey);
+    if (typeof body.sourceCode !== 'string') {
+      throw apiError(400, 'INVALID_INPUT', 'sourceCode must be a string.');
+    }
+    if (!body.sourceCode.trim()) {
+      throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
+    }
+    if (body.sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code cannot exceed ${MAX_SOURCE_CODE_LENGTH} characters.`);
+    }
+    if (!context.lab || !context.labAssignment) {
+      throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
+    }
+    if (body.assignmentVersionId !== undefined
+      && body.assignmentVersionId !== context.labAssignment.assignmentVersionId) {
+      throw apiError(409, 'ASSIGNMENT_VERSION_MISMATCH', 'The requested problem version is not pinned to this workspace.');
+    }
+
+    const requestReceivedAt = new Date();
+    const membership = memberships.find((member) =>
+      belongsToClassroom(member, context.classroomItem.id)
+      && normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email)
+      && isActiveMembership(member));
+    if (!membership) deny();
+
+    const canonicalPayload = JSON.stringify({
+      workspaceId: workspace.id,
+      classroomId: workspace.classroomId,
+      labId: workspace.labId,
+      labAssignmentId: workspace.labAssignmentId,
+      assignmentId: workspace.assignmentId,
+      assignmentVersionId: context.labAssignment.assignmentVersionId,
+      sourceCode: body.sourceCode,
+    });
+    const payloadHash = createHash('sha256').update(canonicalPayload).digest('hex');
+    const result = await mutateSubmissions((records) => {
+      const existing = records.find((record) =>
+        record.kind === 'CODE_SUBMISSION'
+        && normalizeEmail(record.student.email) === normalizeEmail(user.email)
+        && record.requestKey === requestKey);
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          throw apiError(409, 'IDEMPOTENCY_CONFLICT', 'This requestKey was already accepted with a different payload.');
+        }
+        return { submission: existing, created: false };
+      }
+
+      assertActiveSubmissionWindow(context, requestReceivedAt);
+      const submission = {
+        kind: 'CODE_SUBMISSION',
+        id: `submission-${randomUUID()}`,
+        courseId: String(context.classroomItem.courseId),
+        termId: workspace.termId,
+        classroomId: workspace.classroomId,
+        labId: workspace.labId,
+        labAssignmentId: workspace.labAssignmentId,
+        assignmentId: workspace.assignmentId,
+        assignmentVersionId: context.labAssignment.assignmentVersionId,
+        assignmentVersion: {
+          id: context.labAssignment.assignmentVersionId,
+          assignmentId: context.labAssignment.assignmentId,
+          version: context.labAssignment.version,
+          title: context.labAssignment.title,
+          language: context.labAssignment.language ?? 'PYTHON',
+        },
+        workspaceId: workspace.id,
+        student: {
+          id: membership.studentId ?? user.email,
+          membershipId: membership.id,
+          name: membership.studentName ?? user.name ?? user.email,
+          email: user.email,
+        },
+        sourceCode: body.sourceCode,
+        acceptedAt: requestReceivedAt.toISOString(),
+        requestKey,
+        payloadHash,
+        status: 'PENDING',
+        gradingAttempts: [],
+      };
+      records.push(submission);
+      return { submission, created: true };
+    });
+
+    sendJson(response, result.created ? 201 : 200, {
+      item: codeSubmissionView(result.submission),
+      created: result.created,
+    });
+    return;
+  }
+
+  if (parts[2] === 'submissions' && parts[3] && !parts[4] && request.method === 'GET') {
+    const records = await readSubmissions();
+    const submission = records.find((record) =>
+      record.kind === 'CODE_SUBMISSION' && record.id === parts[3]) ?? notFound();
+    const classroomItem = classroom(submission.classroomId);
+    const canRead = normalizeEmail(submission.student.email) === normalizeEmail(user.email)
+      || isDsaManager(classroomItem);
+    if (!canRead) deny();
+    sendJson(response, 200, { item: codeSubmissionView(submission) });
     return;
   }
 
