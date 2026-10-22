@@ -16,6 +16,7 @@ import {
   codePulseApi,
   type CodePulseAssignment,
   type CodePulseClassroom,
+  type CodePulseExecutionResult,
   type CodePulseLab,
   type CodePulseLabSubmission,
   type CodePulseLabAssignment,
@@ -23,10 +24,12 @@ import {
   type CodePulseRunSummary,
   type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
+import { ExecutionPanel } from './execution-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
 import { SandboxRunControls } from './sandbox-run-controls';
@@ -61,11 +64,7 @@ function StudentWorkspaceEditor({
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
-  const [workspace, setWorkspace] = useState<{
-    id: string;
-    sourceCode: string;
-    updatedAt?: string;
-  }>();
+  const [workspace, setWorkspace] = useState<CodePulseWorkspace>();
   const [sourceCode, setSourceCode] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -77,6 +76,7 @@ function StudentWorkspaceEditor({
   selectedProblem.current = labAssignment.id;
   const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
+  const [execution, setExecution] = useState<CodePulseExecutionResult>();
   const [submission, setSubmission] = useState<CodePulseLabSubmission>();
   const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
     usePracticeWindow(workspace?.id);
@@ -92,6 +92,7 @@ function StudentWorkspaceEditor({
     setWorkspace(undefined);
     setSourceCode('');
     setRunSummary(undefined);
+    setExecution(undefined);
     setRunning(false);
     setRunState('');
     setSubmission(undefined);
@@ -158,16 +159,13 @@ function StudentWorkspaceEditor({
     setRunError(undefined);
     setRunSummary(undefined);
     try {
-      const saved = await persistWorkspace(false);
-      if (!saved) {
-        setRunError('Không thể lưu code trước khi chạy.');
-        return;
-      }
       const response = await codePulseApi.executeWorkspace(workspace.id, sourceCode, { mode: runMode, stdin });
+      if (selectedProblem.current === problemId) setExecution(response.data.item);
       const execution = await waitForExecution(response.data.item, (item) => {
         if (selectedProblem.current === problemId) setRunState(item.state);
       });
       if (selectedProblem.current !== problemId) return;
+      setExecution(execution);
       setRunSummary({ ...execution, results: execution.results ?? [], passedCount: execution.passedCount ?? 0,
         totalCount: execution.totalCount ?? 0 });
       setRunState(execution.status);
@@ -227,7 +225,7 @@ function StudentWorkspaceEditor({
     error?.toLowerCase().includes('unauthorized');
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+    <section aria-label="Student code workspace" className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="truncate font-mono text-sm font-medium text-slate-900">
@@ -353,6 +351,7 @@ function StudentWorkspaceEditor({
           <div
             className={`${mobileTab === 'tests' ? 'block' : 'hidden'} border-t border-slate-200 lg:block`}
           >
+            <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={execution ?? workspace.executionResult} />
             <TestResultsPanel
               summary={runSummary}
               running={running}
@@ -485,14 +484,14 @@ function TestResultsPanel({
                 <th className="p-2 font-medium">Status</th>
                 <th className="p-2 font-medium">Time</th>
                 <th className="p-2 font-medium">Input</th>
-                <th className="p-2 font-medium">Output</th>
+                <th className="p-2 font-medium">stdout</th>
+                <th className="p-2 font-medium">stderr</th>
                 <th className="p-2 font-medium">Expected</th>
               </tr>
             </thead>
             <tbody>
               {summary.results.map((result, index) => {
                 const meta = runStatusMeta[result.status];
-                const renderedOutput = [result.actualOutput, result.stderr].filter(Boolean).join('\n') || '—';
                 return (
                   <tr
                     key={result.testCaseId}
@@ -524,8 +523,12 @@ function TestResultsPanel({
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       <output aria-label={`Output for test ${index + 1}`}>
-                        {renderedOutput}
+                        {result.actualOutput.slice(0, 32000) || '—'}
                       </output>
+                      {result.outputTruncated && <span className="block text-amber-800">⚠ Output truncated</span>}
+                    </td>
+                    <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-rose-700">
+                      <output aria-label={`stderr for test ${index + 1}`}>{result.stderr.slice(0, 32000) || '—'}</output>
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       {result.expectedOutput || '—'}
