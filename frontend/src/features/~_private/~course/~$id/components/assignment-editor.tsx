@@ -12,6 +12,7 @@ import {
   type CodePulseVersionHistory,
 } from '@/services/codepulse-api';
 
+import { ExecutionSnapshot, ExecutionStatus } from './execution-panel';
 import { MonacoCodeEditor } from './monaco-code-editor';
 
 type AssignmentEditorProps = {
@@ -352,7 +353,7 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                       </div>
                       <div>
                         <h5 className="font-semibold text-gray-900">Submissions ({versionHistory.submissions.length})</h5>
-                        {versionHistory.submissions.length === 0 && <p className="mt-2 text-sm text-gray-500">No student runs or submissions for this version.</p>}
+                        {versionHistory.submissions.length === 0 && <p className="mt-2 text-sm text-gray-500">No submissions for this version.</p>}
                         <div className="mt-3 space-y-3">
                           {versionHistory.submissions.map((submission) => (
                             <article key={submission.id} className="rounded border border-gray-200 p-3 text-sm">
@@ -369,6 +370,18 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                             </article>
                           ))}
                         </div>
+                      </div>
+                      <div>
+                        <h5 className="font-semibold text-gray-900">Run history ({versionHistory.executions?.length ?? 0})</h5>
+                        <p className="mt-1 text-xs text-gray-500">Execution độc lập với Submission; lỗi hệ thống không tính là lỗi thuật toán.</p>
+                        {versionHistory.executions?.map((execution) => (
+                          <details key={execution.id} className="mt-2 rounded border border-gray-200 p-3 text-sm">
+                            <summary className="cursor-pointer text-gray-800">
+                              {execution.ownerEmail} · {execution.mode} · <ExecutionStatus execution={execution} /> · {new Date(execution.executedAt).toLocaleString()}
+                            </summary>
+                            <ExecutionSnapshot execution={execution} />
+                          </details>
+                        ))}
                       </div>
                     </section>
                   )}

@@ -1,7 +1,7 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { runSandbox } from './sandbox.mjs';
+import { createExecutionQueue } from './executions.mjs';
 import { createHash, randomUUID } from 'node:crypto';
-import os from 'node:os';
 import path from 'node:path';
 
 import {
@@ -17,6 +17,7 @@ import {
   CODEPULSE_ACTIVITIES_FILE,
   PRACTICE_WINDOW_AUDIT_FILE,
   WORKSPACES_FILE,
+  EXECUTIONS_FILE,
 } from './config.mjs';
 import {
   assignmentRepositoryName,
@@ -53,7 +54,6 @@ const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
 const MAX_MEMORY_LIMIT_MB = 1_024;
 const MAX_SOURCE_CODE_LENGTH = 200_000;
-const MAX_RUN_OUTPUT_LENGTH = 32_000;
 
 const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
@@ -152,12 +152,35 @@ function mutate(file, initial, callback) {
   const result = mutationQueue.then(async () => {
     const records = await readRecords(file, initial);
     const value = callback(records);
-    await writeFile(file, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+    const temporary = `${file}.${randomUUID()}.tmp`;
+    try {
+      await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+      await rename(temporary, file);
+    } finally {
+      await rm(temporary, { force: true });
+    }
     return value;
   });
   mutationQueue = result.catch(() => {});
   return result;
 }
+
+const executions = createExecutionQueue({
+  read: () => readRecords(EXECUTIONS_FILE, []),
+  mutate: (callback) => mutate(EXECUTIONS_FILE, [], callback),
+  onUpdate: async (execution) => {
+    if (!execution.workspaceId) return;
+    await mutate(workspaceFile, initialWorkspaces, (records) => {
+      const workspace = records.find((item) => item.id === execution.workspaceId);
+      if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
+        || execution.state === 'QUEUED')) {
+        workspace.executionResult = execution;
+      }
+    });
+  },
+});
+
+export const initializeCodePulseExecutions = () => executions.list();
 
 const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
   ...structuredClone(assignment),
@@ -392,157 +415,20 @@ const normalizeRunOutput = (value, comparator = {}) => {
   return output;
 };
 
-const runProcess = (command, args, { cwd, input = '', timeoutMs }) => new Promise((resolve, reject) => {
-  const child = spawn(command, args, { cwd, windowsHide: true });
-  let stdout = '';
-  let stderr = '';
-  let timedOut = false;
-  let outputLimitReached = false;
-  let settled = false;
-  const timer = setTimeout(() => {
-    timedOut = true;
-    child.kill();
-  }, timeoutMs);
-
-  const appendOutput = (target, chunk) => {
-    const value = chunk.toString();
-    if (target === 'stdout') stdout += value;
-    else stderr += value;
-    if (stdout.length + stderr.length > MAX_RUN_OUTPUT_LENGTH) {
-      outputLimitReached = true;
-      child.kill();
-    }
-  };
-
-  child.stdout.on('data', (chunk) => appendOutput('stdout', chunk));
-  child.stderr.on('data', (chunk) => appendOutput('stderr', chunk));
-  child.once('error', (error) => {
-    clearTimeout(timer);
-    if (settled) return;
-    settled = true;
-    reject(error);
-  });
-  child.once('close', (code, signal) => {
-    clearTimeout(timer);
-    if (settled) return;
-    settled = true;
-    resolve({
-      code,
-      signal,
-      stdout: stdout.slice(0, MAX_RUN_OUTPUT_LENGTH),
-      stderr: stderr.slice(0, MAX_RUN_OUTPUT_LENGTH),
-      timedOut,
-      outputLimitReached,
-    });
-  });
-
-  child.stdin.on('error', () => {});
-  child.stdin.end(input);
-});
-
-const runWithFallback = async (commands, options) => {
-  let lastError;
-  for (const [command, args] of commands) {
-    try {
-      return await runProcess(command, args, options);
-    } catch (error) {
-      if (error?.code !== 'ENOENT') throw error;
-      lastError = error;
-    }
-  }
-  throw lastError ?? new Error('Không tìm thấy runtime để chạy bài.');
-};
-
-const runnerCommands = (runtime, sourcePath, executablePath) => {
-  if (runtime === 'PYTHON') {
-    const python = process.env.PYTHON_BIN?.trim();
-    return [
-      ...(python ? [[python, ['-I', sourcePath]]] : []),
-      ...(process.platform === 'win32' ? [['py', ['-3', '-I', sourcePath]]] : []),
-      ['python', ['-I', sourcePath]],
-      ['python3', ['-I', sourcePath]],
-    ];
-  }
-
-  return [
-    ['g++', ['-std=c++17', '-O2', '-pipe', sourcePath, '-o', executablePath]],
-    ['clang++', ['-std=c++17', '-O2', sourcePath, '-o', executablePath]],
-  ];
-};
-
 const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => {
-  const tempDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-codepulse-run-'));
-  const sourceExtension = assignment.runtime === 'CPP' ? 'cpp' : 'py';
-  const sourcePath = path.join(tempDirectory, `main.${sourceExtension}`);
-  const executablePath = path.join(tempDirectory, process.platform === 'win32' ? 'main.exe' : 'main');
-  const timeoutMs = Math.min(
-    Math.max(Number(assignment.cpuTimeLimitMs) || 1_000, 100),
-    MAX_CPU_TIME_LIMIT_MS,
-  );
-
-  try {
-    await writeFile(sourcePath, sourceCode, 'utf8');
-    let executableCommand;
-    if (assignment.runtime === 'CPP') {
-      const compile = await runWithFallback(runnerCommands('CPP', sourcePath, executablePath), {
-        cwd: tempDirectory,
-        timeoutMs: MAX_CPU_TIME_LIMIT_MS,
-      });
-      if (compile.code !== 0 || compile.timedOut || compile.outputLimitReached) {
-        return testCases.map((testCase) => ({
-          testCaseId: testCase.id,
-          input: testCase.input,
-          expectedOutput: testCase.expectedOutput,
-          actualOutput: '',
-          stderr: compile.stderr || compile.stdout,
-          status: compile.timedOut ? 'TIMEOUT' : 'COMPILE_ERROR',
-          passed: false,
-          durationMs: null,
-        }));
-      }
-      executableCommand = [executablePath, []];
-    }
-
-    const results = [];
-    for (const testCase of testCases) {
-      const startedAt = Date.now();
-      const result = assignment.runtime === 'PYTHON'
-        ? await runWithFallback(runnerCommands('PYTHON', sourcePath), {
-          cwd: tempDirectory,
-          input: testCase.input,
-          timeoutMs,
-        })
-        : await runProcess(executableCommand[0], executableCommand[1], {
-          cwd: tempDirectory,
-          input: testCase.input,
-          timeoutMs,
-        });
-      const actualOutput = normalizeRunOutput(result.stdout, assignment.comparator);
-      const expectedOutput = normalizeRunOutput(testCase.expectedOutput, assignment.comparator);
-      const status = result.timedOut
-        ? 'TIMEOUT'
-        : result.outputLimitReached
-          ? 'OUTPUT_LIMIT'
-          : result.code === 0
-            ? actualOutput === expectedOutput ? 'PASSED' : 'WRONG_ANSWER'
-            : 'RUNTIME_ERROR';
-      results.push({
-        testCaseId: testCase.id,
-        weight: testCase.weight ?? 1,
-        hidden: Boolean(testCase.hidden),
-        input: testCase.input,
-        expectedOutput: testCase.expectedOutput,
-        actualOutput: result.stdout,
-        stderr: result.stderr,
-        status,
-        passed: status === 'PASSED',
-        durationMs: Date.now() - startedAt,
-      });
-    }
-    return results;
-  } finally {
-    await rm(tempDirectory, { recursive: true, force: true });
+  const results = [];
+  for (const testCase of testCases) {
+    const cpuTimeLimitMs = Math.min(Math.max(Number(assignment.cpuTimeLimitMs) || 1000, 1), 10000);
+    const result = await runSandbox({ runtime: assignment.runtime, sourceCode, input: testCase.input,
+      cpuTimeLimitMs, wallTimeLimitMs: cpuTimeLimitMs * 2 + 250,
+      memoryLimitMb: Number(assignment.memoryLimitMb) || 128 });
+    const passed = result.status === 'SUCCESS' && normalizeRunOutput(result.stdout, assignment.comparator) === normalizeRunOutput(testCase.expectedOutput, assignment.comparator);
+    results.push({ testCaseId: testCase.id, input: testCase.input, expectedOutput: testCase.expectedOutput,
+      weight: testCase.weight ?? 1, hidden: Boolean(testCase.hidden), actualOutput: result.stdout,
+      stderr: result.stderr, status: result.status === 'SUCCESS' ? passed ? 'PASSED' : 'WRONG_ANSWER' : result.status,
+      passed, durationMs: result.runtimeMs });
   }
+  return results;
 };
 
 export async function getCodePulseClassrooms() {
@@ -875,7 +761,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (context.classroomItem.status === 'ARCHIVED') {
       throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
     }
-    if (!context.lab) return null;
+    if (!context.lab) {
+      if (!isAcademicTermActive(terms.find((item) => item.id === context.classroomItem.termId))) deny();
+      return null;
+    }
     if (!context.labAssignment) notFound();
     const practiceContext = labAssignmentContext({
       classroomId: workspace.classroomId,
@@ -937,6 +826,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return {
       ...assignmentSnapshot(assignment, version.version, version.id, version),
       ...version,
+      runtime: version.runtime ?? version.language ?? assignment.runtime,
       testCases: normalizeTestCases(version.testCases ?? assignment.testCases),
       comparator: normalizeComparator(version.comparator ?? assignment.comparator),
     };
@@ -976,6 +866,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Assignment chưa có runtime được hỗ trợ để chạy.');
     }
     const results = await runAssignmentTestCases({ assignment: version, sourceCode, testCases: version.testCases });
+    if (results.some((result) => result.status === 'INTERNAL_ERROR')) {
+      throw apiError(503, 'RUNNER_UNAVAILABLE', 'Sandbox unavailable. Retry later.');
+    }
     const totalWeight = results.reduce((sum, result) => sum + result.weight, 0);
     const earnedWeight = results.reduce((sum, result) => sum + (result.passed ? result.weight : 0), 0);
     const submission = {
@@ -1200,6 +1093,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       submissions: submissions
         .filter((submission) => submission.assignmentVersionId === version.id)
         .map((submission) => ({ ...submission, studentEmail: submission.studentEmail ?? null })),
+      executions: (await executions.list()).filter((execution) =>
+        execution.classroomId === classroomItem.id && execution.assignmentVersionId === version.id).reverse().slice(0, 100),
     });
     return;
   }
@@ -1740,6 +1635,32 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'executions' && request.method === 'GET') {
+    if (!['student', 'lecturer'].includes(user.role)) deny();
+    const visible = (await executions.list()).filter((execution) => {
+      const item = classrooms.find((candidate) => candidate.id === execution.classroomId);
+      if (!item) return false;
+      return user.role === 'student'
+        ? execution.ownerEmail === user.email && isMember(item.id)
+        : isDsaManager(item);
+    });
+    if (parts[3]) {
+      const item = visible.find((execution) => execution.id === parts[3]) ?? notFound();
+      sendJson(response, 200, { item });
+    } else {
+      const matches = visible.filter((execution) =>
+        (!requestUrl.searchParams.has('workspaceId') || execution.workspaceId === requestUrl.searchParams.get('workspaceId'))
+        && (!requestUrl.searchParams.has('classroomId') || execution.classroomId === requestUrl.searchParams.get('classroomId'))).reverse();
+      const before = requestUrl.searchParams.get('before');
+      const cursor = before ? matches.findIndex((execution) => execution.id === before) : -1;
+      if (before && cursor === -1) throw apiError(400, 'INVALID_CURSOR', 'Invalid execution history cursor.');
+      const items = matches.slice(cursor + 1, cursor + 101);
+      sendJson(response, 200, { items,
+        nextCursor: cursor + 101 < matches.length ? items.at(-1).id : null });
+    }
+    return;
+  }
+
   if (isAssignmentRoute && parts[5] && parts[6] === 'run' && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
@@ -1780,48 +1701,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
     }
 
-    const visibleTestCases = user.role === 'student'
-      ? gradingAssignment.testCases.filter((testCase) => !testCase.hidden)
-      : gradingAssignment.testCases;
-    const requestedTestCaseIds = Array.isArray(body.testCaseIds)
-      ? new Set(body.testCaseIds.map((id) => String(id)))
-      : null;
-    const selectedTestCases = requestedTestCaseIds
-      ? visibleTestCases.filter((testCase) => requestedTestCaseIds.has(testCase.id))
-      : visibleTestCases;
-    if (selectedTestCases.length === 0) {
-      throw apiError(400, 'NO_VISIBLE_TEST_CASES', 'Không có testcase public để chạy.');
-    }
-
-    const results = await runAssignmentTestCases({
-      assignment: gradingAssignment,
-      sourceCode,
-      testCases: selectedTestCases,
-    });
-    if (user.role === 'student' && gradingAssignment.status === 'PUBLISHED') {
-      await markAssignmentVersionUsed(gradingAssignment.id);
-    }
-    await recordActivity({
-      type: 'RUN',
-      context: practiceContext,
-      activityAt: practiceAccess?.acceptedAt,
-      metadata: {
-        assignmentId: assignment.id,
-        activityContext: practiceAccess?.activityContext ?? null,
-        passedCount: results.filter((result) => result.passed).length,
-        totalCount: results.length,
-      },
-    });
-    sendJson(response, 200, {
-      item: {
-        assignmentId: assignment.id,
-        assignmentVersionId: gradingAssignment.id,
-        runtime: gradingAssignment.runtime,
-        results,
-        passedCount: results.filter((result) => result.passed).length,
-        totalCount: results.length,
-      },
-    });
+    const queued = await executions.enqueue({ assignment: gradingAssignment, sourceCode, body,
+      assignmentId: assignment.id, classroomId: classroomItem.id, ownerEmail: user.email,
+      workspaceId: savedWorkspace?.id ?? null, labId: practiceContext?.lab.id ?? null,
+      labAssignmentId: practiceContext?.labAssignment.id ?? null });
+    if (user.role === 'student' && gradingAssignment.status === 'PUBLISHED') await markAssignmentVersionUsed(gradingAssignment.id);
+    const execution = await queued.completion;
+    await recordActivity({ type: 'RUN', context: practiceContext, activityAt: practiceAccess?.acceptedAt,
+      metadata: { assignmentId: assignment.id, activityContext: practiceAccess?.activityContext ?? null,
+        executionId: execution.id, executionStatus: execution.status,
+        passedCount: execution.passedCount, totalCount: execution.totalCount,
+        systemError: execution.status === 'INTERNAL_ERROR' } });
+    sendJson(response, 200, { item: execution });
     return;
   }
 
@@ -2050,73 +1941,33 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
     const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
     const context = workspaceContext(workspace);
+    if (workspace.termId !== context.classroomItem.termId) deny();
     if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
     const access = assertWorkspaceWritable(workspace, context);
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
     if (!sourceCode.trim()) throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
-    const startedAt = Date.now();
-    const linkedAssignment = assignments.find((assignment) =>
-      assignment.id === workspace.assignmentId &&
-      assignment.classroomId === workspace.classroomId &&
-      assignment.status === 'PUBLISHED');
-    let executionResult;
-    if (linkedAssignment && ALLOWED_RUNTIMES.has(linkedAssignment.runtime)) {
-      const visibleTestCases = linkedAssignment.testCases.filter((testCase) => !testCase.hidden);
-      const results = await runAssignmentTestCases({
-        assignment: linkedAssignment,
-        sourceCode,
-        testCases: visibleTestCases,
-      });
-      const passedCount = results.filter((result) => result.passed).length;
-      const runtimeFailure = results.find((result) =>
-        ['RUNTIME_ERROR', 'COMPILE_ERROR', 'TIMEOUT', 'OUTPUT_LIMIT'].includes(result.status));
-      executionResult = {
-        id: `execution-${Date.now()}`,
-        status: runtimeFailure ? 'RUNTIME_ERROR' : passedCount === results.length ? 'COMPLETED' : 'FAILED',
-        stdout: results.map((result) => result.actualOutput).filter(Boolean).join('\n'),
-        stderr: results.map((result) => result.stderr).filter(Boolean).join('\n'),
-        exitCode: passedCount === results.length ? 0 : 1,
-        runtimeMs: results.reduce((total, result) => total + (result.durationMs ?? 0), 0),
-        executedAt: new Date().toISOString(),
-        passedCount,
-        totalCount: results.length,
-        results,
-      };
-    } else {
-      const hasRuntimeError = /\b(raise|throw)\b|syntax_error/i.test(sourceCode);
-      executionResult = {
-        id: `execution-${Date.now()}`,
-        status: hasRuntimeError ? 'RUNTIME_ERROR' : 'COMPLETED',
-        stdout: hasRuntimeError ? '' : `Execution completed for ${context.labAssignment?.title ?? 'problem'}.`,
-        stderr: hasRuntimeError ? 'The submitted source triggered a runtime error.' : '',
-        exitCode: hasRuntimeError ? 1 : 0,
-        runtimeMs: Math.max(1, Date.now() - startedAt),
-        executedAt: new Date().toISOString(),
-      };
-    }
-    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
-      const current = records.find((record) => record.id === workspace.id) ?? notFound();
-      current.sourceCode = sourceCode;
-      current.executionResult = executionResult;
-      current.updatedAt = executionResult.executedAt;
-      return current;
-    });
-    if (access) {
-      await recordActivity({
-        type: 'RUN',
-        context: access.practiceContext,
-        activityAt: access.practiceAccess.acceptedAt,
-        metadata: {
-          assignmentId: workspace.assignmentId,
-          activityContext: access.practiceAccess.activityContext,
-          workspaceId: workspace.id,
-          executionId: executionResult.id,
-          executionStatus: executionResult.status,
-        },
-      });
-    }
-    sendJson(response, 200, { item: workspaceView(updated, context) });
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) throw apiError(413, 'SOURCE_CODE_TOO_LARGE', 'Source exceeds 200000 characters.');
+    const linkedAssignment = assignments.find((assignment) => assignment.id === workspace.assignmentId
+      && assignment.classroomId === workspace.classroomId && assignment.status === 'PUBLISHED');
+    const versionId = context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId;
+    const storedVersion = assignmentVersions.find((item) => item.id === versionId
+      && item.assignmentId === workspace.assignmentId && item.classroomId === workspace.classroomId
+      && item.status === 'PUBLISHED');
+    const version = linkedAssignment
+      ? versionId ? resolvePublishedAssignmentVersion(linkedAssignment, versionId) : latestPublishedAssignmentVersion(linkedAssignment)
+      : storedVersion ? { ...storedVersion, runtime: storedVersion.runtime ?? storedVersion.language,
+        testCases: normalizeTestCases(storedVersion.testCases ?? []) } : notFound();
+    if (!ALLOWED_RUNTIMES.has(version.runtime)) throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Unsupported assignment runtime.');
+    const queued = await executions.enqueue({ assignment: version, sourceCode, body,
+      assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
+      workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
+    await markAssignmentVersionUsed(version.id);
+    await recordActivity({ type: 'RUN', context: access?.practiceContext,
+      activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
+        activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
+        executionId: queued.item.id, executionStatus: 'QUEUED' } });
+    sendJson(response, 202, { item: queued.item });
     return;
   }
 

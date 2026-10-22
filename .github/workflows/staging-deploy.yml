@@ -75,7 +75,9 @@ jobs:
           npm run build
 
       - name: Test staging backend
-        run: npm run backend:test
+        run: |
+          docker build -t codepulse-sandbox:1 deploy/sandbox
+          npm run backend:test
 
       - name: Test staging deployment configuration
         run: npm run deploy:test

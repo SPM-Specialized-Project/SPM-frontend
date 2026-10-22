@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   codePulseApi,
+  waitForExecution,
   type CodePulseLab,
   type CodePulseLabAssignment,
 } from '@/services/codepulse-api';
@@ -19,7 +20,8 @@ import {
 import { StudentLabWorkspace } from './student-lab-workspace';
 
 vi.mock('@/services/codepulse-api', () => ({
-  codePulseApi: { getWorkspace: vi.fn(), updateWorkspace: vi.fn() },
+  codePulseApi: { getWorkspace: vi.fn(), updateWorkspace: vi.fn(), executeWorkspace: vi.fn(), listExecutions: vi.fn() },
+  waitForExecution: vi.fn(),
 }));
 
 const assignment: CodePulseLabAssignment = {
@@ -78,6 +80,7 @@ describe('student practice access', () => {
     // A wrong browser clock must not override server access.
     vi.setSystemTime(new Date('2030-01-01T00:00:00.000Z'));
     practiceWindow = { ...assignment };
+    vi.mocked(codePulseApi.listExecutions).mockResolvedValue({ status: 200, data: { items: [] } });
     vi.mocked(codePulseApi.getWorkspace).mockImplementation(async () => ({
       status: 200,
       data: { item, practiceWindow },
@@ -189,5 +192,48 @@ describe('student practice access', () => {
     expect(
       screen.getByRole('textbox', { name: 'Source code' }),
     ).not.toHaveAttribute('readonly');
+  });
+
+  it('runs the unsaved source snapshot with custom stdin and renders system errors separately', async () => {
+    practiceWindow = { ...assignment, practiceAccess: 'OPEN', practiceAccessReason: null };
+    await mountWorkspace();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Source code' }), { target: { value: 'print(input())' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Run mode' }), { target: { value: 'STDIN' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom input (stdin)' }), { target: { value: 'hello custom' } });
+    const execution = { id: 'execution-fixture', state: 'FINISHED' as const, status: 'INTERNAL_ERROR' as const,
+      mode: 'STDIN' as const, stdout: 'partial stdout', stderr: 'worker unavailable', exitCode: null,
+      sourceCode: 'print(input())', sourceHash: 'hash', runtime: 'PYTHON' as const, assignmentId: 'queue',
+      assignmentVersionId: 'queue-v1', ownerEmail: item.ownerEmail, runtimeMs: 0,
+      executedAt: '2026-10-21T00:00:00Z', limits: { cpuTimeLimitMs: 1000, memoryLimitMb: 128, wallTimeLimitMs: 2250 } };
+    vi.mocked(codePulseApi.executeWorkspace).mockResolvedValue({ status: 202, data: { item: execution } });
+    vi.mocked(waitForExecution).mockResolvedValue(execution);
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(codePulseApi.executeWorkspace).toHaveBeenCalledWith(item.id, 'print(input())', { mode: 'STDIN', stdin: 'hello custom' });
+    expect(screen.getByText('Internal Error · Lỗi hệ thống')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'stdout' })).toHaveTextContent('partial stdout');
+    expect(screen.getByRole('region', { name: 'stderr' })).toHaveTextContent('worker unavailable');
+    expect(screen.getByRole('textbox', { name: 'Source code' })).toHaveValue('print(input())');
+    expect(codePulseApi.updateWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('inspects an old run without changing the unsaved active editor', async () => {
+    practiceWindow = { ...assignment, practiceAccess: 'OPEN', practiceAccessReason: null };
+    const execution = { id: 'execution-old', state: 'FINISHED' as const, status: 'SUCCESS' as const,
+      mode: 'STDIN' as const, stdout: 'old output', stderr: '', exitCode: 0,
+      sourceCode: 'print("old output")', sourceHash: 'hash', runtime: 'PYTHON' as const, assignmentId: 'queue',
+      assignmentVersionId: 'queue-v1', ownerEmail: item.ownerEmail, runtimeMs: 25, memoryUsageKb: 8192,
+      executedAt: '2026-10-21T00:00:00Z', limits: { cpuTimeLimitMs: 1000, memoryLimitMb: 128, wallTimeLimitMs: 2250 } };
+    vi.mocked(codePulseApi.listExecutions).mockResolvedValue({ status: 200, data: { items: [execution] } });
+    await mountWorkspace();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Source code' }), { target: { value: 'unsaved edge case' } });
+    fireEvent.click(screen.getByRole('tab', { name: 'Execution History' }));
+    fireEvent.click(screen.getByRole('button', { name: /execution-old/ }));
+    expect(screen.getByRole('textbox', { name: 'Code snapshot' })).toHaveValue(execution.sourceCode);
+    expect(screen.getByRole('textbox', { name: 'Code snapshot' })).toHaveAttribute('readonly');
+    expect(screen.getByRole('textbox', { name: 'Source code' })).toHaveValue('unsaved edge case');
+    fireEvent.click(screen.getByRole('tab', { name: 'Console' }));
+    expect(screen.getByRole('textbox', { name: 'Source code' })).toHaveValue('unsaved edge case');
+    expect(codePulseApi.updateWorkspace).not.toHaveBeenCalled();
   });
 });
