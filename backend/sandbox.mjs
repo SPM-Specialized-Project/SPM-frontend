@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 
 export const internalError = () => ({ status: 'INTERNAL_ERROR', stdout: '',
   stderr: 'Sandbox unavailable or worker failed. Please retry later.', exitCode: null,
-  runtimeMs: 0, outputTruncated: false });
+  runtimeMs: 0, memoryUsageKb: null, outputTruncated: false });
 
 export function dockerArguments(name, image, memoryLimitMb = 128) {
   return ['run', '--name', name, '--pull=never', '--interactive', '--network=none',

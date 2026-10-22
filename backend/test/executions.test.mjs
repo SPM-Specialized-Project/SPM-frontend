@@ -70,3 +70,46 @@ test('stdin success has no test pass or grading result; mismatches keep successf
   assert.equal(small.limits.memoryLimitMb, 1);
   assert.equal(small.limits.cpuTimeLimitMs, 0.5);
 });
+
+test('history retains every immutable run, separated streams, duration and measured peak memory', async () => {
+  let attempts = 0;
+  const service = queue(async () => ({ ...success, stdout: `<script>run${++attempts}</script>`,
+    stderr: 'student diagnostic', runtimeMs: 37, memoryUsageKb: 16384 }));
+  const first = await (await service.enqueue(input)).completion;
+  const second = await (await service.enqueue({ ...input, sourceCode: 'changed edge case' })).completion;
+  assert.notEqual(first.id, second.id);
+  const history = await service.list();
+  assert.equal(history[0].sourceCode, 'original');
+  assert.equal(history[1].sourceCode, 'changed edge case');
+  assert.equal(history[0].stdout, '<script>run1</script>');
+  assert.equal(history[0].stderr, 'student diagnostic');
+  assert.equal(first.runtimeMs, 37);
+  assert.equal(first.memoryUsageKb, 16384);
+  assert.equal(first.results[0].memoryUsageKb, 16384);
+  assert.equal(first.outputTruncated, false);
+  assert.ok(Date.parse(first.executedAt));
+});
+
+test('aggregate truncation is byte-bounded and flagged even when individual tests fit', async () => {
+  let index = 0;
+  const service = queue(async () => ({ ...success, stdout: '界'.repeat(7000), stderr: 'e'.repeat(20000),
+    memoryUsageKb: ++index * 1024, outputTruncated: false }));
+  const result = await (await service.enqueue({ ...input, assignment: { ...assignment, testCases: [
+    { id: 'a', input: '', expectedOutput: '', hidden: false },
+    { id: 'b', input: '', expectedOutput: '', hidden: false },
+  ] } })).completion;
+  assert.equal(result.outputTruncated, true);
+  assert.ok(Buffer.byteLength(result.stdout) <= 32000);
+  assert.ok(Buffer.byteLength(result.stderr) <= 32000);
+  assert.equal(result.stdout.includes('\uFFFD'), false);
+  assert.equal(result.memoryUsageKb, 2048);
+  assert.equal(result.runtimeMs, 2);
+  assert.equal(result.results.length, 2);
+});
+
+test('missing memory remains unknown and infrastructure failure keeps a null exit code', async () => {
+  const service = queue(async () => ({ ...success, status: 'INTERNAL_ERROR', exitCode: null }));
+  const result = await (await service.enqueue(input)).completion;
+  assert.equal(result.memoryUsageKb, null);
+  assert.equal(result.exitCode, null);
+});

@@ -1648,9 +1648,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       const item = visible.find((execution) => execution.id === parts[3]) ?? notFound();
       sendJson(response, 200, { item });
     } else {
-      sendJson(response, 200, { items: visible.filter((execution) =>
+      const matches = visible.filter((execution) =>
         (!requestUrl.searchParams.has('workspaceId') || execution.workspaceId === requestUrl.searchParams.get('workspaceId'))
-        && (!requestUrl.searchParams.has('classroomId') || execution.classroomId === requestUrl.searchParams.get('classroomId'))).reverse().slice(0, 100) });
+        && (!requestUrl.searchParams.has('classroomId') || execution.classroomId === requestUrl.searchParams.get('classroomId'))).reverse();
+      const before = requestUrl.searchParams.get('before');
+      const cursor = before ? matches.findIndex((execution) => execution.id === before) : -1;
+      if (before && cursor === -1) throw apiError(400, 'INVALID_CURSOR', 'Invalid execution history cursor.');
+      const items = matches.slice(cursor + 1, cursor + 101);
+      sendJson(response, 200, { items,
+        nextCursor: cursor + 101 < matches.length ? items.at(-1).id : null });
     }
     return;
   }

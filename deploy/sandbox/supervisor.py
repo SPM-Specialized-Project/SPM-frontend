@@ -40,13 +40,26 @@ def run(command, stdin, cpu_limit, memory_mb, wall_limit):
                                  stderr=subprocess.PIPE, cwd='/work/student',
                                  env={'PATH': '/usr/local/bin:/usr/bin:/bin', 'HOME': '/work/student'},
                                  preexec_fn=restrict)
+    memory_kb = None
+
+    def reap(block=False):
+        nonlocal memory_kb
+        if child.returncode is None:
+            pid, status, usage = os.wait4(child.pid, 0 if block else os.WNOHANG)
+            if pid:
+                child.returncode = os.waitstatus_to_exitcode(status)
+                # Linux wait4 reports peak resident memory in KB for this child,
+                # independent of the earlier compilation process.
+                memory_kb = usage.ru_maxrss
+        return child.returncode
+
     selector = selectors.DefaultSelector()
     selector.register(child.stdout, selectors.EVENT_READ, 'stdout')
     selector.register(child.stderr, selectors.EVENT_READ, 'stderr')
     output = {'stdout': b'', 'stderr': b''}
     size = 0
     verdict = None
-    while selector.get_map() or child.poll() is None:
+    while selector.get_map() or reap() is None:
         if (time.monotonic() - start) * 1000 >= wall_limit or cpu_ms() - initial_cpu >= cpu_limit:
             verdict = 'TIME_LIMIT_EXCEEDED'
             break
@@ -68,7 +81,7 @@ def run(command, stdin, cpu_limit, memory_mb, wall_limit):
         os.killpg(child.pid, signal.SIGKILL)
     except ProcessLookupError:
         pass
-    child.wait()
+    reap(block=True)
     selector.close()
     stdout = output['stdout'].decode(errors='replace')
     stderr = output['stderr'].decode(errors='replace')
@@ -83,7 +96,8 @@ def run(command, stdin, cpu_limit, memory_mb, wall_limit):
             verdict = 'RUNTIME_ERROR'
     return dict(status=verdict, stdout=stdout, stderr=stderr,
                 exitCode=child.returncode, outputTruncated=size > OUTPUT_BYTES,
-                runtimeMs=round((time.monotonic() - start) * 1000))
+                runtimeMs=round((time.monotonic() - start) * 1000),
+                memoryUsageKb=memory_kb)
 
 
 def main():
@@ -111,4 +125,4 @@ try:
 except Exception:
     # Never expose host/worker traces or turn a supervisor failure into RE.
     print(json.dumps(dict(status='INTERNAL_ERROR', stdout='', stderr='Sandbox worker failed.',
-                         exitCode=None, runtimeMs=0, outputTruncated=False)))
+                         exitCode=None, runtimeMs=0, memoryUsageKb=None, outputTruncated=False)))
