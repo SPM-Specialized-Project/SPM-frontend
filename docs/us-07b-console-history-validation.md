@@ -9,7 +9,8 @@ AC-07b đạt trong môi trường local, với backend thật, Chromium và san
 - `main` chưa có sandbox của US-07.1. Sáu commit phụ thuộc đã được cherry-pick:
   sandbox, cấu hình CI build image, execution queue, API, Run controls và lecturer history.
 - Không mang theo thay đổi runner preflight và các script Debian ngoài phạm vi phụ thuộc.
-- Chưa push, tạo PR hay deploy staging/production.
+- PR nhắm tới `staging`; kết quả bên dưới là kiểm thử local, chưa xác nhận deploy
+  staging/production.
 
 ## Đối chiếu acceptance và business rules
 
@@ -89,6 +90,12 @@ Script chạy browser, dữ liệu fixture và ảnh local ở `output/us-07b/`,
 khỏi Git. Script này dùng Playwright đã cài ở repo `test-E2E` bên cạnh. Kết quả:
 `browser-results.json`, `console-desktop.png`, `history-desktop.png`,
 `truncated-output.png`, `history-mobile.png`.
+
+Ảnh phục vụ review được lưu trong repo:
+
+![Console với stdout/stderr và metrics](images/us-07b/console-desktop.png)
+
+![Execution History và snapshot chỉ đọc](images/us-07b/history-desktop.png)
 
 ## Cách kiểm tra thủ công
 
