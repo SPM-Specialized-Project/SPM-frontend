@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 
+import { ConflictResolutionModal } from './conflict-resolution-modal';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import {
   codePulseApi,
@@ -18,6 +19,17 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [conflictModal, setConflictModal] = useState<{
+    isOpen: boolean;
+    currentRevision: number;
+    serverSourceCode: string;
+    serverUpdatedAt?: string;
+  } | null>(null);
+
   const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
     usePracticeWindow(workspace?.id);
 
@@ -85,23 +97,61 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     setDrafts((current) => ({ ...current, [item.id]: item.sourceCode }));
   };
 
-  const save = async () => {
+  const save = async (forcedRevision?: number) => {
     if (!workspace) return;
     setLoading(true);
     try {
+      const baseRev = forcedRevision !== undefined ? forcedRevision : (workspace.revision ?? 1);
       const result = await codePulseApi.updateWorkspace(
         workspace.id,
         sourceCode,
+        baseRev,
       );
       replaceWorkspace(result.data.item);
-      setMessage('Đã lưu workspace của problem này.');
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : 'Không thể lưu workspace.',
-      );
+      setMessage('Đã lưu mã nguồn thành công.');
+      setConflictModal(null);
+    } catch (error: any) {
+      const errorDetails = error?.response?.data?.details;
+      if (error?.response?.status === 409 && errorDetails?.conflict) {
+        setConflictModal({
+          isOpen: true,
+          currentRevision: errorDetails.currentRevision,
+          serverSourceCode: errorDetails.serverSourceCode,
+          serverUpdatedAt: errorDetails.serverUpdatedAt,
+        });
+        setMessage('⚠️ Phát hiện xung đột phiên bản! Vui lòng chọn cách giải quyết trong hộp thoại.');
+      } else {
+        setMessage(
+          error instanceof Error ? error.message : 'Không thể lưu workspace.',
+        );
+      }
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleKeepServer = () => {
+    if (!conflictModal || !workspace) return;
+    setDrafts((current) => ({
+      ...current,
+      [workspace.id]: conflictModal.serverSourceCode,
+    }));
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            sourceCode: conflictModal.serverSourceCode,
+            revision: conflictModal.currentRevision,
+          }
+        : undefined,
+    );
+    setConflictModal(null);
+    setMessage('Đã đồng bộ mã nguồn theo phiên bản trên máy chủ.');
+  };
+
+  const handleOverwrite = () => {
+    if (!conflictModal) return;
+    void save(conflictModal.currentRevision);
   };
 
   const execute = async () => {
@@ -286,7 +336,20 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       Chưa có kết quả chạy cho problem này.
                     </p>
                   )}
-                </section>
+                
+      {conflictModal && (
+        <ConflictResolutionModal
+          isOpen={conflictModal.isOpen}
+          onClose={() => setConflictModal(null)}
+          localDraft={sourceCode}
+          serverSourceCode={conflictModal.serverSourceCode}
+          serverRevision={conflictModal.currentRevision}
+          serverUpdatedAt={conflictModal.serverUpdatedAt}
+          onKeepServer={handleKeepServer}
+          onOverwriteLocal={handleOverwrite}
+        />
+      )}
+    </section>
 
                 <section>
                   <h6 className="font-semibold text-gray-900">Hints</h6>

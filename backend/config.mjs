@@ -24,3 +24,4 @@ export const STUDENT_SUBMISSIONS_DIRECTORY = path.join(DATA_DIRECTORY, 'codepuls
 export const CODEPULSE_SUBMISSIONS_FILE = path.join(DATA_DIRECTORY, 'codepulse-submissions.json');
 export const CODEPULSE_ACTIVITIES_FILE = path.join(DATA_DIRECTORY, 'codepulse-activities.json');
 export const PRACTICE_WINDOW_AUDIT_FILE = path.join(DATA_DIRECTORY, 'codepulse-practice-window-audit.json');
+export const SNAPSHOTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-snapshots.json');

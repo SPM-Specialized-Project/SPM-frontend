@@ -33,6 +33,30 @@ export type CodePulseWorkspace = {
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
+  revision?: number;
+};
+
+
+export type RevisionConflictDetails = {
+  conflict: boolean;
+  currentRevision: number;
+  serverSourceCode: string;
+  serverUpdatedAt?: string;
+  workspaceId: string;
+};
+
+export type CodePulseSnapshot = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  assignmentId?: string;
+  assignmentVersionId?: string | null;
+  studentEmail: string;
+  sourceCode: string;
+  hash: string;
+  revision: number;
+  trigger: 'SAVE' | 'RUN' | 'SUBMIT' | 'MANUAL';
+  createdAt: string;
 };
 
 export type CodePulseRuntime = 'PYTHON' | 'CPP';
@@ -391,9 +415,18 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
-  updateWorkspace: (id: string, sourceCode: string) => request(() =>
+  updateWorkspace: (id: string, sourceCode: string, baseRevision?: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
+      `/codepulse/workspaces/${encodeURIComponent(id)}`, {
+        sourceCode,
+        ...(typeof baseRevision === 'number' ? { baseRevision } : {}),
+      })),
+  getWorkspaceStatus: (id: string) => request(() =>
+    apiClient.get<{ item: { workspaceId: string; revision: number; updatedAt: string | null; lastSnapshotHash: string | null; snapshotCount: number } }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/status`)),
+  getWorkspaceSnapshots: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseSnapshot[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/snapshots`)),
   executeWorkspace: (id: string, sourceCode: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode })),
