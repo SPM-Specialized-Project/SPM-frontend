@@ -11,6 +11,7 @@ const server = http.createServer((request, response) => {
       code: error?.code ?? 'BACKEND_ERROR',
       message: error?.message ?? 'Backend error.',
       ...(error?.errors ? { errors: error.errors } : {}),
+      ...(error?.currentRevision !== undefined ? { currentRevision: error.currentRevision } : {}),
     });
   });
 });
