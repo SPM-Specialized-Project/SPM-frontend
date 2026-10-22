@@ -59,6 +59,7 @@ const item = {
   classroomId: lab.classroomId,
   ownerEmail: 'student@gmail.com',
   sourceCode: '# Implement the queue here',
+  revision: 0,
   executionResult: null,
   problem: {
     id: assignment.assignmentVersionId,
@@ -82,6 +83,46 @@ describe('student practice access', () => {
       status: 200,
       data: { item, practiceWindow },
     }));
+    vi.mocked(codePulseApi.updateWorkspace).mockImplementation(
+      async (_workspaceId, sourceCode, baseRevision) => ({
+        status: 200,
+        data: {
+          item: {
+            ...item,
+            sourceCode,
+            revision: baseRevision + 1,
+          },
+        },
+      }),
+    );
+  });
+
+  it('autosaves after one second of inactivity using the current revision', async () => {
+    practiceWindow = {
+      ...assignment,
+      practiceAccess: 'OPEN',
+      practiceAccessReason: null,
+    };
+    await mountWorkspace();
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Source code' }), {
+      target: { value: 'print("autosaved queue")' },
+    });
+    expect(screen.getByText('Unsaved changes')).toBeInTheDocument();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(999);
+    });
+    expect(codePulseApi.updateWorkspace).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(codePulseApi.updateWorkspace).toHaveBeenCalledWith(
+      item.id,
+      'print("autosaved queue")',
+      0,
+    );
+    expect(screen.getByText('Saved')).toBeInTheDocument();
   });
 
   afterEach(() => {
