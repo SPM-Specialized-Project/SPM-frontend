@@ -117,6 +117,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
 
   const saved = await request(baseUrl, `/api/codepulse/workspaces/${workspaceId}`, student, 'PATCH', {
     sourceCode: 'print(input())',
+    baseRevision: workspace.data.item.revision,
   });
   assert.equal(saved.status, 200);
 
@@ -313,7 +314,10 @@ test('LIVE LAB with a future practice window reports why it is locked and lectur
   assert.equal(fresh.data.practiceWindow.practiceAccess, 'OPEN');
   assert.equal(fresh.data.practiceWindow.practiceAccessReason, null);
   assert.equal(fresh.data.item.sourceCode, locked.data.item.sourceCode);
-  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', { sourceCode: 'print("queue")' })).status, 200);
+  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', {
+    sourceCode: 'print("queue")',
+    baseRevision: fresh.data.item.revision,
+  })).status, 200);
 
   const closed = await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
     status: 'CLOSED', expectedVersion: opened.data.item.practiceWindowVersion,

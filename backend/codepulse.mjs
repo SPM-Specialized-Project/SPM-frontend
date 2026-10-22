@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
@@ -148,11 +148,28 @@ async function readRecords(file, initial) {
   }
 }
 
-function mutate(file, initial, callback) {
+function mutate(file, initial, callback, { durable = false } = {}) {
   const result = mutationQueue.then(async () => {
     const records = await readRecords(file, initial);
     const value = callback(records);
-    await writeFile(file, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+    const serialized = `${JSON.stringify(records, null, 2)}\n`;
+    if (durable) {
+      const temporaryFile = `${file}.${randomUUID()}.tmp`;
+      try {
+        const handle = await open(temporaryFile, 'wx');
+        try {
+          await handle.writeFile(serialized, 'utf8');
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await rename(temporaryFile, file);
+      } finally {
+        await rm(temporaryFile, { force: true });
+      }
+    } else {
+      await writeFile(file, serialized, 'utf8');
+    }
     return value;
   });
   mutationQueue = result.catch(() => {});
@@ -889,10 +906,20 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     };
   };
   const workspaceView = (workspace, context) => {
-    if (!context.labAssignment) return workspace;
+    const visibleWorkspace = { ...workspace };
+    delete visibleWorkspace.revisions;
+    const revision = Number.isInteger(workspace.revision) ? workspace.revision : 0;
+    if (!context.labAssignment) {
+      return {
+        ...visibleWorkspace,
+        revision,
+        executionResult: workspace.executionResult ?? null,
+      };
+    }
     const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
     return {
-      ...workspace,
+      ...visibleWorkspace,
+      revision,
       executionResult: workspace.executionResult ?? null,
       problem: {
         id: context.labAssignment.id,
@@ -908,6 +935,40 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         })),
       },
     };
+  };
+  const writeWorkspaceRevision = (current, sourceCode, baseRevision, savedAt) => {
+    const currentRevision = Number.isInteger(current.revision) ? current.revision : 0;
+    if (baseRevision !== currentRevision) {
+      const conflict = apiError(
+        409,
+        'REVISION_CONFLICT',
+        `Workspace is at revision ${currentRevision}; reload it before saving again.`,
+      );
+      conflict.currentRevision = currentRevision;
+      throw conflict;
+    }
+    if (current.sourceCode === sourceCode) return current;
+
+    const nextRevision = currentRevision + 1;
+    current.revisions ??= [];
+    current.revisions.push({
+      revision: nextRevision,
+      sourceCode,
+      savedAt,
+    });
+    current.sourceCode = sourceCode;
+    current.revision = nextRevision;
+    current.updatedAt = savedAt;
+    return current;
+  };
+  const requireBaseRevision = (body) => {
+    if (body.baseRevision === undefined) {
+      throw apiError(400, 'BASE_REVISION_REQUIRED', 'baseRevision is required to save workspace code.');
+    }
+    if (!Number.isInteger(body.baseRevision) || body.baseRevision < 0) {
+      throw apiError(400, 'INVALID_BASE_REVISION', 'baseRevision must be a non-negative integer.');
+    }
+    return body.baseRevision;
   };
   const publishedAssignmentVersions = (classroomId) => {
     const storedVersions = assignmentVersions.filter((item) =>
@@ -1549,6 +1610,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         termId: classroomItem.termId,
         ownerEmail: user.email,
         sourceCode: '',
+        revision: 0,
+        revisions: [],
         ...(practiceContext
           ? {
             labId: practiceContext.lab.id,
@@ -1564,7 +1627,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
 
     sendJson(response, 200, {
-      item: workspace,
+      item: workspaceView(workspace, workspaceContext(workspace)),
       ...(practiceContext ? {
         practiceWindow: {
           ...practiceContext.labAssignment,
@@ -1650,8 +1713,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
       throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
     }
-    const version = resolvePublishedAssignmentVersion(assignment, practiceContext.labAssignment.assignmentVersionId);
     const acceptedAt = practiceAccess.acceptedAt;
+    if (workspace && workspace.sourceCode !== sourceCode) {
+      const baseRevision = Number.isInteger(workspace.revision) ? workspace.revision : 0;
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const current = records.find((record) => record.id === workspace.id) ?? notFound();
+        return writeWorkspaceRevision(current, sourceCode, baseRevision, acceptedAt);
+      }, { durable: true });
+    }
+    const version = resolvePublishedAssignmentVersion(assignment, practiceContext.labAssignment.assignmentVersionId);
     const submission = await gradeSubmission({
       assignment,
       version,
@@ -1675,16 +1745,6 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       records.push(submission);
       return submission;
     });
-    if (workspace && workspace.sourceCode !== sourceCode) {
-      await mutate(workspaceFile, initialWorkspaces, (records) => {
-        const stored = records.find((record) => record.id === workspace.id);
-        if (stored) {
-          stored.sourceCode = sourceCode;
-          stored.updatedAt = acceptedAt;
-        }
-        return stored;
-      });
-    }
     await recordActivity({
       type: 'SUBMIT',
       context: practiceContext,
@@ -2023,12 +2083,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (item.status === 'ARCHIVED') throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom đã được lưu trữ và chỉ đọc.');
     const body = await readRequestBody(request);
     if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode phải là chuỗi.');
+    if (body.sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
+    const baseRevision = requireBaseRevision(body);
+    const savedAt = new Date().toISOString();
     const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
-      current.sourceCode = body.sourceCode;
-      current.updatedAt = new Date().toISOString();
-      return current;
-    });
+      return writeWorkspaceRevision(current, body.sourceCode, baseRevision, savedAt);
+    }, { durable: true });
     if (access) {
       await recordActivity({
         type: 'SAVE',
@@ -2054,6 +2117,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const access = assertWorkspaceWritable(workspace, context);
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
+    const baseRevision = requireBaseRevision(body);
     if (!sourceCode.trim()) throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
     const startedAt = Date.now();
     const linkedAssignment = assignments.find((assignment) =>
@@ -2097,11 +2164,11 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
-      current.sourceCode = sourceCode;
+      writeWorkspaceRevision(current, sourceCode, baseRevision, executionResult.executedAt);
       current.executionResult = executionResult;
       current.updatedAt = executionResult.executedAt;
       return current;
-    });
+    }, { durable: true });
     if (access) {
       await recordActivity({
         type: 'RUN',

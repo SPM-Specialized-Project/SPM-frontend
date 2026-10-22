@@ -9,6 +9,10 @@ import {
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'react-toastify';
 
+import {
+  useCodePulseWorkspaceAutosave,
+  type WorkspaceAutosaveStatus,
+} from '@/hooks/use-codepulse-workspace-autosave';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
 import {
@@ -22,6 +26,7 @@ import {
   type CodePulseRunSummary,
   type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
@@ -31,8 +36,21 @@ import { MonacoCodeEditor } from './monaco-code-editor';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
 
-type WorkspaceSaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error';
 type MobileWorkspaceTab = 'problem' | 'code' | 'tests';
+
+const saveStateLabel: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'Saving...',
+  saved: 'Saved',
+  dirty: 'Unsaved changes',
+  offline: 'Offline',
+};
+
+const saveStateClass: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'text-slate-500',
+  saved: 'text-emerald-700',
+  dirty: 'text-amber-700',
+  offline: 'text-rose-700',
+};
 
 const runtimeLabel: Record<CodePulseAssignment['runtime'], string> = {
   PYTHON: 'Python',
@@ -59,11 +77,7 @@ function StudentWorkspaceEditor({
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
-  const [workspace, setWorkspace] = useState<{
-    id: string;
-    sourceCode: string;
-    updatedAt?: string;
-  }>();
+  const [workspace, setWorkspace] = useState<CodePulseWorkspace>();
   const [sourceCode, setSourceCode] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -76,7 +90,16 @@ function StudentWorkspaceEditor({
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [submitError, setSubmitError] = useState<string>();
-  const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
+  const {
+    status: saveState,
+    error: saveError,
+    saveNow,
+  } = useCodePulseWorkspaceAutosave({
+    workspace,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+    onSaved: setWorkspace,
+  });
 
   useEffect(() => {
     let active = true;
@@ -88,7 +111,6 @@ function StudentWorkspaceEditor({
     setSubmission(undefined);
     setRunError(undefined);
     setSubmitError(undefined);
-    setSaveState('loading');
 
     void codePulseApi
       .getStudentLabWorkspace(classroomId, lab.id, labAssignment.id)
@@ -96,7 +118,6 @@ function StudentWorkspaceEditor({
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
-        setSaveState('saved');
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -105,7 +126,6 @@ function StudentWorkspaceEditor({
             ? reason.message
             : 'Không thể tải workspace bài làm.',
         );
-        setSaveState('error');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -119,24 +139,14 @@ function StudentWorkspaceEditor({
   const persistWorkspace = async (showToast = true) => {
     if (!workspace) return false;
     setSaving(true);
-    setSaveState('saving');
     try {
-      const response = await codePulseApi.updateWorkspace(
-        workspace.id,
-        sourceCode,
-      );
-      setWorkspace(response.data.item);
-      setSourceCode(response.data.item.sourceCode);
-      setSaveState('saved');
+      const savedWorkspace = await saveNow();
+      if (!savedWorkspace) {
+        if (showToast) toast.error('Could not save workspace code.');
+        return false;
+      }
       if (showToast) toast.success(`Đã lưu bài làm: ${assignment.title}.`);
       return true;
-    } catch (reason: unknown) {
-      setSaveState('error');
-      if (showToast)
-        toast.error(
-          reason instanceof Error ? reason.message : 'Không thể lưu bài làm.',
-        );
-      return false;
     } finally {
       setSaving(false);
     }
@@ -190,24 +200,6 @@ function StudentWorkspaceEditor({
     }
   };
 
-  const saveStateLabel: Record<WorkspaceSaveState, string> = {
-    loading: 'Đang tải',
-    saved: workspace?.updatedAt
-      ? `Đã lưu ${new Date(workspace.updatedAt).toLocaleTimeString('vi-VN')}`
-      : 'Đã lưu',
-    dirty: 'Chưa lưu thay đổi',
-    saving: 'Đang lưu',
-    error: 'Lưu thất bại',
-  };
-
-  const saveStateClass: Record<WorkspaceSaveState, string> = {
-    loading: 'text-slate-500',
-    saved: 'text-emerald-700',
-    dirty: 'text-amber-700',
-    saving: 'text-slate-500',
-    error: 'text-rose-700',
-  };
-
   const editorLanguage = assignment.runtime === 'CPP' ? 'cpp' : 'python';
   const filename = assignment.runtime === 'CPP' ? 'main.cpp' : 'main.py';
   const unauthorized =
@@ -241,7 +233,7 @@ function StudentWorkspaceEditor({
             className={`text-xs ${saveStateClass[saveState]}`}
             aria-live="polite"
           >
-            {saveStateLabel[saveState]}
+            {loading ? 'Loading...' : saveStateLabel[saveState]}
           </span>
           <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
             {activityContext && `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
@@ -292,6 +284,11 @@ function StudentWorkspaceEditor({
           </button>
         </div>
       </div>
+      {saveError && (
+        <p className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-800" role="alert">
+          {saveError}
+        </p>
+      )}
 
       {loading && (
         <p className="px-4 py-8 text-sm text-slate-500">Đang tải editor...</p>
@@ -332,7 +329,6 @@ function StudentWorkspaceEditor({
               value={sourceCode}
               onChange={(value) => {
                 setSourceCode(value);
-                setSaveState('dirty');
               }}
               height="min(52vh, 520px)"
             />
