@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   codePulseApi,
+  waitForExecution,
   type CodePulseLab,
   type CodePulseLabAssignment,
 } from '@/services/codepulse-api';
@@ -19,7 +20,8 @@ import {
 import { StudentLabWorkspace } from './student-lab-workspace';
 
 vi.mock('@/services/codepulse-api', () => ({
-  codePulseApi: { getWorkspace: vi.fn(), updateWorkspace: vi.fn() },
+  codePulseApi: { getWorkspace: vi.fn(), updateWorkspace: vi.fn(), executeWorkspace: vi.fn() },
+  waitForExecution: vi.fn(),
 }));
 
 const assignment: CodePulseLabAssignment = {
@@ -189,5 +191,27 @@ describe('student practice access', () => {
     expect(
       screen.getByRole('textbox', { name: 'Source code' }),
     ).not.toHaveAttribute('readonly');
+  });
+
+  it('runs the unsaved source snapshot with custom stdin and renders system errors separately', async () => {
+    practiceWindow = { ...assignment, practiceAccess: 'OPEN', practiceAccessReason: null };
+    await mountWorkspace();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Source code' }), { target: { value: 'print(input())' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Run mode' }), { target: { value: 'STDIN' } });
+    fireEvent.change(screen.getByRole('textbox', { name: 'Custom input (stdin)' }), { target: { value: 'hello custom' } });
+    const execution = { id: 'execution-fixture', state: 'FINISHED' as const, status: 'INTERNAL_ERROR' as const,
+      mode: 'STDIN' as const, stdout: 'partial stdout', stderr: 'worker unavailable', exitCode: null,
+      sourceCode: 'print(input())', sourceHash: 'hash', runtime: 'PYTHON' as const, assignmentId: 'queue',
+      assignmentVersionId: 'queue-v1', ownerEmail: item.ownerEmail, runtimeMs: 0,
+      executedAt: '2026-10-21T00:00:00Z', limits: { cpuTimeLimitMs: 1000, memoryLimitMb: 128, wallTimeLimitMs: 2250 } };
+    vi.mocked(codePulseApi.executeWorkspace).mockResolvedValue({ status: 202, data: { item: execution } });
+    vi.mocked(waitForExecution).mockResolvedValue(execution);
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }));
+    await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+    expect(codePulseApi.executeWorkspace).toHaveBeenCalledWith(item.id, 'print(input())', { mode: 'STDIN', stdin: 'hello custom' });
+    expect(screen.getByText('Internal Error · Lỗi hệ thống')).toBeInTheDocument();
+    expect(screen.getByText(/partial stdout/)).toHaveTextContent('worker unavailable');
+    expect(screen.getByRole('textbox', { name: 'Source code' })).toHaveValue('print(input())');
+    expect(codePulseApi.updateWorkspace).not.toHaveBeenCalled();
   });
 });

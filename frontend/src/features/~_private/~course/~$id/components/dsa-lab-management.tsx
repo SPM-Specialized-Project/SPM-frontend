@@ -6,11 +6,12 @@ import {
   PlayIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
+import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseAssignment,
@@ -28,6 +29,7 @@ import { getCurrentViewerContext } from '@/services/viewer-context';
 import { AssignmentEditor } from './assignment-editor';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
+import { SandboxRunControls } from './sandbox-run-controls';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
 
@@ -68,6 +70,11 @@ function StudentWorkspaceEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
+  const [stdin, setStdin] = useState('');
+  const [runState, setRunState] = useState('');
+  const selectedProblem = useRef(labAssignment.id);
+  selectedProblem.current = labAssignment.id;
   const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
   const [submission, setSubmission] = useState<CodePulseLabSubmission>();
@@ -85,6 +92,8 @@ function StudentWorkspaceEditor({
     setWorkspace(undefined);
     setSourceCode('');
     setRunSummary(undefined);
+    setRunning(false);
+    setRunState('');
     setSubmission(undefined);
     setRunError(undefined);
     setSubmitError(undefined);
@@ -144,6 +153,7 @@ function StudentWorkspaceEditor({
 
   const run = async () => {
     if (!workspace) return;
+    const problemId = labAssignment.id;
     setRunning(true);
     setRunError(undefined);
     setRunSummary(undefined);
@@ -153,20 +163,21 @@ function StudentWorkspaceEditor({
         setRunError('Không thể lưu code trước khi chạy.');
         return;
       }
-      const response = await codePulseApi.runAssignment(
-        classroomId,
-        assignment.id,
-        sourceCode,
-        undefined,
-        { labId: lab.id, labAssignmentId: labAssignment.id },
-      );
-      setRunSummary(response.data.item);
+      const response = await codePulseApi.executeWorkspace(workspace.id, sourceCode, { mode: runMode, stdin });
+      const execution = await waitForExecution(response.data.item, (item) => {
+        if (selectedProblem.current === problemId) setRunState(item.state);
+      });
+      if (selectedProblem.current !== problemId) return;
+      setRunSummary({ ...execution, results: execution.results ?? [], passedCount: execution.passedCount ?? 0,
+        totalCount: execution.totalCount ?? 0 });
+      setRunState(execution.status);
     } catch (reason: unknown) {
+      if (selectedProblem.current !== problemId) return;
       setRunError(
         reason instanceof Error ? reason.message : 'Không thể chạy bài làm.',
       );
     } finally {
-      setRunning(false);
+      if (selectedProblem.current === problemId) setRunning(false);
     }
   };
 
@@ -279,7 +290,7 @@ function StudentWorkspaceEditor({
             ) : (
               <PlayIcon className="size-4" aria-hidden="true" />
             )}
-            {running ? 'Đang chạy' : 'Run'}
+            {running ? runState === 'QUEUED' ? 'Đang chờ' : 'Đang chạy' : 'Run'}
           </button>
           <button
             type="button"
@@ -293,6 +304,8 @@ function StudentWorkspaceEditor({
         </div>
       </div>
 
+      <SandboxRunControls mode={runMode} stdin={stdin} disabled={running || !practiceOpen}
+        onMode={setRunMode} onStdin={setStdin} />
       {loading && (
         <p className="px-4 py-8 text-sm text-slate-500">Đang tải editor...</p>
       )}
@@ -390,6 +403,11 @@ const runStatusMeta: Record<
   CodePulseRunResult['status'],
   { label: string; className: string }
 > = {
+  SUCCESS: { label: 'Success', className: 'text-emerald-700' },
+  TIME_LIMIT_EXCEEDED: { label: 'Time Limit Exceeded (TLE)', className: 'text-orange-700' },
+  MEMORY_LIMIT_EXCEEDED: { label: 'Memory Limit Exceeded (MLE)', className: 'text-orange-700' },
+  OUTPUT_LIMIT_EXCEEDED: { label: 'Output truncated', className: 'text-orange-700' },
+  INTERNAL_ERROR: { label: 'Internal Error · Lỗi hệ thống', className: 'text-slate-700' },
   PASSED: { label: 'Passed', className: 'text-emerald-700' },
   WRONG_ANSWER: { label: 'Wrong answer', className: 'text-amber-700' },
   RUNTIME_ERROR: { label: 'Runtime error', className: 'text-rose-700' },
@@ -422,7 +440,7 @@ function TestResultsPanel({
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Tests</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Public test cases for this problem.
+            {summary?.mode === 'STDIN' ? 'Custom input · Không chấm điểm' : 'Public test cases for this problem.'}
           </p>
         </div>
         {summary && (
@@ -430,8 +448,7 @@ function TestResultsPanel({
             <span
               className={`font-semibold ${allPassed ? 'text-emerald-700' : 'text-rose-700'}`}
             >
-              {allPassed ? 'Passed' : 'Failed'} · {summary.passedCount}/
-              {summary.totalCount}
+              {summary.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : summary.mode === 'STDIN' ? summary.status : `${allPassed ? 'Passed' : 'Failed'} · ${summary.passedCount}/${summary.totalCount}`}
             </span>
             <span className="ml-2">{totalDuration} ms</span>
           </div>
@@ -475,8 +492,7 @@ function TestResultsPanel({
             <tbody>
               {summary.results.map((result, index) => {
                 const meta = runStatusMeta[result.status];
-                const renderedOutput =
-                  result.actualOutput || result.stderr || '—';
+                const renderedOutput = [result.actualOutput, result.stderr].filter(Boolean).join('\n') || '—';
                 return (
                   <tr
                     key={result.testCaseId}

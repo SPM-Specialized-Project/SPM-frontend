@@ -1,8 +1,9 @@
 # Deploy staging and Gitea through GitHub Actions
 
-Run `.github/workflows/staging-deploy.yml` manually on `staging`, or let the
-staging-to-main PR E2E gate call it. Pushes and merges into `staging` do not
-start a standalone deployment check.
+Run **Actions → Staging E2E Gate → Run workflow** on `staging`, or open a
+staging-to-main PR. The existing `Promotion source` job checks runner availability
+before calling `.github/workflows/staging-deploy.yml`. No extra job is added.
+Pushes and merges into `staging` do not start a standalone deployment check.
 Actions configures the Debian runner, initializes Gitea, deploys the app and
 publishes the Quick Tunnel URL. No SSH session, installation form or manual
 token creation is needed for this flow.
@@ -15,6 +16,7 @@ Go to **Settings → Secrets and variables → Actions → Secrets** and add:
 | --- | --- |
 | `GITEA_ADMIN_PASSWORD` | A strong new Gitea admin password, at least 12 characters |
 | `RUNNER_SUDO_PASSWORD` | Linux password of the runner account, currently `hutieunamvang` |
+| `RUNNER_STATUS_TOKEN` | Fine-grained PAT with **Administration: Read** on this repository, used only to inspect self-hosted runners |
 
 These are different credentials. The Gitea password is used to create the
 initial administrator; an existing administrator keeps its password. The
@@ -56,16 +58,35 @@ have root sudo permission. Docker Engine, Compose and `cloudflared` are host
 prerequisites already present on the current runner. Actions installs missing
 Nginx, rsync and curl packages and refreshes the application services.
 
+The availability check requires an exact label match for all four labels and
+`status=online`, `busy=false`. Busy/offline runners, a missing token, an API error,
+or no matching runner stop the workflow before the deployment job is scheduled;
+there is no wait/retry loop for availability. The default `GITHUB_TOKEN` does not
+provide the repository Administration permission this endpoint requires.
+See [GitHub's runner API permission requirements](https://docs.github.com/en/rest/actions/self-hosted-runners#list-self-hosted-runners-for-a-repository).
+
+The check reads a point-in-time status; it does not reserve the runner. Another
+workflow can claim an idle runner after the check and before GitHub schedules
+deployment. The existing deployment concurrency group still applies.
+
 ## Run and check
 
-1. Add the two secrets before merging and wait for both PR quality jobs.
-2. Merge into `staging`; open **Actions → Staging Deploy → Run workflow**,
+1. Add the three secrets before merging and wait for both PR quality jobs.
+2. Merge into `staging`; open **Actions → Staging E2E Gate → Run workflow**,
    select `staging` and start the workflow.
-3. The first validation checks credentials and sudo before the frontend build.
+3. `Promotion source` validates the staging branch and checks for an idle
+   `local-deploy` runner. Failure stops before build or deployment. A manual run
+   deploys only; remote E2E remains limited to staging-to-main PRs.
 4. Wait for Gitea setup, deployment and all verification steps to succeed.
 5. Open the run **Summary** for the app, `/api/health` and `/git/` URLs.
 6. Sign into `<public-url>/git/` as `spm-admin` with `GITEA_ADMIN_PASSWORD`.
    Verify lecturer publication and a student LAB submission in the app.
+
+GitHub only exposes manual dispatch after `workflow_dispatch` is present in the
+gate workflow on the repository's default branch. The first rollout therefore
+needs this workflow update on the default branch before the new manual button
+is available; the staging-to-main PR path still performs its own availability
+check. See [manual workflow requirements](https://docs.github.com/en/actions/how-tos/manage-workflow-runs/manually-run-a-workflow).
 
 If credentials were missing or incorrect, fix them in GitHub and select
 **Re-run failed jobs** on the staging run.

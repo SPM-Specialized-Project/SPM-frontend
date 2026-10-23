@@ -155,9 +155,17 @@ test('SCRUM-65: create a LAB with ordered pinned problems and isolated workspace
   assert.equal((await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}`, student)).data.item.sourceCode, 'first problem solution');
   assert.match((await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(second.workspaceId)}`, student)).data.item.sourceCode, /singly linked list/);
 
-  const executed = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}/execute`, student, 'POST', { sourceCode: 'print("first")' });
-  assert.equal(executed.status, 200);
-  assert.equal(executed.data.item.executionResult.status, 'COMPLETED');
+  const finish = async (id) => {
+    for (let poll = 0; poll < 200; poll++) {
+      const item = (await request(baseUrl, `/api/codepulse/executions/${id}`, student)).data.item;
+      if (item.state === 'FINISHED') return item;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.fail('Execution timed out');
+  };
+  const executed = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}/execute`, student, 'POST', { sourceCode: 'print("first")', mode: 'STDIN' });
+  assert.equal(executed.status, 202);
+  assert.equal((await finish(executed.data.item.id)).status, 'SUCCESS');
   assert.equal((await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(second.workspaceId)}`, student)).data.item.executionResult, null);
 
   const firstHintId = firstWorkspace.data.item.problem.hints[0].id;
@@ -172,16 +180,16 @@ test('SCRUM-65: create a LAB with ordered pinned problems and isolated workspace
   const endedStudentLabs = await request(baseUrl, labsRoute, student);
   assert.equal(endedStudentLabs.data.items.find((item) => item.id === labId).status, 'ENDED');
   const preserved = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}`, student);
-  assert.equal(preserved.data.item.sourceCode, 'print("first")');
-  assert.equal(preserved.data.item.executionResult.status, 'COMPLETED');
+  assert.equal(preserved.data.item.sourceCode, 'first problem solution');
+  assert.equal(preserved.data.item.executionResult.status, 'SUCCESS');
   assert.equal(preserved.data.item.problem.hints[0].revealed, true);
   const homeworkSave = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}`, student, 'PATCH', { sourceCode: 'homework solution after LAB' });
   assert.equal(homeworkSave.status, 200);
-  const homeworkRun = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}/execute`, student, 'POST', { sourceCode: 'print("homework")' });
-  assert.equal(homeworkRun.status, 200);
-  assert.equal(homeworkRun.data.item.executionResult.status, 'COMPLETED');
+  const homeworkRun = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}/execute`, student, 'POST', { sourceCode: 'print("homework")', mode: 'STDIN' });
+  assert.equal(homeworkRun.status, 202);
+  assert.equal((await finish(homeworkRun.data.item.id)).status, 'SUCCESS');
   const homeworkHint = await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}/hints/${firstHintId}`, student, 'POST');
   assert.equal(homeworkHint.status, 200);
-  assert.equal((await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}`, student)).data.item.sourceCode, 'print("homework")');
+  assert.equal((await request(baseUrl, `/api/codepulse/workspaces/${encodeURIComponent(first.workspaceId)}`, student)).data.item.sourceCode, 'homework solution after LAB');
   assert.equal((await request(baseUrl, `${labsRoute}/${labId}`, lecturer, 'PATCH', { status: 'LIVE', expectedStateVersion: ended.data.item.stateVersion })).status, 409);
 });
