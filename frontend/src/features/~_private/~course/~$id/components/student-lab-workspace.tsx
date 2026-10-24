@@ -111,8 +111,9 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
       setMessage('Đã lưu mã nguồn thành công.');
       setConflictModal(null);
     } catch (error: any) {
-      const errorDetails = error?.response?.data?.details;
-      if (error?.response?.status === 409 && errorDetails?.conflict) {
+      const errorDetails = error?.details ?? error?.response?.data?.details;
+      const status = error?.status ?? error?.response?.status;
+      if (status === 409 && errorDetails?.conflict) {
         setConflictModal({
           isOpen: true,
           currentRevision: errorDetails.currentRevision,
@@ -293,23 +294,52 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   spellCheck={false}
                 />
               </label>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={loading || !practiceOpen}
-                  onClick={() => void save()}
-                  className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 disabled:opacity-40"
-                >
-                  Lưu code
-                </button>
-                <button
-                  type="button"
-                  disabled={loading || !practiceOpen}
-                  onClick={() => void execute()}
-                  className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
-                >
-                  Run
-                </button>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={loading || !practiceOpen}
+                    onClick={() => void save()}
+                    className="rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 shadow-sm"
+                  >
+                    Lưu code
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading || !practiceOpen}
+                    onClick={() => void execute()}
+                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-300 shadow-sm"
+                  >
+                    Run
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold shadow-sm ${
+                      !isOnline
+                        ? 'border border-rose-300 bg-rose-50 text-rose-800'
+                        : isReconnecting
+                        ? 'border border-amber-300 bg-amber-50 text-amber-800 animate-pulse'
+                        : 'border border-emerald-300 bg-emerald-50 text-emerald-800'
+                    }`}
+                  >
+                    <span
+                      className={`h-2.5 w-2.5 rounded-full ${
+                        !isOnline
+                          ? 'bg-rose-500'
+                          : isReconnecting
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                    />
+                    {!isOnline
+                      ? '○ Offline (Đang đệm vào bộ nhớ)'
+                      : isReconnecting
+                      ? '◌ Đang kết nối lại...'
+                      : `● Trực tuyến • Bản lưu #${workspace?.revision ?? 1}`}
+                  </span>
+                </div>
               </div>
 
               <div className="mt-6 grid gap-5 xl:grid-cols-2">
@@ -336,20 +366,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       Chưa có kết quả chạy cho problem này.
                     </p>
                   )}
-                
-      {conflictModal && (
-        <ConflictResolutionModal
-          isOpen={conflictModal.isOpen}
-          onClose={() => setConflictModal(null)}
-          localDraft={sourceCode}
-          serverSourceCode={conflictModal.serverSourceCode}
-          serverRevision={conflictModal.currentRevision}
-          serverUpdatedAt={conflictModal.serverUpdatedAt}
-          onKeepServer={handleKeepServer}
-          onOverwriteLocal={handleOverwrite}
-        />
-      )}
-    </section>
+                </section>
 
                 <section>
                   <h6 className="font-semibold text-gray-900">Hints</h6>
@@ -391,6 +408,19 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
           ) : null}
         </div>
       </div>
+
+      {conflictModal && (
+        <ConflictResolutionModal
+          isOpen={conflictModal.isOpen}
+          onClose={() => setConflictModal(null)}
+          localDraft={sourceCode}
+          serverSourceCode={conflictModal.serverSourceCode}
+          serverRevision={conflictModal.currentRevision}
+          serverUpdatedAt={conflictModal.serverUpdatedAt}
+          onKeepServer={handleKeepServer}
+          onOverwriteLocal={handleOverwrite}
+        />
+      )}
     </section>
   );
 }
