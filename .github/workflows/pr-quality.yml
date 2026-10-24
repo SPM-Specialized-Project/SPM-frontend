@@ -60,6 +60,9 @@ jobs:
         with:
           node-version: 22
 
+      - name: Build isolated code runner
+        run: docker build -t codepulse-sandbox:1 deploy/sandbox
+
       - name: Test Node.js backend
         run: npm run backend:test
 

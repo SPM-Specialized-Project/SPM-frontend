@@ -100,7 +100,17 @@ Nếu `SPM-frontend` public thì `SPM_CHECKOUT_TOKEN` có thể không cần; wo
 mở lại hoặc chuyển PR vào `main` sang trạng thái ready for review.
 Chỉ PR `staging -> main` trong cùng repository được deploy staging rồi chạy E2E.
 Push vào `staging` không tạo lượt chạy **Staging Deploy** riêng. Có thể deploy
-thủ công bằng **Actions → Staging Deploy → Run workflow** trên nhánh `staging`.
+thủ công bằng **Actions → Staging E2E Gate → Run workflow** trên nhánh `staging`;
+lượt thủ công chỉ deploy, không dispatch E2E.
+
+Job `Promotion source` có sẵn sẽ kiểm tra runner deploy trước khi cho phép
+`deploy-staging` được schedule. Runner cần đủ label `self-hosted`, `linux`, `x64`,
+`local-deploy`, `status=online` và `busy=false`; nếu không thì dừng ngay, không poll
+chờ idle. Không thêm job riêng. Cần secret `RUNNER_STATUS_TOKEN` có quyền repository
+**Administration: Read** trên `SPM-frontend`; token E2E hiện tại vẫn dùng cho E2E.
+API check chỉ xác nhận trạng thái tại thời điểm kiểm tra, không giữ chỗ runner.
+`staging-deploy.yml` chỉ nhận `workflow_call` với `runner_ready=true` từ bước kiểm tra
+này, không có nút chạy thủ công để bỏ qua preflight.
 
 Workflow gửi payload chứa:
 

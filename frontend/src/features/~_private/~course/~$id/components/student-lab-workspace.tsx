@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { ConflictResolutionModal } from './conflict-resolution-modal';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
+import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseLab,
   type CodePulseLabAssignment,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
+
+import { SandboxRunControls } from './sandbox-run-controls';
 
 type StudentLabWorkspaceProps = {
   labs: CodePulseLab[];
@@ -29,7 +32,10 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     serverSourceCode: string;
     serverUpdatedAt?: string;
   } | null>(null);
-
+  const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
+  const [stdin, setStdin] = useState('');
+  const selectedRef = useRef(selectedWorkspaceId);
+  selectedRef.current = selectedWorkspaceId;
   const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
     usePracticeWindow(workspace?.id);
 
@@ -159,11 +165,13 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     if (!workspace) return;
     setLoading(true);
     try {
-      const result = await codePulseApi.executeWorkspace(
-        workspace.id,
-        sourceCode,
-      );
-      replaceWorkspace(result.data.item);
+      const workspaceId = workspace.id;
+      const result = await codePulseApi.executeWorkspace(workspaceId, sourceCode, { mode: runMode, stdin });
+      const execution = await waitForExecution(result.data.item, (progress) => {
+        if (selectedRef.current === workspaceId) setMessage(progress.state === 'QUEUED' ? 'Đang chờ worker...' : 'Đang chạy...');
+      });
+      if (selectedRef.current !== workspaceId) return;
+      setWorkspace((current) => current ? { ...current, executionResult: execution } : current);
       setMessage('Đã lưu execution result riêng cho problem này.');
     } catch (error) {
       setMessage(
@@ -294,6 +302,8 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   spellCheck={false}
                 />
               </label>
+              <SandboxRunControls mode={runMode} stdin={stdin} disabled={loading || !practiceOpen}
+                onMode={setRunMode} onStdin={setStdin} />
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
                 <div className="flex flex-wrap gap-2">
                   <button
@@ -350,15 +360,15 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   {workspace.executionResult ? (
                     <div className="mt-2 rounded-lg bg-slate-950 p-4 font-mono text-xs text-slate-100">
                       <div className="mb-2 flex justify-between text-slate-400">
-                        <span>{workspace.executionResult.status}</span>
+                        <span>{workspace.executionResult.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : workspace.executionResult.status}</span>
                         <span>
                           {workspace.executionResult.runtimeMs} ms · exit{' '}
                           {workspace.executionResult.exitCode}
                         </span>
                       </div>
+                      <p className="mb-2 text-slate-400">{workspace.executionResult.limits?.cpuTimeLimitMs} ms CPU · {workspace.executionResult.limits?.memoryLimitMb} MB</p>
                       <pre className="whitespace-pre-wrap text-emerald-300">
-                        {workspace.executionResult.stdout ||
-                          workspace.executionResult.stderr}
+                        {[workspace.executionResult.stdout, workspace.executionResult.stderr].filter(Boolean).join('\n')}
                       </pre>
                     </div>
                   ) : (
