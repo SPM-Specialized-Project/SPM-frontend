@@ -184,7 +184,7 @@ function RouteComponent() {
           </div>
         </div>
         <h3 className="mx-auto w-full text-center text-xs font-semibold leading-6 text-secondary md:w-full md:text-[16px] lg:max-w-96 2xl:text-[20px]">
-          Tutor Support System
+          Code Pulse
           <br />
           Nền tảng học tập, hỗ trợ học sinh mạnh mẽ
         </h3> */}

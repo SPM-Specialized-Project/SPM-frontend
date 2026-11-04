@@ -9,7 +9,7 @@ import { useDataStore } from '@/services/use-data-store'
 
 export const Route = createFileRoute('/_private/schedule/history/')({
   beforeLoad: async () => {
-    document.title = 'Lịch sử buổi học -  Tutor Support System';
+    document.title = 'Lịch sử buổi học - Code Pulse';
   },
   component: RouteComponent,
 })

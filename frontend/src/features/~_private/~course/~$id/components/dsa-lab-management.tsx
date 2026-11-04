@@ -6,25 +6,34 @@ import {
   PlayIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
+import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
+import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseAssignment,
   type CodePulseClassroom,
+  type CodePulseExecutionResult,
+  type CodePulseLab,
+  type CodePulseLabSubmission,
+  type CodePulseLabAssignment,
   type CodePulseRunResult,
   type CodePulseRunSummary,
   type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseWorkspaceSubmission,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
+import { ExecutionPanel } from './execution-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
+import { SandboxRunControls } from './sandbox-run-controls';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
 
@@ -45,10 +54,14 @@ const problemNumber = (index: number) =>
 
 function StudentWorkspaceEditor({
   classroomId,
+  lab,
+  labAssignment,
   assignment,
   mobileTab,
 }: {
   classroomId: string;
+  lab: CodePulseLab;
+  labAssignment: CodePulseLabAssignment;
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
@@ -57,13 +70,24 @@ function StudentWorkspaceEditor({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
+  const [stdin, setStdin] = useState('');
+  const [runState, setRunState] = useState('');
+  const selectedProblem = useRef(labAssignment.id);
+  selectedProblem.current = labAssignment.id;
+  const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
+  const [execution, setExecution] = useState<CodePulseExecutionResult>();
+  const [submission, setSubmission] = useState<CodePulseLabSubmission>();
+  const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
+    usePracticeWindow(workspace?.id);
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
+  const [submitError, setSubmitError] = useState<string>();
   const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
   const [confirmingSubmission, setConfirmingSubmission] = useState(false);
-  const [submitting, setSubmitting] = useState(false);
-  const [submission, setSubmission] = useState<CodePulseSubmission>();
+  const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
+  const [workspaceSubmission, setWorkspaceSubmission] = useState<CodePulseWorkspaceSubmission>();
   const [submissionError, setSubmissionError] = useState<string>();
   const [pendingRequest, setPendingRequest] = useState<{
     sourceCode: string;
@@ -77,15 +101,21 @@ function StudentWorkspaceEditor({
     setWorkspace(undefined);
     setSourceCode('');
     setRunSummary(undefined);
+    setExecution(undefined);
+    setRunning(false);
+    setRunState('');
+    setSubmission(undefined);
     setRunError(undefined);
+    setSubmitError(undefined);
     setSaveState('loading');
     setConfirmingSubmission(false);
-    setSubmission(undefined);
+    setWorkspaceSubmission(undefined);
     setSubmissionError(undefined);
     setPendingRequest(undefined);
+    setSnapshotSubmitting(false);
 
     void codePulseApi
-      .getStudentWorkspace(classroomId, assignment.id)
+      .getStudentLabWorkspace(classroomId, lab.id, labAssignment.id)
       .then((response) => {
         if (!active) return;
         setWorkspace(response.data.item);
@@ -95,7 +125,7 @@ function StudentWorkspaceEditor({
           void codePulseApi
             .listWorkspaceSubmissions(response.data.item.id)
             .then((history) => {
-              if (active) setSubmission(history.data.items.at(-1));
+              if (active) setWorkspaceSubmission(history.data.items.at(-1));
             })
             .catch(() => {});
         }
@@ -116,7 +146,7 @@ function StudentWorkspaceEditor({
     return () => {
       active = false;
     };
-  }, [assignment.id, classroomId]);
+  }, [assignment.id, classroomId, lab.id, labAssignment.id]);
 
   const persistWorkspace = async (showToast = true) => {
     if (!workspace) return false;
@@ -146,6 +176,7 @@ function StudentWorkspaceEditor({
 
   const run = async () => {
     if (!workspace) return;
+    const problemId = labAssignment.id;
     setRunning(true);
     setRunError(undefined);
     setRunSummary(undefined);
@@ -155,18 +186,43 @@ function StudentWorkspaceEditor({
         setRunError('Không thể lưu code trước khi chạy.');
         return;
       }
-      const response = await codePulseApi.runAssignment(
-        classroomId,
-        assignment.id,
-        sourceCode,
-      );
-      setRunSummary(response.data.item);
+      const response = await codePulseApi.executeWorkspace(workspace.id, sourceCode, { mode: runMode, stdin });
+      if (selectedProblem.current === problemId) setExecution(response.data.item);
+      const execution = await waitForExecution(response.data.item, (item) => {
+        if (selectedProblem.current === problemId) setRunState(item.state);
+      });
+      if (selectedProblem.current !== problemId) return;
+      setExecution(execution);
+      setRunSummary({ ...execution, results: execution.results ?? [], passedCount: execution.passedCount ?? 0,
+        totalCount: execution.totalCount ?? 0 });
+      setRunState(execution.status);
     } catch (reason: unknown) {
+      if (selectedProblem.current !== problemId) return;
       setRunError(
         reason instanceof Error ? reason.message : 'Không thể chạy bài làm.',
       );
     } finally {
-      setRunning(false);
+      if (selectedProblem.current === problemId) setRunning(false);
+    }
+  };
+
+  const submit = async () => {
+    if (!workspace || !sourceCode.trim() || !practiceOpen) return;
+    setSubmitting(true);
+    setSubmitError(undefined);
+    try {
+      const saved = await persistWorkspace(false);
+      if (!saved) {
+        setSubmitError('Could not save code before submission.');
+        return;
+      }
+      const response = await codePulseApi.submitLabAssignment(classroomId, lab.id, labAssignment.id, sourceCode);
+      setSubmission(response.data.item);
+      toast.success(`Submitted against version ${response.data.item.version}.`);
+    } catch (reason: unknown) {
+      setSubmitError(reason instanceof Error ? reason.message : 'Could not submit this solution.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -174,14 +230,13 @@ function StudentWorkspaceEditor({
     globalThis.crypto?.randomUUID?.() ??
     `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const submit = async () => {
-    if (!workspace?.problem || submitting) return;
-    const logicalRequest =
-      pendingRequest?.sourceCode === sourceCode
-        ? pendingRequest
-        : { sourceCode, requestKey: createRequestKey() };
+  const submitImmutableSnapshot = async () => {
+    if (!workspace?.problem || !sourceCode.trim() || !practiceOpen || snapshotSubmitting) return;
+    const logicalRequest = pendingRequest?.sourceCode === sourceCode
+      ? pendingRequest
+      : { sourceCode, requestKey: createRequestKey() };
     setPendingRequest(logicalRequest);
-    setSubmitting(true);
+    setSnapshotSubmitting(true);
     setSubmissionError(undefined);
     try {
       const response = await codePulseApi.submitWorkspace(workspace.id, {
@@ -189,20 +244,18 @@ function StudentWorkspaceEditor({
         requestKey: logicalRequest.requestKey,
         assignmentVersionId: workspace.problem.assignmentVersionId,
       });
-      setSubmission(response.data.item);
+      setWorkspaceSubmission(response.data.item);
       setPendingRequest(undefined);
       setConfirmingSubmission(false);
       toast.success(
         response.data.created
-          ? `Đã tiếp nhận bài nộp: ${assignment.title}.`
-          : `Đã khôi phục bài nộp: ${assignment.title}.`,
+          ? `Đã tiếp nhận snapshot bài nộp: ${assignment.title}.`
+          : `Đã khôi phục snapshot bài nộp: ${assignment.title}.`,
       );
     } catch (reason: unknown) {
-      setSubmissionError(
-        reason instanceof Error ? reason.message : 'Không thể nộp bài.',
-      );
+      setSubmissionError(reason instanceof Error ? reason.message : 'Không thể nộp snapshot bài làm.');
     } finally {
-      setSubmitting(false);
+      setSnapshotSubmitting(false);
     }
   };
 
@@ -232,7 +285,7 @@ function StudentWorkspaceEditor({
     error?.toLowerCase().includes('unauthorized');
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+    <section aria-label="Student code workspace" className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="truncate font-mono text-sm font-medium text-slate-900">
@@ -259,6 +312,10 @@ function StudentWorkspaceEditor({
           >
             {saveStateLabel[saveState]}
           </span>
+          <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
+            {activityContext && `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
+            {practiceStatus}
+          </span>
           <button
             type="button"
             onClick={() => void persistWorkspace()}
@@ -267,7 +324,8 @@ function StudentWorkspaceEditor({
               running ||
               loading ||
               !workspace ||
-              saveState === 'saved'
+              saveState === 'saved' ||
+              !practiceOpen
             }
             className="inline-flex h-8 items-center gap-1.5 rounded border border-slate-300 px-3 text-xs font-semibold text-slate-700 transition hover:border-slate-500 hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-teal-600/30 disabled:cursor-not-allowed disabled:opacity-50"
           >
@@ -278,7 +336,7 @@ function StudentWorkspaceEditor({
             type="button"
             onClick={() => void run()}
             disabled={
-              saving || running || loading || !workspace || !sourceCode.trim()
+              saving || running || submitting || loading || !workspace || !sourceCode.trim() || !practiceOpen
             }
             className="inline-flex h-8 items-center gap-1.5 rounded bg-teal-700 px-3 text-xs font-semibold text-white transition hover:bg-teal-800 focus:outline-none focus:ring-2 focus:ring-teal-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
@@ -290,7 +348,16 @@ function StudentWorkspaceEditor({
             ) : (
               <PlayIcon className="size-4" aria-hidden="true" />
             )}
-            {running ? 'Đang chạy' : 'Run'}
+            {running ? runState === 'QUEUED' ? 'Đang chờ' : 'Đang chạy' : 'Run'}
+          </button>
+          <button
+            type="button"
+            onClick={() => void submit()}
+            disabled={saving || running || submitting || loading || !workspace || !sourceCode.trim() || !practiceOpen}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {submitting ? <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" /> : <CloudArrowUpIcon className="size-4" aria-hidden="true" />}
+            {submitting ? 'Đang chấm' : 'Submit & grade'}
           </button>
           <button
             type="button"
@@ -299,27 +366,28 @@ function StudentWorkspaceEditor({
               setConfirmingSubmission(true);
             }}
             disabled={
-              saving || running || submitting || loading || !workspace?.problem || !sourceCode.trim()
+              saving || running || snapshotSubmitting || loading || !workspace?.problem || !sourceCode.trim() || !practiceOpen
             }
             title={workspace?.problem ? undefined : 'Official Submit is available for an active LAB problem.'}
             className="inline-flex h-8 items-center gap-1.5 rounded bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
-            {submitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
-            Submit
+            {snapshotSubmitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+            Official submit
           </button>
         </div>
       </div>
 
-      {submission && (
+      <SandboxRunControls mode={runMode} stdin={stdin} disabled={running || !practiceOpen}
+        onMode={setRunMode} onStdin={setStdin} />
+      {workspaceSubmission && (
         <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600" aria-live="polite">
-          Submission <span className="font-mono">{submission.id}</span>{' '}
+          Immutable submission <span className="font-mono">{workspaceSubmission.id}</span>{' '}
           <span className="font-semibold text-teal-700">
-            {submission.status === 'PENDING' ? 'Pending' : 'Judging'}
+            {workspaceSubmission.status === 'PENDING' ? 'Pending' : 'Judging'}
           </span>
-          {' '}· accepted {new Date(submission.acceptedAt).toLocaleString('vi-VN')}
+          {' '}· accepted {new Date(workspaceSubmission.acceptedAt).toLocaleString('vi-VN')}
         </div>
       )}
-
       {loading && (
         <p className="px-4 py-8 text-sm text-slate-500">Đang tải editor...</p>
       )}
@@ -344,11 +412,17 @@ function StudentWorkspaceEditor({
       )}
       {!loading && !error && workspace && (
         <>
+          {!practiceOpen && (
+            <p className="mx-4 mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+              {practiceMessage} Workspace hiện ở chế độ chỉ đọc.
+            </p>
+          )}
           <div
             className={`${mobileTab === 'code' ? 'block' : 'hidden'} p-3 lg:block`}
           >
             <MonacoCodeEditor
               label="Code"
+              readOnly={!practiceOpen}
               language={editorLanguage}
               value={sourceCode}
               onChange={(value) => {
@@ -361,11 +435,13 @@ function StudentWorkspaceEditor({
           <div
             className={`${mobileTab === 'tests' ? 'block' : 'hidden'} border-t border-slate-200 lg:block`}
           >
+            <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={execution ?? workspace.executionResult} />
             <TestResultsPanel
               summary={runSummary}
               running={running}
               error={runError}
             />
+            <SubmissionReceipt submission={submission} error={submitError} />
           </div>
         </>
       )}
@@ -404,19 +480,19 @@ function StudentWorkspaceEditor({
               <button
                 type="button"
                 onClick={() => setConfirmingSubmission(false)}
-                disabled={submitting}
+                disabled={snapshotSubmitting}
                 className="rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
               >
                 Hủy
               </button>
               <button
                 type="button"
-                onClick={() => void submit()}
-                disabled={submitting}
+                onClick={() => void submitImmutableSnapshot()}
+                disabled={snapshotSubmitting}
                 className="inline-flex items-center gap-2 rounded bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
               >
-                {submitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
-                {submitting ? 'Đang nộp' : 'Nộp bài'}
+                {snapshotSubmitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+                {snapshotSubmitting ? 'Đang nộp' : 'Nộp snapshot'}
               </button>
             </div>
           </div>
@@ -426,10 +502,43 @@ function StudentWorkspaceEditor({
   );
 }
 
+function SubmissionReceipt({ submission, error }: { submission?: CodePulseSubmission; error?: string }) {
+  if (!submission && !error) return null;
+  return (
+    <div className="border-t border-slate-200 px-4 py-3 text-sm" aria-live="polite">
+      {error && <p className="text-rose-700">{error}</p>}
+      {submission && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="font-semibold text-slate-900">
+            Version {submission.version} · Score {submission.score}% · {submission.passedCount}/{submission.totalCount} passed
+          </p>
+          <p className="font-mono text-xs text-slate-500" title={submission.commitSha ?? 'Submission stored locally'}>
+            {submission.commitSha ? `commit ${submission.commitSha.slice(0, 7)}` : 'local submission'}
+          </p>
+        </div>
+      )}
+      {submission && (
+        <ul className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
+          {submission.results.map((result, index) => (
+            <li key={result.testCaseId}>
+              Test {index + 1}: <span className={result.passed ? 'font-semibold text-emerald-700' : 'font-semibold text-rose-700'}>{result.status}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 const runStatusMeta: Record<
   CodePulseRunResult['status'],
   { label: string; className: string }
 > = {
+  SUCCESS: { label: 'Success', className: 'text-emerald-700' },
+  TIME_LIMIT_EXCEEDED: { label: 'Time Limit Exceeded (TLE)', className: 'text-orange-700' },
+  MEMORY_LIMIT_EXCEEDED: { label: 'Memory Limit Exceeded (MLE)', className: 'text-orange-700' },
+  OUTPUT_LIMIT_EXCEEDED: { label: 'Output truncated', className: 'text-orange-700' },
+  INTERNAL_ERROR: { label: 'Internal Error · Lỗi hệ thống', className: 'text-slate-700' },
   PASSED: { label: 'Passed', className: 'text-emerald-700' },
   WRONG_ANSWER: { label: 'Wrong answer', className: 'text-amber-700' },
   RUNTIME_ERROR: { label: 'Runtime error', className: 'text-rose-700' },
@@ -462,7 +571,7 @@ function TestResultsPanel({
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Tests</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Public test cases for this problem.
+            {summary?.mode === 'STDIN' ? 'Custom input · Không chấm điểm' : 'Public test cases for this problem.'}
           </p>
         </div>
         {summary && (
@@ -470,8 +579,7 @@ function TestResultsPanel({
             <span
               className={`font-semibold ${allPassed ? 'text-emerald-700' : 'text-rose-700'}`}
             >
-              {allPassed ? 'Passed' : 'Failed'} · {summary.passedCount}/
-              {summary.totalCount}
+              {summary.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : summary.mode === 'STDIN' ? summary.status : `${allPassed ? 'Passed' : 'Failed'} · ${summary.passedCount}/${summary.totalCount}`}
             </span>
             <span className="ml-2">{totalDuration} ms</span>
           </div>
@@ -508,15 +616,14 @@ function TestResultsPanel({
                 <th className="p-2 font-medium">Status</th>
                 <th className="p-2 font-medium">Time</th>
                 <th className="p-2 font-medium">Input</th>
-                <th className="p-2 font-medium">Output</th>
+                <th className="p-2 font-medium">stdout</th>
+                <th className="p-2 font-medium">stderr</th>
                 <th className="p-2 font-medium">Expected</th>
               </tr>
             </thead>
             <tbody>
               {summary.results.map((result, index) => {
                 const meta = runStatusMeta[result.status];
-                const renderedOutput =
-                  result.actualOutput || result.stderr || '—';
                 return (
                   <tr
                     key={result.testCaseId}
@@ -548,8 +655,12 @@ function TestResultsPanel({
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       <output aria-label={`Output for test ${index + 1}`}>
-                        {renderedOutput}
+                        {result.actualOutput.slice(0, 32000) || '—'}
                       </output>
+                      {result.outputTruncated && <span className="block text-amber-800">⚠ Output truncated</span>}
+                    </td>
+                    <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-rose-700">
+                      <output aria-label={`stderr for test ${index + 1}`}>{result.stderr.slice(0, 32000) || '—'}</output>
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       {result.expectedOutput || '—'}
@@ -655,7 +766,11 @@ function StudentProblemWorkspace({
   classroomId: string;
   classroom?: CodePulseClassroom;
 }) {
-  const [assignments, setAssignments] = useState<CodePulseAssignment[]>([]);
+  const [problems, setProblems] = useState<Array<{
+    lab: CodePulseLab;
+    labAssignment: CodePulseLabAssignment;
+    assignment: CodePulseAssignment;
+  }>>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string>();
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -665,13 +780,22 @@ function StudentProblemWorkspace({
     let active = true;
     setLoading(true);
     setError(undefined);
-    void codePulseApi
-      .listAssignments(classroomId, 'student')
-      .then((response) => {
+    void Promise.all([
+      codePulseApi.listLabs(classroomId),
+      codePulseApi.listAssignments(classroomId, 'student'),
+    ])
+      .then(([labsResponse, assignmentsResponse]) => {
         if (!active) return;
-        setAssignments(response.data.items);
+        const assignmentById = new Map(assignmentsResponse.data.items.map((item) => [item.id, item]));
+        const nextProblems = labsResponse.data.items.flatMap((lab) =>
+          lab.assignments.flatMap((labAssignment) => {
+            const assignment = assignmentById.get(labAssignment.assignmentId);
+            return assignment ? [{ lab, labAssignment, assignment }] : [];
+          }),
+        );
+        setProblems(nextProblems);
         setSelectedIndex((current) =>
-          Math.min(current, Math.max(response.data.items.length - 1, 0)),
+          Math.min(current, Math.max(nextProblems.length - 1, 0)),
         );
       })
       .catch((error: unknown) => {
@@ -689,7 +813,8 @@ function StudentProblemWorkspace({
     };
   }, [classroomId]);
 
-  const assignment = assignments[selectedIndex];
+  const problem = problems[selectedIndex];
+  const assignment = problem?.assignment;
   const selectedProblemLabel = assignment
     ? problemNumber(selectedIndex)
     : 'Problem';
@@ -720,7 +845,7 @@ function StudentProblemWorkspace({
               Problem workspace
             </h2>
           </div>
-          {assignments.length > 1 && (
+          {problems.length > 1 && (
             <label className="text-xs text-slate-500">
               <span className="sr-only">Chọn bài tập</span>
               <select
@@ -732,9 +857,9 @@ function StudentProblemWorkspace({
                 }}
                 className="h-9 min-w-52 rounded border border-slate-300 bg-white px-3 text-sm text-slate-800 focus:border-teal-700 focus:outline-none focus:ring-2 focus:ring-teal-600/20"
               >
-                {assignments.map((item, index) => (
-                  <option key={item.id} value={index}>
-                    {problemNumber(index)} · {item.title}
+                {problems.map((item, index) => (
+                  <option key={item.labAssignment.id} value={index}>
+                    {problemNumber(index)} · {item.assignment.title}
                   </option>
                 ))}
               </select>
@@ -783,12 +908,12 @@ function StudentProblemWorkspace({
             </div>
           </div>
         )}
-        {!loading && assignments.length === 0 && (
+        {!loading && problems.length === 0 && (
           <p className="mt-4 rounded border border-dashed border-slate-300 bg-white p-6 text-sm text-slate-500">
             Chưa có bài tập được publish trong học kỳ hiện tại.
           </p>
         )}
-        {!loading && !error && assignment && (
+        {!loading && !error && problem && assignment && (
           <div className="mt-4 grid grid-cols-1 items-start gap-6">
             <div
               className={mobileTab === 'problem' ? 'block' : 'hidden lg:block'}
@@ -800,6 +925,8 @@ function StudentProblemWorkspace({
             >
               <StudentWorkspaceEditor
                 classroomId={classroomId}
+                lab={problem.lab}
+                labAssignment={problem.labAssignment}
                 assignment={assignment}
                 mobileTab={mobileTab}
               />

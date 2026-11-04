@@ -1,6 +1,6 @@
 # Flutter Mobile Migration Plan
 
-Tài liệu này xác lập hướng chuyển trải nghiệm Tutor Support System từ web React/Vite sang ứng dụng Flutter đa nền tảng. Đây là **đặc tả và kế hoạch**, không phải triển khai. Tài liệu phân biệt rõ hiện trạng có bằng chứng trong repository với đề xuất mobile và các giả định cần product/backend xác nhận.
+Tài liệu này xác lập hướng chuyển trải nghiệm Code Pulse từ web React/Vite sang ứng dụng Flutter đa nền tảng. Đây là **đặc tả và kế hoạch**, không phải triển khai. Tài liệu phân biệt rõ hiện trạng có bằng chứng trong repository với đề xuất mobile và các giả định cần product/backend xác nhận.
 
 ## Existing system
 

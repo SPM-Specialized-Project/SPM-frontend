@@ -9,7 +9,7 @@ import StudyLayout from '@/components/study-layout'
 // Định nghĩa route
 export const Route = createFileRoute('/_private/system-monitoring/')({
   beforeLoad: async () => {
-    document.title = 'System Monitoring -  Tutor Support System';
+    document.title = 'System Monitoring - Code Pulse';
     if (!localStorage.getItem('userStore')) {
       window.location.assign('/login');
     };

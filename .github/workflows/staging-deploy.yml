@@ -1,20 +1,29 @@
 name: Staging Deploy
 
 on:
-  push:
-    branches:
-      - staging
   workflow_call:
     inputs:
       app_ref:
         description: Git ref or commit to deploy
         required: false
         type: string
+      runner_ready:
+        description: The caller verified an online idle local-deploy runner
+        required: true
+        type: boolean
+    secrets:
+      GITEA_ADMIN_PASSWORD:
+        required: true
+      RUNNER_SUDO_PASSWORD:
+        required: false
+      POSTGRES_PASSWORD:
+        required: false
+      GITEA_API_TOKEN:
+        required: false
     outputs:
       public_url:
         description: Public URL of the deployed staging application
         value: ${{ jobs.deploy-staging.outputs.public_url }}
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -25,10 +34,16 @@ concurrency:
 
 jobs:
   deploy-staging:
-    name: Deploy staging to Debian
-    if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
-    runs-on: [self-hosted, linux, x64, local-deploy]
+    name: Deploy staging on Windows (WSL2)
+    if: inputs.runner_ready && (inputs.app_ref != '' || github.ref == 'refs/heads/staging')
+    runs-on: [self-hosted, windows, x64, local-deploy]
     timeout-minutes: 30
+    concurrency:
+      group: spm-git-platform-deploy
+      cancel-in-progress: false
+    env:
+      SPM_DEPLOY_ENVIRONMENT: staging
+      SPM_WSL_DISTRO: ${{ vars.SPM_WSL_DISTRO }}
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
     steps:
@@ -44,6 +59,20 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Check WSL2 deployment runtime
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase host-check
+
+      - name: Validate staging secrets and runner permissions
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase check
+
       - name: Build staging frontend
         env:
           VITE_BACKEND_URL: /api
@@ -55,116 +84,82 @@ jobs:
           npm run build
 
       - name: Test staging backend
-        run: npm run backend:test
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase tests
+
+      - name: Test staging deployment configuration
+        run: npm run deploy:test
+
+      - name: Configure staging services and Gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase setup
 
       - name: Deploy staging release
-        shell: bash
-        run: |
-          set -euo pipefail
-          release_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
-
-          if [[ ! -x /usr/local/sbin/spm-staging-deploy ]]; then
-            echo '::error::/usr/local/sbin/spm-staging-deploy is missing or not executable on the local runner.'
-            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
-            exit 1
-          fi
-
-          timeout --signal=TERM --kill-after=30s 25m \
-            sudo -n /usr/local/sbin/spm-staging-deploy "$GITHUB_WORKSPACE" "$release_id"
+        shell: powershell
+        env:
+          SPM_WSL_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase deploy
 
       - name: Verify staging locally
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-            http://127.0.0.1:8080/api/health
-          curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-            http://127.0.0.1:8080/ >/dev/null
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-local
 
       - name: Start staging Cloudflare Quick Tunnel
         id: cloudflare
-        shell: bash
-        run: |
-          set -euo pipefail
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase tunnel
 
-          cloudflared_path="$(command -v cloudflared || true)"
-          if [[ -z "$cloudflared_path" ]]; then
-            echo '::error::cloudflared is not installed on the local-deploy runner.'
-            exit 1
-          fi
+      - name: Configure Gitea public URL
+        id: gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_OWNER }}
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase public
 
-          started_at="$(date -u --iso-8601=seconds)"
-          if ! sudo -n systemctl restart spm-staging-quick-tunnel.service; then
-            echo '::error::The persistent spm-staging-quick-tunnel.service is not installed or cannot be restarted.'
-            echo '::error::Run deploy/install-staging-local.sh on the Debian host first.'
-            exit 1
-          fi
-
-          public_url=""
-          for _ in $(seq 1 30); do
-            public_url="$(sudo -n journalctl -u spm-staging-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
-              | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
-              | grep -vE '^https://api\.trycloudflare\.com$' \
-              | tail -n 1 || true)"
-            if [[ -n "$public_url" ]]; then
-              break
-            fi
-            sleep 2
-          done
-
-          if [[ -z "$public_url" ]]; then
-            echo '::error::Staging Cloudflare Quick Tunnel did not return a public URL.'
-            sudo -n journalctl -u spm-staging-quick-tunnel.service --no-pager -n 100 || true
-            exit 1
-          fi
-
-          reachable=0
-          for _ in $(seq 1 60); do
-            if curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
-               curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
-               curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
-              reachable=1
-              break
-            fi
-            sleep 2
-          done
-
-          if [[ "$reachable" != '1' ]]; then
-            echo "::error::Staging Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
-            curl --fail --show-error --max-time 15 "$public_url/" || true
-            curl --fail --show-error --max-time 15 "$public_url/api/health" || true
-            curl --fail --show-error --max-time 15 "$public_url/git/" || true
-            exit 1
-          fi
-
-          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Staging URL::$public_url"
+      - name: Verify public staging and Gitea
+        env:
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-public
 
       - name: Publish staging URL to job summary
         if: ${{ success() && steps.cloudflare.outputs.public_url != '' }}
-        shell: bash
+        shell: powershell
         env:
           STAGING_URL: ${{ steps.cloudflare.outputs.public_url }}
+          GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
         run: |
-          set -euo pipefail
+          @"
+          ## Staging deployment ready
 
-          {
-            echo '## Staging deployment ready'
-            echo
-            echo "### Open staging: [$STAGING_URL/]($STAGING_URL/)"
-            echo
-            echo '**Staging URL (copy):**'
-            echo
-            echo '```text'
-            echo "$STAGING_URL"
-            echo '```'
-            echo
-            echo "- Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)"
-            echo "- Gitea: [$STAGING_URL/git/]($STAGING_URL/git/)"
-            echo '- Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.'
-            echo '- The public URL is HTTPS; do not append the runner origin port (for example `:8080`).'
-            echo "- Backend service: spm-staging-backend.service"
-          } >> "$GITHUB_STEP_SUMMARY"
+          ### Open staging: [$env:STAGING_URL/]($env:STAGING_URL/)
+
+          **Staging URL (copy):**
+
+          ```text
+          $env:STAGING_URL
+          ```
+
+          - Backend health: [$env:STAGING_URL/api/health]($env:STAGING_URL/api/health)
+          - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
+          - Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.
+          - Backend Gitea token: verified by private repository/branch/file writes and saved in WSL.
+          - Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.
+          - The public URL is HTTPS; do not append the WSL origin port (for example `:8080`).
+          - Backend service: spm-staging-backend.service
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

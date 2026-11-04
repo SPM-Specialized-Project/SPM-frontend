@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: main-ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   frontend-quality:
@@ -57,22 +57,31 @@ jobs:
         with:
           node-version: 22
 
+      - name: Build isolated code runner
+        run: docker build -t codepulse-sandbox:1 deploy/sandbox
+
       - name: Test Node.js backend
         run: npm run backend:test
 
+      - name: Test deployment configuration
+        run: npm run deploy:test
+
   deploy-local:
-    name: Deploy local Debian
+    name: Deploy main on Windows (WSL2)
     if: github.ref == 'refs/heads/main'
     needs:
       - frontend-quality
       - backend-quality
-    runs-on: [self-hosted, linux, x64, local-deploy]
+    runs-on: [self-hosted, windows, x64, local-deploy]
     timeout-minutes: 30
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
     concurrency:
-      group: local-deploy
+      group: spm-git-platform-deploy
       cancel-in-progress: false
+    env:
+      SPM_DEPLOY_ENVIRONMENT: main
+      SPM_WSL_DISTRO: ${{ vars.SPM_WSL_DISTRO }}
     steps:
       - name: Checkout main
         uses: actions/checkout@v4
@@ -84,6 +93,20 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
+      - name: Check WSL2 deployment runtime
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase host-check
+
+      - name: Validate main secrets and runner permissions
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase check
+
       - name: Build production frontend
         env:
           VITE_BACKEND_URL: /api
@@ -92,93 +115,71 @@ jobs:
           npm run build
         working-directory: frontend
 
+      - name: Build isolated code runner on deployment host
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase build-sandbox
+
+      - name: Configure main services and shared Gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_MAIN_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase setup
+
       - name: Deploy atomic release
-        shell: bash
-        run: |
-          set -euo pipefail
-          release_id="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}-${GITHUB_SHA}"
-
-          if [[ ! -x /usr/local/sbin/spm-deploy ]]; then
-            echo '::error::/usr/local/sbin/spm-deploy is missing or not executable on the local runner.'
-            exit 1
-          fi
-
-          timeout --signal=TERM --kill-after=30s 25m \
-            sudo -n /usr/local/sbin/spm-deploy "$GITHUB_WORKSPACE" "$release_id"
+        shell: powershell
+        env:
+          SPM_WSL_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase deploy
 
       - name: Verify local deployment
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl --fail --silent --show-error http://127.0.0.1/api/health
-          curl --fail --silent --show-error http://127.0.0.1/ >/dev/null
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-local
 
       - name: Start one Cloudflare Quick Tunnel
         id: cloudflare
-        shell: bash
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase tunnel
+
+      - name: Configure shared Gitea canonical URL
+        id: gitea
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+          GITEA_ADMIN_PASSWORD: ${{ secrets.GITEA_ADMIN_PASSWORD }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          GITEA_API_TOKEN: ${{ secrets.GITEA_MAIN_API_TOKEN }}
+          GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
+          GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
+          GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase public
+
+      - name: Verify public main and shared Gitea
+        env:
+          SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
+        shell: powershell
+        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-public
+
+      - name: Publish main and shared Gitea URLs
+        shell: powershell
+        env:
+          MAIN_URL: ${{ steps.cloudflare.outputs.public_url }}
+          GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
         run: |
-          set -euo pipefail
+          @"
+          ### Public deployment URL
 
-          cloudflared_path="$(command -v cloudflared || true)"
-          if [[ -z "$cloudflared_path" ]]; then
-            echo '::error::cloudflared is not installed on the local-deploy runner.'
-            exit 1
-          fi
+          - Frontend: [$env:MAIN_URL/]($env:MAIN_URL/)
+          - Backend health: [$env:MAIN_URL/api/health]($env:MAIN_URL/api/health)
+          - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
+          - Repository owner for main: configured GITEA_MAIN_OWNER, or codepulse-bot-main.
+          - Gitea uses the same PostgreSQL database and volumes as staging.
 
-          started_at="$(date -u --iso-8601=seconds)"
-          if ! sudo -n systemctl restart spm-quick-tunnel.service; then
-            echo '::error::The persistent spm-quick-tunnel.service is not installed or cannot be restarted.'
-            echo '::error::Run deploy/install-local.sh on the Debian host first.'
-            exit 1
-          fi
-
-          public_url=""
-          for _ in $(seq 1 30); do
-            public_url="$(sudo -n journalctl -u spm-quick-tunnel.service --since "$started_at" --no-pager -n 100 2>/dev/null \
-              | grep -Eo 'https://[a-z0-9-]+\.trycloudflare\.com' \
-              | tail -n 1 || true)"
-            if [[ -n "$public_url" ]]; then
-              break
-            fi
-            sleep 2
-          done
-
-          if [[ -z "$public_url" ]]; then
-            echo '::error::Cloudflare Quick Tunnel did not return a public URL.'
-            sudo -n journalctl -u spm-quick-tunnel.service --no-pager -n 100 || true
-            exit 1
-          fi
-
-          reachable=0
-          for _ in $(seq 1 30); do
-            if curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/" >/dev/null 2>&1 && \
-               curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/api/health" >/dev/null 2>&1 && \
-               curl --fail --silent --show-error --retry 1 --retry-all-errors \
-              --location --connect-timeout 5 --max-time 15 "$public_url/git/" >/dev/null 2>&1; then
-              reachable=1
-              break
-            fi
-            sleep 2
-          done
-
-          if [[ "$reachable" != '1' ]]; then
-            echo "::error::Cloudflare Quick Tunnel URL was returned but did not become reachable: $public_url"
-            curl --fail --show-error --max-time 15 "$public_url/" || true
-            curl --fail --show-error --max-time 15 "$public_url/api/health" || true
-            curl --fail --show-error --max-time 15 "$public_url/git/" || true
-            exit 1
-          fi
-
-          echo "public_url=$public_url" >> "$GITHUB_OUTPUT"
-          echo "::notice title=Public deployment URL::$public_url"
-          {
-            echo '### Public deployment URL'
-            echo
-            echo "- Frontend: $public_url/"
-            echo "- Backend health: $public_url/api/health"
-            echo "- Gitea: [$public_url/git/]($public_url/git/)"
-            echo
-            echo '> The public URL is HTTPS. Do not append the runner origin port (for example `:8080`).'
-          } >> "$GITHUB_STEP_SUMMARY"
+          > The public URL is HTTPS. Do not append the WSL origin port (for example `:8080`).
+          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

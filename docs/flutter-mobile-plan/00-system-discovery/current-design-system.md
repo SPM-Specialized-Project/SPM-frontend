@@ -2,7 +2,7 @@
 
 ## Visual evidence
 
-- Product appears as “Tutor Support System” / “Tutor System”; favicon/logo points to `bachkhoa.png`.
+- Product appears as “Code Pulse”; favicon/logo points to `bachkhoa.png`.
 - Global CSS and several components use `#0329E9` as a bright brand/action blue, `#3D4863` as dark slate-blue text, and `#F9BA08` as an accent/shadow yellow.
 - Tailwind configuration separately declares `primary: #0B2878`, `primary-300: #6D7EAE`, and `primary-700: #082060`, plus neutral/secondary colors. Many screens also use ad hoc Tailwind grays, status colors, and literal hex values. There is no single enforced token source.
 - Web fonts are loaded from Google Fonts: Archivo and Baloo Chettan 2. Their availability/offline licensing and app asset policy must be confirmed before bundling.

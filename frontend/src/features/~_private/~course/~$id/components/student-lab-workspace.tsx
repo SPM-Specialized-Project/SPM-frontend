@@ -1,12 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { usePracticeWindow } from '@/hooks/use-practice-window';
+import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseLab,
   type CodePulseLabAssignment,
-  type CodePulseSubmission,
+  type CodePulseWorkspaceSubmission,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
+
+import { ExecutionPanel } from './execution-panel';
+import { SandboxRunControls } from './sandbox-run-controls';
 
 type StudentLabWorkspaceProps = {
   labs: CodePulseLab[];
@@ -20,12 +25,18 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [message, setMessage] = useState('');
   const [confirmingSubmission, setConfirmingSubmission] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [submission, setSubmission] = useState<CodePulseSubmission>();
+  const [submission, setSubmission] = useState<CodePulseWorkspaceSubmission>();
   const [submissionError, setSubmissionError] = useState('');
   const [pendingRequest, setPendingRequest] = useState<{
     sourceCode: string;
     requestKey: string;
   }>();
+  const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
+  const [stdin, setStdin] = useState('');
+  const selectedRef = useRef(selectedWorkspaceId);
+  selectedRef.current = selectedWorkspaceId;
+  const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
+    usePracticeWindow(workspace?.id);
 
   const assignments = useMemo(
     () =>
@@ -48,7 +59,9 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     }
   }, [assignments, selectedWorkspaceId]);
 
-  const loadWorkspace = useCallback(async (workspaceId: string) => {
+  useEffect(() => {
+    let active = true;
+    const workspaceId = selectedWorkspaceId;
     if (!workspaceId) {
       setWorkspace(undefined);
       return;
@@ -60,35 +73,44 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     setSubmissionError('');
     setPendingRequest(undefined);
     setConfirmingSubmission(false);
-    try {
-      const result = await codePulseApi.getWorkspace(workspaceId);
-      setWorkspace(result.data.item);
-      setDrafts((current) => ({
-        ...current,
-        [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
-      }));
-      const history = await codePulseApi.listWorkspaceSubmissions(workspaceId);
-      setSubmission(history.data.items.at(-1));
-    } catch (error) {
-      setMessage(
-        error instanceof Error ? error.message : 'Không thể tải workspace.',
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadWorkspace(selectedWorkspaceId);
-  }, [loadWorkspace, selectedWorkspaceId]);
+    setSubmitting(false);
+    const loadWorkspace = async () => {
+      setLoading(true);
+      setMessage('');
+      setWorkspace(undefined);
+      try {
+        const result = await codePulseApi.getWorkspace(workspaceId);
+        if (!active) return;
+        setWorkspace(result.data.item);
+        setDrafts((current) => ({
+          ...current,
+          [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
+        }));
+        if (result.data.item.problem) {
+          void codePulseApi.listWorkspaceSubmissions(workspaceId)
+            .then((history) => {
+              if (active) setSubmission(history.data.items.at(-1));
+            })
+            .catch(() => {});
+        }
+      } catch (error) {
+        if (!active) return;
+        setMessage(
+          error instanceof Error ? error.message : 'Không thể tải workspace.',
+        );
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    void loadWorkspace();
+    return () => {
+      active = false;
+    };
+  }, [selectedWorkspaceId]);
 
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
-  const practiceOpen = selected
-    ? Date.now() >= Date.parse(selected.assignment.practiceStartAt) &&
-      Date.now() < Date.parse(selected.assignment.practiceEndAt)
-    : false;
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
@@ -118,11 +140,14 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     if (!workspace) return;
     setLoading(true);
     try {
-      const result = await codePulseApi.executeWorkspace(
-        workspace.id,
-        sourceCode,
-      );
-      replaceWorkspace(result.data.item);
+      const workspaceId = workspace.id;
+      const result = await codePulseApi.executeWorkspace(workspaceId, sourceCode, { mode: runMode, stdin });
+      if (selectedRef.current === workspaceId) setWorkspace((current) => current ? { ...current, executionResult: result.data.item } : current);
+      const execution = await waitForExecution(result.data.item, (progress) => {
+        if (selectedRef.current === workspaceId) setMessage(progress.state === 'QUEUED' ? 'Đang chờ worker...' : 'Đang chạy...');
+      });
+      if (selectedRef.current !== workspaceId) return;
+      setWorkspace((current) => current ? { ...current, executionResult: execution } : current);
       setMessage('Đã lưu execution result riêng cho problem này.');
     } catch (error) {
       setMessage(
@@ -138,7 +163,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const submit = async () => {
-    if (!workspace?.problem || submitting) return;
+    if (!workspace?.problem || submitting || !practiceOpen) return;
     const logicalRequest =
       pendingRequest?.sourceCode === sourceCode
         ? pendingRequest
@@ -194,9 +219,24 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-blue-700">
           Student practice
         </p>
-        <h4 className="mt-1 text-lg font-bold text-gray-900">
-          Chọn problem trong LAB đang Live
-        </h4>
+        <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+          <h4 className="text-lg font-bold text-gray-900">
+            Chọn problem để tiếp tục luyện tập
+          </h4>
+          {selected && (
+            <span
+              className={`rounded-full px-3 py-1 text-xs font-semibold ${
+                practiceOpen
+                  ? 'bg-emerald-100 text-emerald-800'
+                  : 'bg-amber-100 text-amber-800'
+              }`}
+            >
+              {activityContext &&
+                `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
+              {practiceStatus}
+            </span>
+          )}
+        </div>
       </header>
 
       <div className="grid min-h-[520px] lg:grid-cols-[280px_1fr]">
@@ -254,8 +294,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
 
               {!practiceOpen && (
                 <p className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                  Problem hiện nằm ngoài practice window và đang ở chế độ chỉ
-                  đọc.
+                  {practiceMessage} Workspace hiện ở chế độ chỉ đọc.
                 </p>
               )}
 
@@ -275,6 +314,8 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   spellCheck={false}
                 />
               </label>
+              <SandboxRunControls mode={runMode} stdin={stdin} disabled={loading || !practiceOpen}
+                onMode={setRunMode} onStdin={setStdin} />
               <div className="mt-3 flex flex-wrap gap-2">
                 <button
                   type="button"
@@ -316,30 +357,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
               )}
 
               <div className="mt-6 grid gap-5 xl:grid-cols-2">
-                <section>
-                  <h6 className="font-semibold text-gray-900">
-                    Execution result
-                  </h6>
-                  {workspace.executionResult ? (
-                    <div className="mt-2 rounded-lg bg-slate-950 p-4 font-mono text-xs text-slate-100">
-                      <div className="mb-2 flex justify-between text-slate-400">
-                        <span>{workspace.executionResult.status}</span>
-                        <span>
-                          {workspace.executionResult.runtimeMs} ms · exit{' '}
-                          {workspace.executionResult.exitCode}
-                        </span>
-                      </div>
-                      <pre className="whitespace-pre-wrap text-emerald-300">
-                        {workspace.executionResult.stdout ||
-                          workspace.executionResult.stderr}
-                      </pre>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-gray-500">
-                      Chưa có kết quả chạy cho problem này.
-                    </p>
-                  )}
-                </section>
+                <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={workspace.executionResult} />
 
                 <section>
                   <h6 className="font-semibold text-gray-900">Hints</h6>
@@ -419,7 +437,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       </button>
                       <button
                         type="button"
-                        disabled={submitting}
+                        disabled={submitting || !practiceOpen}
                         onClick={() => void submit()}
                         className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
                       >

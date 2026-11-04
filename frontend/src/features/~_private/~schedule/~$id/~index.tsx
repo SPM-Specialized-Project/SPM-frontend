@@ -13,7 +13,7 @@ import { StudentSessionView } from './student-session-view'
 
 export const Route = createFileRoute('/_private/schedule/$id/')({
   beforeLoad: async () => {
-    document.title = 'Chi tiết buổi học -  Tutor Support System';
+    document.title = 'Chi tiết buổi học - Code Pulse';
   },
   component: RouteComponent,
 })
