@@ -45,9 +45,9 @@ export function ConflictResolutionModal({
     >
       <div className="flex max-h-[90vh] w-full max-w-4xl flex-col rounded-2xl bg-white shadow-2xl">
         {/* Header */}
-        <div className="flex items-start justify-between border-b border-amber-200 bg-amber-50 px-6 py-4 rounded-t-2xl">
+        <div className="flex items-start justify-between rounded-t-2xl border-b border-amber-200 bg-amber-50 px-6 py-4">
           <div className="flex items-center gap-3">
-            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xl font-bold text-white shadow-sm">
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-amber-500 text-xl font-bold text-white shadow-sm">
               ⚠️
             </span>
             <div>
@@ -123,7 +123,7 @@ export function ConflictResolutionModal({
         </div>
 
         {/* Footer Actions */}
-        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 rounded-b-2xl">
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-b-2xl border-t border-gray-200 bg-gray-50 px-6 py-4">
           <p className="text-xs text-gray-500">
             Gợi ý: Nếu chưa chắc chắn, hãy bấm <strong>Sao chép code</strong> rồi chọn <strong>Giữ bản máy chủ</strong>.
           </p>
@@ -131,21 +131,21 @@ export function ConflictResolutionModal({
             <button
               type="button"
               onClick={onClose}
-              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-100 shadow-sm"
+              className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm hover:bg-gray-100"
             >
               Xem lại sau
             </button>
             <button
               type="button"
               onClick={onKeepServer}
-              className="rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100 shadow-sm"
+              className="rounded-lg border border-emerald-600 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-700 shadow-sm hover:bg-emerald-100"
             >
               ☁️ Giữ bản trên máy chủ
             </button>
             <button
               type="button"
               onClick={onOverwriteLocal}
-              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white hover:bg-amber-700 shadow-sm"
+              className="rounded-lg bg-amber-600 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-amber-700"
             >
               ⚠️ Ghi đè bằng bản của tôi
             </button>

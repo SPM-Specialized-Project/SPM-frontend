@@ -60,13 +60,13 @@ test('SCRUM-70: workspace snapshot immutability, revision tracking, and conflict
   assert.equal(wsRes.status, 200);
   const wsData = await wsRes.json();
   assert.equal(wsData.item.id, 'workspace-1');
-  assert.equal(wsData.item.revision, 1);
+  assert.equal(wsData.item.revision, 0);
 
   // 2. Reconnect status endpoint (SCRUM-136)
   const statusRes = await fetch(`${baseUrl}/api/codepulse/workspaces/workspace-1/status`, { headers });
   assert.equal(statusRes.status, 200);
   const statusData = await statusRes.json();
-  assert.equal(statusData.item.revision, 1);
+  assert.equal(statusData.item.revision, 0);
   assert.equal(statusData.item.workspaceId, 'workspace-1');
 
   // 3. Save with matching baseRevision (SCRUM-134, SCRUM-135)
@@ -75,12 +75,12 @@ test('SCRUM-70: workspace snapshot immutability, revision tracking, and conflict
     headers,
     body: JSON.stringify({
       sourceCode: 'print("Tab 1 Edit")',
-      baseRevision: 1,
+      baseRevision: 0,
     }),
   });
   assert.equal(save1.status, 200);
   const save1Data = await save1.json();
-  assert.equal(save1Data.item.revision, 2);
+  assert.equal(save1Data.item.revision, 1);
   assert.equal(save1Data.item.sourceCode, 'print("Tab 1 Edit")');
 
   // 4. Verify snapshot was recorded (SCRUM-134)
@@ -88,45 +88,45 @@ test('SCRUM-70: workspace snapshot immutability, revision tracking, and conflict
   assert.equal(snapRes.status, 200);
   const snapData = await snapRes.json();
   assert.equal(snapData.items.length, 1);
-  assert.equal(snapData.items[0].revision, 2);
+  assert.equal(snapData.items[0].revision, 1);
   assert.equal(snapData.items[0].trigger, 'SAVE');
   assert.equal(snapData.items[0].sourceCode, 'print("Tab 1 Edit")');
   assert.ok(snapData.items[0].hash);
 
   // 5. Stale save rejection / Conflict Detection (SCRUM-135, SCRUM-139)
-  // Tab 2 attempts to save with outdated baseRevision: 1
+  // Tab 2 attempts to save with outdated baseRevision: 0
   const staleSave = await fetch(`${baseUrl}/api/codepulse/workspaces/workspace-1`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({
       sourceCode: 'print("Tab 2 Stale Overwrite Attempt")',
-      baseRevision: 1, // outdated, server is at revision 2
+      baseRevision: 0, // outdated, server is at revision 1
     }),
   });
   assert.equal(staleSave.status, 409);
   const conflictData = await staleSave.json();
   assert.equal(conflictData.code, 'REVISION_CONFLICT');
   assert.equal(conflictData.details.conflict, true);
-  assert.equal(conflictData.details.currentRevision, 2);
+  assert.equal(conflictData.details.currentRevision, 1);
   assert.equal(conflictData.details.serverSourceCode, 'print("Tab 1 Edit")');
 
   // 6. Verify server code was NOT overwritten during conflict
   const verifyWs = await (await fetch(`${baseUrl}/api/codepulse/workspaces/workspace-1`, { headers })).json();
   assert.equal(verifyWs.item.sourceCode, 'print("Tab 1 Edit")');
-  assert.equal(verifyWs.item.revision, 2);
+  assert.equal(verifyWs.item.revision, 1);
 
-  // 7. Tab 2 resolves conflict by advancing to currentRevision: 2
+  // 7. Tab 2 resolves conflict by advancing to currentRevision: 1
   const resolvedSave = await fetch(`${baseUrl}/api/codepulse/workspaces/workspace-1`, {
     method: 'PATCH',
     headers,
     body: JSON.stringify({
       sourceCode: 'print("Tab 2 Resolved")',
-      baseRevision: 2,
+      baseRevision: 1,
     }),
   });
   assert.equal(resolvedSave.status, 200);
   const resolvedData = await resolvedSave.json();
-  assert.equal(resolvedData.item.revision, 3);
+  assert.equal(resolvedData.item.revision, 2);
   assert.equal(resolvedData.item.sourceCode, 'print("Tab 2 Resolved")');
 
   // 8. Snapshot Immutability test (SCRUM-134, SCRUM-139)

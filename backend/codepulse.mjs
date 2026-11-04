@@ -134,8 +134,8 @@ const initialCodePulseSubmissions = [];
 const initialCodePulseActivities = [];
 const initialPracticeWindowAudit = [];
 const initialWorkspaces = [
-  { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 1 },
-  { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 1 },
+  { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 0 },
+  { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 0 },
 ];
 
 let mutationQueue = Promise.resolve();
@@ -232,7 +232,7 @@ async function recordWorkspaceSnapshot({ workspace, trigger = 'SAVE', sourceCode
     studentEmail: workspace.ownerEmail,
     sourceCode: sourceCode || '',
     hash,
-    revision: workspace.revision ?? 1,
+    revision: workspace.revision ?? 0,
     trigger,
     createdAt: new Date().toISOString(),
   };
@@ -2064,7 +2064,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     sendJson(response, 200, {
       item: {
         workspaceId: workspace.id,
-        revision: workspace.revision ?? 1,
+        revision: workspace.revision ?? 0,
         updatedAt: workspace.updatedAt ?? null,
         lastSnapshotHash: lastSnapshot?.hash ?? null,
         snapshotCount: workspaceSnapshots.length,

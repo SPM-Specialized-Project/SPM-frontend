@@ -434,7 +434,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                     type="button"
                     disabled={loading || !practiceOpen}
                     onClick={() => void save()}
-                    className="rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-700 hover:bg-blue-50 disabled:opacity-40 shadow-sm"
+                    className="rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50 disabled:opacity-40"
                   >
                     Lưu code
                   </button>
@@ -442,7 +442,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                     type="button"
                     disabled={loading || !practiceOpen}
                     onClick={() => void execute()}
-                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-800 disabled:bg-gray-300 shadow-sm"
+                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:bg-gray-300"
                   >
                     Run
                   </button>
@@ -465,12 +465,12 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       !isOnline
                         ? 'border border-rose-300 bg-rose-50 text-rose-800'
                         : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
-                        ? 'border border-amber-300 bg-amber-50 text-amber-800 animate-pulse'
+                        ? 'animate-pulse border border-amber-300 bg-amber-50 text-amber-800'
                         : 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                     }`}
                   >
                     <span
-                      className={`h-2.5 w-2.5 rounded-full ${
+                      className={`size-2.5 rounded-full ${
                         !isOnline
                           ? 'bg-rose-500'
                           : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
@@ -486,7 +486,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       ? '◌ Đang đồng bộ...'
                       : saveStatus === 'dirty'
                       ? `● Chưa lưu • Bản #${workspace?.revision ?? 0}`
-                      : `● Trực tuyến • Bản lưu #${workspace?.revision ?? 1}`}
+                      : `● Trực tuyến • Bản lưu #${workspace?.revision ?? 0}`}
                   </span>
                 </div>
               </div>
