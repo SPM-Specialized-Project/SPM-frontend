@@ -6,6 +6,7 @@ import {
   codePulseApi,
   type CodePulseLab,
   type CodePulseLabAssignment,
+  type CodePulseWorkspaceSubmission,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 
@@ -22,6 +23,14 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [confirmingSubmission, setConfirmingSubmission] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submission, setSubmission] = useState<CodePulseWorkspaceSubmission>();
+  const [submissionError, setSubmissionError] = useState('');
+  const [pendingRequest, setPendingRequest] = useState<{
+    sourceCode: string;
+    requestKey: string;
+  }>();
   const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
   const [stdin, setStdin] = useState('');
   const selectedRef = useRef(selectedWorkspaceId);
@@ -57,6 +66,14 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
       setWorkspace(undefined);
       return;
     }
+    setLoading(true);
+    setMessage('');
+    setWorkspace(undefined);
+    setSubmission(undefined);
+    setSubmissionError('');
+    setPendingRequest(undefined);
+    setConfirmingSubmission(false);
+    setSubmitting(false);
     const loadWorkspace = async () => {
       setLoading(true);
       setMessage('');
@@ -69,6 +86,13 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
           ...current,
           [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
         }));
+        if (result.data.item.problem) {
+          void codePulseApi.listWorkspaceSubmissions(workspaceId)
+            .then((history) => {
+              if (active) setSubmission(history.data.items.at(-1));
+            })
+            .catch(() => {});
+        }
       } catch (error) {
         if (!active) return;
         setMessage(
@@ -131,6 +155,42 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() ??
+    `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const submit = async () => {
+    if (!workspace?.problem || submitting || !practiceOpen) return;
+    const logicalRequest =
+      pendingRequest?.sourceCode === sourceCode
+        ? pendingRequest
+        : { sourceCode, requestKey: createRequestKey() };
+    setPendingRequest(logicalRequest);
+    setSubmitting(true);
+    setSubmissionError('');
+    try {
+      const result = await codePulseApi.submitWorkspace(workspace.id, {
+        sourceCode: logicalRequest.sourceCode,
+        requestKey: logicalRequest.requestKey,
+        assignmentVersionId: workspace.problem.assignmentVersionId,
+      });
+      setSubmission(result.data.item);
+      setPendingRequest(undefined);
+      setConfirmingSubmission(false);
+      setMessage(
+        result.data.created
+          ? 'Đã tiếp nhận bài nộp chính thức.'
+          : 'Đã khôi phục bài nộp đã được tiếp nhận trước đó.',
+      );
+    } catch (error) {
+      setSubmissionError(
+        error instanceof Error ? error.message : 'Không thể nộp bài.',
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -273,7 +333,28 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                 >
                   Run
                 </button>
+                <button
+                  type="button"
+                  disabled={loading || submitting || !practiceOpen || !sourceCode.trim()}
+                  onClick={() => {
+                    setSubmissionError('');
+                    setConfirmingSubmission(true);
+                  }}
+                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
+                >
+                  Submit
+                </button>
               </div>
+
+              {submission && (
+                <p className="mt-3 text-sm text-slate-600" aria-live="polite">
+                  Submission <span className="font-mono">{submission.id}</span>{' '}
+                  <span className="font-semibold text-blue-700">
+                    {submission.status === 'PENDING' ? 'Pending' : 'Judging'}
+                  </span>
+                  {' '}· accepted {new Date(submission.acceptedAt).toLocaleString('vi-VN')}
+                </p>
+              )}
 
               <div className="mt-6 grid gap-5 xl:grid-cols-2">
                 <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={workspace.executionResult} />
@@ -314,6 +395,58 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   </div>
                 </section>
               </div>
+              {confirmingSubmission && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation">
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="lab-submission-confirmation-title"
+                    className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+                  >
+                    <h5 id="lab-submission-confirmation-title" className="text-lg font-bold text-gray-900">
+                      Xác nhận nộp bài chính thức
+                    </h5>
+                    <p className="mt-2 text-sm text-gray-600">
+                      Source code hiện tại sẽ được lưu thành snapshot bất biến.
+                    </p>
+                    <dl className="mt-4 space-y-3 rounded-lg border border-gray-200 bg-slate-50 p-4 text-sm">
+                      <div>
+                        <dt className="text-xs font-semibold text-gray-500">Problem</dt>
+                        <dd className="mt-1 font-semibold text-gray-900">{workspace.problem.title}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-semibold text-gray-500">Pinned version</dt>
+                        <dd className="mt-1 font-mono text-gray-900">
+                          v{workspace.problem.version} · {workspace.problem.assignmentVersionId}
+                        </dd>
+                      </div>
+                    </dl>
+                    {submissionError && (
+                      <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                        {submissionError}
+                      </p>
+                    )}
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setConfirmingSubmission(false)}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-40"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        disabled={submitting || !practiceOpen}
+                        onClick={() => void submit()}
+                        className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
+                      >
+                        {submitting ? 'Đang nộp...' : 'Nộp bài'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : null}
         </div>

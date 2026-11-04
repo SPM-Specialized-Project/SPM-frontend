@@ -64,6 +64,8 @@ const item = {
   executionResult: null,
   problem: {
     id: assignment.assignmentVersionId,
+    assignmentId: assignment.assignmentId,
+    assignmentVersionId: assignment.assignmentVersionId,
     title: assignment.title,
     description: '',
     version: 1,
