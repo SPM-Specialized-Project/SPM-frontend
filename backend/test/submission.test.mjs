@@ -77,7 +77,7 @@ async function createLiveLab(baseUrl, lecturer, student, { startAt, endAt }) {
     `/api/codepulse/classrooms/class-1/labs/${labId}`,
     lecturer,
     'PATCH',
-    { status: 'LIVE' },
+    { status: 'LIVE', expectedStateVersion: 0 },
   )).status, 200);
   const labs = await request(baseUrl, '/api/codepulse/classrooms/class-1/labs', student);
   const lab = labs.data.items.find((item) => item.id === labId);
@@ -180,7 +180,7 @@ test('SCRUM-73: enforces idempotency, payload conflicts and concurrent duplicate
     `/api/codepulse/classrooms/class-1/labs/${lab.id}`,
     lecturer,
     'PATCH',
-    { status: 'ENDED' },
+    { status: 'ENDED', expectedStateVersion: lab.stateVersion },
   )).status, 200);
   const retryAfterLabEnded = await request(baseUrl, route, student, 'POST', payload);
   assert.equal(retryAfterLabEnded.status, 200);
