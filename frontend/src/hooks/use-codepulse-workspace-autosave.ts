@@ -12,6 +12,12 @@ export type WorkspaceAutosaveStatus =
   | 'saving'
   | 'offline';
 
+export type WorkspaceAutosaveConflict = {
+  currentRevision: number;
+  serverSourceCode: string;
+  serverUpdatedAt?: string;
+};
+
 const isOnline = () =>
   typeof navigator === 'undefined' || navigator.onLine;
 
@@ -20,11 +26,13 @@ export function useCodePulseWorkspaceAutosave({
   sourceCode,
   enabled,
   onSaved,
+  onConflict,
 }: {
   workspace?: CodePulseWorkspace;
   sourceCode: string;
   enabled: boolean;
   onSaved: (workspace: CodePulseWorkspace) => void;
+  onConflict?: (conflict: WorkspaceAutosaveConflict) => void;
 }) {
   const [status, setStatus] = useState<WorkspaceAutosaveStatus>('saved');
   const [error, setError] = useState<string>();
@@ -34,6 +42,7 @@ export function useCodePulseWorkspaceAutosave({
   const revisionRef = useRef(0);
   const enabledRef = useRef(enabled);
   const onSavedRef = useRef(onSaved);
+  const onConflictRef = useRef(onConflict);
   const pendingSaveRef = useRef<Promise<CodePulseWorkspace | undefined> | undefined>(
     undefined,
   );
@@ -41,18 +50,20 @@ export function useCodePulseWorkspaceAutosave({
   sourceCodeRef.current = sourceCode;
   enabledRef.current = enabled;
   onSavedRef.current = onSaved;
+  onConflictRef.current = onConflict;
 
-  const saveNow = useCallback(async () => {
+  const saveNow = useCallback(async (baseRevisionOverride?: number) => {
     while (true) {
       const currentWorkspace = workspaceRef.current;
-      if (!currentWorkspace || !enabledRef.current) return undefined;
+      if (!currentWorkspace || (!enabledRef.current && baseRevisionOverride === undefined)) return undefined;
       if (!isOnline()) {
         setStatus('offline');
         return undefined;
       }
       if (pendingSaveRef.current) {
         const pendingResult = await pendingSaveRef.current;
-        if (!pendingResult) return undefined;
+        if (!pendingResult && baseRevisionOverride === undefined) return undefined;
+        if (!pendingResult) continue;
         if (sourceCodeRef.current === savedSourceCodeRef.current) {
           return pendingResult;
         }
@@ -60,7 +71,7 @@ export function useCodePulseWorkspaceAutosave({
       }
 
       const codeToSave = sourceCodeRef.current;
-      if (codeToSave === savedSourceCodeRef.current) {
+      if (codeToSave === savedSourceCodeRef.current && baseRevisionOverride === undefined) {
         setStatus('saved');
         setError(undefined);
         return currentWorkspace;
@@ -71,7 +82,7 @@ export function useCodePulseWorkspaceAutosave({
         .updateWorkspace(
           currentWorkspace.id,
           codeToSave,
-          revisionRef.current,
+          baseRevisionOverride ?? revisionRef.current,
         )
         .then((response) => {
           const savedWorkspace = response.data.item;
@@ -86,6 +97,20 @@ export function useCodePulseWorkspaceAutosave({
           return savedWorkspace;
         })
         .catch((reason: unknown) => {
+          if (reason instanceof ApiError && reason.code === 'REVISION_CONFLICT') {
+            const details = reason.details;
+            if (details?.conflict === true
+              && Number.isInteger(details.currentRevision)
+              && typeof details.serverSourceCode === 'string') {
+              onConflictRef.current?.({
+                currentRevision: details.currentRevision,
+                serverSourceCode: details.serverSourceCode,
+                ...(typeof details.serverUpdatedAt === 'string'
+                  ? { serverUpdatedAt: details.serverUpdatedAt }
+                  : {}),
+              });
+            }
+          }
           setError(
             reason instanceof Error
               ? reason.message
@@ -129,7 +154,14 @@ export function useCodePulseWorkspaceAutosave({
     }
 
     workspaceRef.current = workspace;
-    revisionRef.current = Math.max(revisionRef.current, workspace.revision);
+    if (workspace.revision > revisionRef.current) {
+      revisionRef.current = workspace.revision;
+      savedSourceCodeRef.current = workspace.sourceCode;
+      setError(undefined);
+      setStatus(isOnline() ? 'saved' : 'offline');
+    } else {
+      revisionRef.current = Math.max(revisionRef.current, workspace.revision);
+    }
   }, [workspace]);
 
   useEffect(() => {

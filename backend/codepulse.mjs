@@ -17,6 +17,7 @@ import {
   CODEPULSE_ACTIVITIES_FILE,
   PRACTICE_WINDOW_AUDIT_FILE,
   WORKSPACES_FILE,
+SNAPSHOTS_FILE,
   EXECUTIONS_FILE,
 } from './config.mjs';
 import {
@@ -43,6 +44,8 @@ const termFile = TERMS_FILE;
 const classroomFile = CLASSROOMS_FILE;
 const membershipFile = MEMBERSHIPS_FILE;
 const workspaceFile = WORKSPACES_FILE;
+const snapshotFile = SNAPSHOTS_FILE;
+const initialSnapshots = [];
 const assignmentFile = ASSIGNMENTS_FILE;
 const labFile = LABS_FILE;
 const assignmentVersionFile = ASSIGNMENT_VERSIONS_FILE;
@@ -131,8 +134,8 @@ const initialCodePulseSubmissions = [];
 const initialCodePulseActivities = [];
 const initialPracticeWindowAudit = [];
 const initialWorkspaces = [
-  { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")' },
-  { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")' },
+  { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 0 },
+  { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 0 },
 ];
 
 let mutationQueue = Promise.resolve();
@@ -216,6 +219,31 @@ const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
   giteaRepository: publication.giteaRepository ?? null,
   giteaBranch: publication.giteaBranch ?? null,
 });
+
+
+async function recordWorkspaceSnapshot({ workspace, trigger = 'SAVE', sourceCode = workspace.sourceCode }) {
+  const hash = createHash('sha256').update(sourceCode || '').digest('hex');
+  const snapshot = {
+    id: `snapshot-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+    workspaceId: workspace.id,
+    classroomId: workspace.classroomId,
+    assignmentId: workspace.assignmentId,
+    assignmentVersionId: workspace.assignmentVersionId ?? null,
+    studentEmail: workspace.ownerEmail,
+    sourceCode: sourceCode || '',
+    hash,
+    revision: workspace.revision ?? 0,
+    trigger,
+    createdAt: new Date().toISOString(),
+  };
+
+  await mutate(snapshotFile, initialSnapshots, (records) => {
+    records.push(snapshot);
+    return snapshot;
+  });
+
+  return snapshot;
+}
 
 const studentAccountKey = (email) => createHash('sha256').update(normalizeEmail(email)).digest('hex');
 
@@ -887,10 +915,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const writeWorkspaceRevision = (current, sourceCode, baseRevision, savedAt) => {
     const currentRevision = Number.isInteger(current.revision) ? current.revision : 0;
     if (baseRevision !== currentRevision) {
+      const details = {
+        conflict: true,
+        currentRevision,
+        serverSourceCode: current.sourceCode,
+        serverUpdatedAt: current.updatedAt,
+        workspaceId: current.id,
+      };
       const conflict = apiError(
         409,
         'REVISION_CONFLICT',
-        `Workspace is at revision ${currentRevision}; reload it before saving again.`,
+        'Code đã bị thay đổi ở một phiên làm việc khác.',
+        details,
       );
       conflict.currentRevision = currentRevision;
       throw conflict;
@@ -2006,6 +2042,78 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'status' && request.method === 'GET') {
+    if (user.role === 'admin') deny();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const item = classroom(workspace.classroomId);
+    const context = workspaceContext(workspace);
+    if (workspace.termId !== item.termId) deny();
+    const isOwner = user.role === 'student' && workspace.ownerEmail === user.email && isMember(item.id);
+    const lecturerCanRead = isDsaManager(item) && memberships.some((member) =>
+      belongsToClassroom(member, item.id) &&
+      (member.studentEmail ?? member.userEmail) === workspace.ownerEmail &&
+      isActiveMembership(member));
+    if (!isOwner && !lecturerCanRead) deny();
+
+    const snapshots = await readRecords(snapshotFile, initialSnapshots);
+    const workspaceSnapshots = snapshots.filter((s) => s.workspaceId === workspace.id);
+    const lastSnapshot = workspaceSnapshots[workspaceSnapshots.length - 1];
+
+    sendJson(response, 200, {
+      item: {
+        workspaceId: workspace.id,
+        revision: workspace.revision ?? 0,
+        updatedAt: workspace.updatedAt ?? null,
+        lastSnapshotHash: lastSnapshot?.hash ?? null,
+        snapshotCount: workspaceSnapshots.length,
+      },
+    });
+    return;
+  }
+
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'snapshots') {
+    if (user.role === 'admin') deny();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const item = classroom(workspace.classroomId);
+    const context = workspaceContext(workspace);
+    if (workspace.termId !== item.termId) deny();
+    const isOwner = user.role === 'student' && workspace.ownerEmail === user.email && isMember(item.id);
+    const lecturerCanRead = isDsaManager(item) && memberships.some((member) =>
+      belongsToClassroom(member, item.id) &&
+      (member.studentEmail ?? member.userEmail) === workspace.ownerEmail &&
+      isActiveMembership(member));
+    if (!isOwner && !lecturerCanRead) deny();
+
+    if (request.method === 'GET') {
+      const snapshots = await readRecords(snapshotFile, initialSnapshots);
+      const items = snapshots.filter((s) => s.workspaceId === workspace.id);
+      sendJson(response, 200, { items });
+      return;
+    }
+
+    if (request.method === 'POST') {
+      if (!isOwner) deny();
+      const access = assertWorkspaceWritable(workspace, context);
+      const body = await readRequestBody(request);
+      const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
+      const snapshot = await recordWorkspaceSnapshot({
+        workspace,
+        trigger: body.trigger || 'MANUAL',
+        sourceCode,
+      });
+      sendJson(response, 201, { item: snapshot });
+      return;
+    }
+
+    // Immutability rule: Snapshots cannot be updated or deleted
+    if (['PUT', 'PATCH', 'DELETE'].includes(request.method)) {
+      throw apiError(405, 'SNAPSHOTS_IMMUTABLE', 'Snapshots are immutable and cannot be modified or deleted.');
+    }
+  }
+
   if (parts[2] === 'workspaces' && parts[3] && !parts[4] && (request.method === 'GET' || request.method === 'PATCH')) {
     if (user.role === 'admin') deny();
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
@@ -2042,6 +2150,11 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
       return writeWorkspaceRevision(current, body.sourceCode, baseRevision, savedAt);
     }, { durable: true });
+    await recordWorkspaceSnapshot({
+      workspace: updated,
+      trigger: 'SAVE',
+      sourceCode: body.sourceCode,
+    });
     if (access) {
       await recordActivity({
         type: 'SAVE',
@@ -2244,6 +2357,11 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
       workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
     await markAssignmentVersionUsed(version.id);
+    await recordWorkspaceSnapshot({
+      workspace,
+      trigger: 'RUN',
+      sourceCode,
+    });
     await recordActivity({ type: 'RUN', context: access?.practiceContext,
       activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
         activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,

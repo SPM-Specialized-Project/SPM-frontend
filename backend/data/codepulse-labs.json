@@ -4,9 +4,9 @@
     "classroomId": "class-1",
     "name": "LAB 01 - Linked structures",
     "description": "Ba bài cấu trúc liên kết trong một buổi thực hành 5 giờ.",
-    "startAt": "2026-09-30T06:05:00.000Z",
-    "endAt": "2026-09-30T11:05:00.000Z",
-    "status": "CANCELLED",
+    "startAt": "2026-01-01T00:00:00.000Z",
+    "endAt": "2027-01-01T23:59:59.000Z",
+    "status": "LIVE",
     "createdBy": "lecturer@gmail.com",
     "createdAt": "2026-09-30T05:06:39.755Z",
     "updatedAt": "2026-09-30T07:10:32.901Z",
@@ -19,8 +19,8 @@
         "title": "Singly Linked List",
         "order": 1,
         "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+        "practiceStartAt": "2026-01-01T00:00:00.000Z",
+        "practiceEndAt": "2027-01-01T23:59:59.000Z"
       },
       {
         "id": "lab-assignment-lab-1790744799755-2",
@@ -30,8 +30,8 @@
         "title": "Doubly Linked List",
         "order": 2,
         "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+        "practiceStartAt": "2026-01-01T00:00:00.000Z",
+        "practiceEndAt": "2027-01-01T23:59:59.000Z"
       },
       {
         "id": "lab-assignment-lab-1790744799755-3",
@@ -41,8 +41,8 @@
         "title": "Queue implementation",
         "order": 3,
         "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+        "practiceStartAt": "2026-01-01T00:00:00.000Z",
+        "practiceEndAt": "2027-01-01T23:59:59.000Z"
       }
     ]
   }

@@ -14,6 +14,7 @@ import {
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 
+import { ConflictResolutionModal } from './conflict-resolution-modal';
 import { ExecutionPanel } from './execution-panel';
 import { SandboxRunControls } from './sandbox-run-controls';
 
@@ -41,6 +42,16 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState('');
+  const [isOnline, setIsOnline] = useState(
+    typeof navigator !== 'undefined' ? navigator.onLine : true,
+  );
+  const [isReconnecting, setIsReconnecting] = useState(false);
+  const [conflictModal, setConflictModal] = useState<{
+    isOpen: boolean;
+    currentRevision: number;
+    serverSourceCode: string;
+    serverUpdatedAt?: string;
+  } | null>(null);
   const [confirmingSubmission, setConfirmingSubmission] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [submission, setSubmission] = useState<CodePulseWorkspaceSubmission>();
@@ -78,6 +89,23 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   }, [assignments, selectedWorkspaceId]);
 
   useEffect(() => {
+    const handleOffline = () => {
+      setIsOnline(false);
+      setIsReconnecting(false);
+    };
+    const handleOnline = () => {
+      setIsOnline(true);
+      setIsReconnecting(true);
+    };
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
+
+  useEffect(() => {
     let active = true;
     const workspaceId = selectedWorkspaceId;
     if (!workspaceId) {
@@ -92,6 +120,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     setPendingRequest(undefined);
     setConfirmingSubmission(false);
     setSubmitting(false);
+    setConflictModal(null);
     const loadWorkspace = async () => {
       setLoading(true);
       setMessage('');
@@ -139,22 +168,33 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     sourceCode,
     enabled: practiceOpen && !loading,
     onSaved: setWorkspace,
+    onConflict: (conflict) => {
+      setIsReconnecting(false);
+      setConflictModal({ isOpen: true, ...conflict });
+      setMessage('⚠️ Phát hiện xung đột phiên bản! Vui lòng chọn cách giải quyết trong hộp thoại.');
+    },
   });
+
+  useEffect(() => {
+    if (!isReconnecting) return;
+    if (saveStatus === 'saved' || (saveStatus === 'dirty' && saveError)) {
+      setIsReconnecting(false);
+    }
+  }, [isReconnecting, saveError, saveStatus]);
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
   };
 
-  const save = async () => {
+  const save = async (forcedRevision?: number) => {
     if (!workspace) return;
     setLoading(true);
     try {
-      const savedWorkspace = await saveNow();
-      setMessage(
-        savedWorkspace
-          ? 'Workspace saved.'
-          : 'Could not save workspace code.',
-      );
+      const savedWorkspace = await saveNow(forcedRevision);
+      if (savedWorkspace) {
+        setConflictModal(null);
+        setMessage('Đã lưu mã nguồn thành công.');
+      }
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : 'Không thể lưu workspace.',
@@ -164,15 +204,37 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     }
   };
 
+  const handleKeepServer = () => {
+    if (!conflictModal || !workspace) return;
+    setDrafts((current) => ({
+      ...current,
+      [workspace.id]: conflictModal.serverSourceCode,
+    }));
+    setWorkspace((current) =>
+      current
+        ? {
+            ...current,
+            sourceCode: conflictModal.serverSourceCode,
+            revision: conflictModal.currentRevision,
+            updatedAt: conflictModal.serverUpdatedAt ?? current.updatedAt,
+          }
+        : undefined,
+    );
+    setConflictModal(null);
+    setMessage('Đã đồng bộ mã nguồn theo phiên bản trên máy chủ.');
+  };
+
+  const handleOverwrite = () => {
+    if (!conflictModal) return;
+    void save(conflictModal.currentRevision);
+  };
+
   const execute = async () => {
     if (!workspace) return;
     setLoading(true);
     try {
       const savedWorkspace = await saveNow();
-      if (!savedWorkspace) {
-        setMessage('Could not save workspace code before running.');
-        return;
-      }
+      if (!savedWorkspace) return;
       const workspaceId = workspace.id;
       const result = await codePulseApi.executeWorkspace(workspaceId, savedWorkspace.sourceCode, {
         mode: runMode,
@@ -340,7 +402,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                 <textarea
                   aria-label="Source code"
                   value={sourceCode}
-                  readOnly={!practiceOpen}
+                  readOnly={!practiceOpen || Boolean(conflictModal)}
                   onChange={(event) =>
                     setDrafts((current) => ({
                       ...current,
@@ -366,34 +428,67 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
               </div>
               <SandboxRunControls mode={runMode} stdin={stdin} disabled={loading || !practiceOpen}
                 onMode={setRunMode} onStdin={setStdin} />
-              <div className="mt-3 flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  disabled={loading || !practiceOpen}
-                  onClick={() => void save()}
-                  className="rounded-lg border border-blue-600 px-4 py-2 text-sm font-semibold text-blue-700 disabled:opacity-40"
-                >
-                  Lưu code
-                </button>
-                <button
-                  type="button"
-                  disabled={loading || !practiceOpen}
-                  onClick={() => void execute()}
-                  className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
-                >
-                  Run
-                </button>
-                <button
-                  type="button"
-                  disabled={loading || submitting || !practiceOpen || !sourceCode.trim()}
-                  onClick={() => {
-                    setSubmissionError('');
-                    setConfirmingSubmission(true);
-                  }}
-                  className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
-                >
-                  Submit
-                </button>
+              <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={loading || !practiceOpen}
+                    onClick={() => void save()}
+                    className="rounded-lg border border-blue-600 bg-white px-4 py-2 text-sm font-semibold text-blue-700 shadow-sm hover:bg-blue-50 disabled:opacity-40"
+                  >
+                    Lưu code
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading || !practiceOpen}
+                    onClick={() => void execute()}
+                    className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-blue-800 disabled:bg-gray-300"
+                  >
+                    Run
+                  </button>
+                  <button
+                    type="button"
+                    disabled={loading || submitting || !practiceOpen || !sourceCode.trim()}
+                    onClick={() => {
+                      setSubmissionError('');
+                      setConfirmingSubmission(true);
+                    }}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
+                  >
+                    Submit
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold shadow-sm ${
+                      !isOnline
+                        ? 'border border-rose-300 bg-rose-50 text-rose-800'
+                        : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
+                        ? 'animate-pulse border border-amber-300 bg-amber-50 text-amber-800'
+                        : 'border border-emerald-300 bg-emerald-50 text-emerald-800'
+                    }`}
+                  >
+                    <span
+                      className={`size-2.5 rounded-full ${
+                        !isOnline
+                          ? 'bg-rose-500'
+                          : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
+                          ? 'bg-amber-500'
+                          : 'bg-emerald-500'
+                      }`}
+                    />
+                    {!isOnline
+                      ? '○ Offline (Đang đệm vào bộ nhớ)'
+                      : isReconnecting
+                      ? '◌ Đang kết nối lại...'
+                      : saveStatus === 'saving'
+                      ? '◌ Đang đồng bộ...'
+                      : saveStatus === 'dirty'
+                      ? `● Chưa lưu • Bản #${workspace?.revision ?? 0}`
+                      : `● Trực tuyến • Bản lưu #${workspace?.revision ?? 0}`}
+                  </span>
+                </div>
               </div>
 
               {submission && (
@@ -501,6 +596,19 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
           ) : null}
         </div>
       </div>
+
+      {conflictModal && (
+        <ConflictResolutionModal
+          isOpen={conflictModal.isOpen}
+          onClose={() => setConflictModal(null)}
+          localDraft={sourceCode}
+          serverSourceCode={conflictModal.serverSourceCode}
+          serverRevision={conflictModal.currentRevision}
+          serverUpdatedAt={conflictModal.serverUpdatedAt}
+          onKeepServer={handleKeepServer}
+          onOverwriteLocal={handleOverwrite}
+        />
+      )}
     </section>
   );
 }

@@ -36,6 +36,29 @@ export type CodePulseWorkspace = {
   updatedAt?: string;
 };
 
+
+export type RevisionConflictDetails = {
+  conflict: boolean;
+  currentRevision: number;
+  serverSourceCode: string;
+  serverUpdatedAt?: string;
+  workspaceId: string;
+};
+
+export type CodePulseSnapshot = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  assignmentId?: string;
+  assignmentVersionId?: string | null;
+  studentEmail: string;
+  sourceCode: string;
+  hash: string;
+  revision: number;
+  trigger: 'SAVE' | 'RUN' | 'SUBMIT' | 'MANUAL';
+  createdAt: string;
+};
+
 export type CodePulseRuntime = 'PYTHON' | 'CPP';
 export type CodePulseAssignmentStatus = 'DRAFT' | 'PUBLISHED';
 export type CodePulseVerificationStatus = 'UNVERIFIED' | 'VERIFIED';
@@ -442,6 +465,12 @@ export const codePulseApi = {
   updateWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode, baseRevision })),
+  getWorkspaceStatus: (id: string) => request(() =>
+    apiClient.get<{ item: { workspaceId: string; revision: number; updatedAt: string | null; lastSnapshotHash: string | null; snapshotCount: number } }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/status`)),
+  getWorkspaceSnapshots: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseSnapshot[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/snapshots`)),
   listWorkspaceSubmissions: (id: string) => request(() =>
     apiClient.get<{ items: CodePulseWorkspaceSubmission[] }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`)),
