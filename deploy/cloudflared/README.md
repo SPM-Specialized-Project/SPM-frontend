@@ -1,4 +1,4 @@
-# Cloudflare Tunnel for the Debian self-host
+# Cloudflare Tunnel on the Windows runner with Ubuntu WSL2
 
 This repository contains an optional named-tunnel example with two hostnames:
 
@@ -20,7 +20,7 @@ tunnel restarts. They are for staging/testing, not stable production hosting.
 The public URL is HTTPS; do not append the origin port (`:80`, `:8080`, or
 `:8211`) to it. The Gitea route is `<public-url>/git/`.
 
-The repository installs Quick Tunnels as persistent systemd services through
+The repository installs Quick Tunnels as persistent systemd services inside WSL2 through
 `deploy/install-local.sh` and `deploy/install-staging-local.sh`. They are
 enabled at boot and restart automatically if `cloudflared` exits. The GitHub
 Actions jobs only restart the corresponding service and read the new URL from
@@ -62,7 +62,7 @@ sudo systemctl enable --now gitea-tunnel.service
 The named tunnel keeps `https://git.example.com/git/` as the canonical
 address across runner resets; the Quick Tunnel URLs remain temporary aliases.
 
-## One-time setup on Debian 13
+## One-time setup inside Ubuntu WSL2
 
 Install `cloudflared` using the official Cloudflare package instructions, then:
 

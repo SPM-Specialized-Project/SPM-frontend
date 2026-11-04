@@ -5,8 +5,8 @@ import { requireIdleDeployRunner } from '../actions/check-idle-runner.mjs';
 
 const repository = 'example/application';
 const token = 'fixture-token-not-for-logging';
-const runner = (patch = {}) => ({ id: 1, name: 'debian-deploy', status: 'online', busy: false,
-  labels: ['self-hosted', 'Linux', 'X64', 'local-deploy'].map((name) => ({ name })), ...patch });
+const runner = (patch = {}) => ({ id: 1, name: 'TUNGQUAN', status: 'online', busy: false,
+  labels: ['self-hosted', 'Windows', 'X64', 'local-deploy'].map((name) => ({ name })), ...patch });
 
 async function inventory(t, pages, status = 200) {
   const requests = [];

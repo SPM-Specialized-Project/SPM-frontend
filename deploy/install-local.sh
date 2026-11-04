@@ -34,6 +34,11 @@ fi
 if ! id -u spm >/dev/null 2>&1; then
   sudo useradd --system --gid spm --home-dir "$app_root" --shell /usr/sbin/nologin spm
 fi
+if ! getent group docker >/dev/null; then
+  echo 'The Docker group is required so the backend service can run sandbox containers.' >&2
+  exit 69
+fi
+sudo usermod --append --groups docker spm
 
 sudo install -d -o root -g spm -m 0755 \
   "$app_root" \
