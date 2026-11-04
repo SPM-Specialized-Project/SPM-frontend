@@ -7,6 +7,10 @@ on:
         description: Git ref or commit to deploy
         required: false
         type: string
+      runner_ready:
+        description: The caller verified an online idle local-deploy runner
+        required: true
+        type: boolean
     secrets:
       GITEA_ADMIN_PASSWORD:
         required: true
@@ -20,7 +24,6 @@ on:
       public_url:
         description: Public URL of the deployed staging application
         value: ${{ jobs.deploy-staging.outputs.public_url }}
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,7 +35,7 @@ concurrency:
 jobs:
   deploy-staging:
     name: Deploy staging to Debian
-    if: inputs.app_ref != '' || github.ref == 'refs/heads/staging'
+    if: inputs.runner_ready && (inputs.app_ref != '' || github.ref == 'refs/heads/staging')
     runs-on: [self-hosted, linux, x64, local-deploy]
     timeout-minutes: 30
     concurrency:

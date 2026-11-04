@@ -159,6 +159,11 @@ function StudentWorkspaceEditor({
     setRunError(undefined);
     setRunSummary(undefined);
     try {
+      const saved = await persistWorkspace(false);
+      if (!saved) {
+        setRunError('Không thể lưu code trước khi chạy.');
+        return;
+      }
       const response = await codePulseApi.executeWorkspace(workspace.id, sourceCode, { mode: runMode, stdin });
       if (selectedProblem.current === problemId) setExecution(response.data.item);
       const execution = await waitForExecution(response.data.item, (item) => {
