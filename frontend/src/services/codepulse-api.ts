@@ -30,6 +30,7 @@ export type CodePulseWorkspace = {
   assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
+  revision: number;
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
@@ -438,9 +439,9 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
-  updateWorkspace: (id: string, sourceCode: string) => request(() =>
+  updateWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
+      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode, baseRevision })),
   listWorkspaceSubmissions: (id: string) => request(() =>
     apiClient.get<{ items: CodePulseWorkspaceSubmission[] }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`)),
@@ -450,7 +451,11 @@ export const codePulseApi = {
   ) => request(() =>
     apiClient.post<{ item: CodePulseWorkspaceSubmission; created: boolean }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`, input)),
-  executeWorkspace: (id: string, sourceCode: string, options?: { mode: 'STDIN' | 'PUBLIC_TESTS'; stdin: string }) => request(() =>
+  executeWorkspace: (
+    id: string,
+    sourceCode: string,
+    options: { mode: 'STDIN' | 'PUBLIC_TESTS'; stdin: string; baseRevision: number },
+  ) => request(() =>
     apiClient.post<{ item: CodePulseExecutionResult }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode, ...options })),
   getExecution: (id: string) => request(() =>

@@ -9,6 +9,10 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
+import {
+  useCodePulseWorkspaceAutosave,
+  type WorkspaceAutosaveStatus,
+} from '@/hooks/use-codepulse-workspace-autosave';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
 import { waitForExecution } from '@/services/codepulse-api';
@@ -37,8 +41,21 @@ import { SandboxRunControls } from './sandbox-run-controls';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
 
-type WorkspaceSaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error';
 type MobileWorkspaceTab = 'problem' | 'code' | 'tests';
+
+const saveStateLabel: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'Saving...',
+  saved: 'Saved',
+  dirty: 'Unsaved changes',
+  offline: 'Offline',
+};
+
+const saveStateClass: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'text-slate-500',
+  saved: 'text-emerald-700',
+  dirty: 'text-amber-700',
+  offline: 'text-rose-700',
+};
 
 const runtimeLabel: Record<CodePulseAssignment['runtime'], string> = {
   PYTHON: 'Python',
@@ -84,7 +101,16 @@ function StudentWorkspaceEditor({
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [submitError, setSubmitError] = useState<string>();
-  const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
+  const {
+    status: saveState,
+    error: saveError,
+    saveNow,
+  } = useCodePulseWorkspaceAutosave({
+    workspace,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+    onSaved: setWorkspace,
+  });
   const [confirmingSubmission, setConfirmingSubmission] = useState(false);
   const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
   const [workspaceSubmission, setWorkspaceSubmission] = useState<CodePulseWorkspaceSubmission>();
@@ -107,7 +133,6 @@ function StudentWorkspaceEditor({
     setSubmission(undefined);
     setRunError(undefined);
     setSubmitError(undefined);
-    setSaveState('loading');
     setConfirmingSubmission(false);
     setWorkspaceSubmission(undefined);
     setSubmissionError(undefined);
@@ -120,7 +145,6 @@ function StudentWorkspaceEditor({
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
-        setSaveState('saved');
         if (response.data.item.problem) {
           void codePulseApi
             .listWorkspaceSubmissions(response.data.item.id)
@@ -137,7 +161,6 @@ function StudentWorkspaceEditor({
             ? reason.message
             : 'Không thể tải workspace bài làm.',
         );
-        setSaveState('error');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -149,26 +172,16 @@ function StudentWorkspaceEditor({
   }, [assignment.id, classroomId, lab.id, labAssignment.id]);
 
   const persistWorkspace = async (showToast = true) => {
-    if (!workspace) return false;
+    if (!workspace) return undefined;
     setSaving(true);
-    setSaveState('saving');
     try {
-      const response = await codePulseApi.updateWorkspace(
-        workspace.id,
-        sourceCode,
-      );
-      setWorkspace(response.data.item);
-      setSourceCode(response.data.item.sourceCode);
-      setSaveState('saved');
+      const savedWorkspace = await saveNow();
+      if (!savedWorkspace) {
+        if (showToast) toast.error('Could not save workspace code.');
+        return undefined;
+      }
       if (showToast) toast.success(`Đã lưu bài làm: ${assignment.title}.`);
-      return true;
-    } catch (reason: unknown) {
-      setSaveState('error');
-      if (showToast)
-        toast.error(
-          reason instanceof Error ? reason.message : 'Không thể lưu bài làm.',
-        );
-      return false;
+      return savedWorkspace;
     } finally {
       setSaving(false);
     }
@@ -181,12 +194,16 @@ function StudentWorkspaceEditor({
     setRunError(undefined);
     setRunSummary(undefined);
     try {
-      const saved = await persistWorkspace(false);
-      if (!saved) {
+      const savedWorkspace = await persistWorkspace(false);
+      if (!savedWorkspace) {
         setRunError('Không thể lưu code trước khi chạy.');
         return;
       }
-      const response = await codePulseApi.executeWorkspace(workspace.id, sourceCode, { mode: runMode, stdin });
+      const response = await codePulseApi.executeWorkspace(workspace.id, savedWorkspace.sourceCode, {
+        mode: runMode,
+        stdin,
+        baseRevision: savedWorkspace.revision,
+      });
       if (selectedProblem.current === problemId) setExecution(response.data.item);
       const execution = await waitForExecution(response.data.item, (item) => {
         if (selectedProblem.current === problemId) setRunState(item.state);
@@ -258,25 +275,6 @@ function StudentWorkspaceEditor({
       setSnapshotSubmitting(false);
     }
   };
-
-  const saveStateLabel: Record<WorkspaceSaveState, string> = {
-    loading: 'Đang tải',
-    saved: workspace?.updatedAt
-      ? `Đã lưu ${new Date(workspace.updatedAt).toLocaleTimeString('vi-VN')}`
-      : 'Đã lưu',
-    dirty: 'Chưa lưu thay đổi',
-    saving: 'Đang lưu',
-    error: 'Lưu thất bại',
-  };
-
-  const saveStateClass: Record<WorkspaceSaveState, string> = {
-    loading: 'text-slate-500',
-    saved: 'text-emerald-700',
-    dirty: 'text-amber-700',
-    saving: 'text-slate-500',
-    error: 'text-rose-700',
-  };
-
   const editorLanguage = assignment.runtime === 'CPP' ? 'cpp' : 'python';
   const filename = assignment.runtime === 'CPP' ? 'main.cpp' : 'main.py';
   const unauthorized =
@@ -310,7 +308,7 @@ function StudentWorkspaceEditor({
             className={`text-xs ${saveStateClass[saveState]}`}
             aria-live="polite"
           >
-            {saveStateLabel[saveState]}
+            {loading ? 'Loading...' : saveStateLabel[saveState]}
           </span>
           <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
             {activityContext && `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
@@ -376,6 +374,11 @@ function StudentWorkspaceEditor({
           </button>
         </div>
       </div>
+      {saveError && (
+        <p className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-800" role="alert">
+          {saveError}
+        </p>
+      )}
 
       <SandboxRunControls mode={runMode} stdin={stdin} disabled={running || !practiceOpen}
         onMode={setRunMode} onStdin={setStdin} />
@@ -427,7 +430,6 @@ function StudentWorkspaceEditor({
               value={sourceCode}
               onChange={(value) => {
                 setSourceCode(value);
-                setSaveState('dirty');
               }}
               height="min(52vh, 520px)"
             />

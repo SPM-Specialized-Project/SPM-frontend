@@ -1,5 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import {
+  useCodePulseWorkspaceAutosave,
+  type WorkspaceAutosaveStatus,
+} from '@/hooks/use-codepulse-workspace-autosave';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { waitForExecution } from '@/services/codepulse-api';
 import {
@@ -15,6 +19,20 @@ import { SandboxRunControls } from './sandbox-run-controls';
 
 type StudentLabWorkspaceProps = {
   labs: CodePulseLab[];
+};
+
+const saveStatusLabel: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'Saving...',
+  saved: 'Saved',
+  dirty: 'Unsaved changes',
+  offline: 'Offline',
+};
+
+const saveStatusClass: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'text-slate-500',
+  saved: 'text-emerald-700',
+  dirty: 'text-amber-700',
+  offline: 'text-rose-700',
 };
 
 export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
@@ -111,22 +129,32 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
+  const {
+    status: saveStatus,
+    error: saveError,
+    saveNow,
+  } = useCodePulseWorkspaceAutosave({
+    workspace:
+      workspace?.id === selectedWorkspaceId ? workspace : undefined,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+    onSaved: setWorkspace,
+  });
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
-    setDrafts((current) => ({ ...current, [item.id]: item.sourceCode }));
   };
 
   const save = async () => {
     if (!workspace) return;
     setLoading(true);
     try {
-      const result = await codePulseApi.updateWorkspace(
-        workspace.id,
-        sourceCode,
+      const savedWorkspace = await saveNow();
+      setMessage(
+        savedWorkspace
+          ? 'Workspace saved.'
+          : 'Could not save workspace code.',
       );
-      replaceWorkspace(result.data.item);
-      setMessage('Đã lưu workspace của problem này.');
     } catch (error) {
       setMessage(
         error instanceof Error ? error.message : 'Không thể lưu workspace.',
@@ -140,8 +168,17 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     if (!workspace) return;
     setLoading(true);
     try {
+      const savedWorkspace = await saveNow();
+      if (!savedWorkspace) {
+        setMessage('Could not save workspace code before running.');
+        return;
+      }
       const workspaceId = workspace.id;
-      const result = await codePulseApi.executeWorkspace(workspaceId, sourceCode, { mode: runMode, stdin });
+      const result = await codePulseApi.executeWorkspace(workspaceId, savedWorkspace.sourceCode, {
+        mode: runMode,
+        stdin,
+        baseRevision: savedWorkspace.revision,
+      });
       if (selectedRef.current === workspaceId) setWorkspace((current) => current ? { ...current, executionResult: result.data.item } : current);
       const execution = await waitForExecution(result.data.item, (progress) => {
         if (selectedRef.current === workspaceId) setMessage(progress.state === 'QUEUED' ? 'Đang chờ worker...' : 'Đang chạy...');
@@ -314,6 +351,19 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   spellCheck={false}
                 />
               </label>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  className={saveStatusClass[saveStatus]}
+                  aria-live="polite"
+                >
+                  {saveStatusLabel[saveStatus]}
+                </span>
+                {saveError && (
+                  <span role="alert" className="text-rose-700">
+                    {saveError}
+                  </span>
+                )}
+              </div>
               <SandboxRunControls mode={runMode} stdin={stdin} disabled={loading || !practiceOpen}
                 onMode={setRunMode} onStdin={setStdin} />
               <div className="mt-3 flex flex-wrap gap-2">
