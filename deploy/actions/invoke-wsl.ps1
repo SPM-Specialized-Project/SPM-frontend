@@ -32,7 +32,7 @@ if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
 $wsl = Get-Command 'wsl.exe' -ErrorAction SilentlyContinue
 if (-not $wsl) { throw 'WSL is unavailable. Install WSL 2 and an Ubuntu distribution on this Windows runner.' }
 
-& $wsl.Source --distribution $distribution --exec bash -lc 'cd "$GITHUB_WORKSPACE" && exec node deploy/actions/wsl-deployment.mjs "$SPM_WSL_PHASE" "$SPM_WSL_RELEASE_ID"'
+& $wsl.Source --distribution $distribution --cd $env:GITHUB_WORKSPACE --exec node deploy/actions/wsl-deployment.mjs $env:SPM_WSL_PHASE $env:SPM_WSL_RELEASE_ID
 if ($LASTEXITCODE -ne 0) {
   exit $LASTEXITCODE
 }
