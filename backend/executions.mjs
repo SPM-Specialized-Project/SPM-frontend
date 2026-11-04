@@ -1,4 +1,5 @@
 import { randomUUID, createHash } from 'node:crypto';
+import { StringDecoder } from 'node:string_decoder';
 import { internalError, runSandbox, sandboxImageId, removeExecutionContainer } from './sandbox.mjs';
 
 export const executionView = ({ snapshot, ...item }) => item;
@@ -61,6 +62,7 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
         const passed = compared && !result.outputTruncated && normalize(result.stdout, record.snapshot.comparator) === normalize(test.expectedOutput, record.snapshot.comparator);
         record.results.push({ testCaseId: test.id, input: test.input, expectedOutput: test.expectedOutput,
           actualOutput: result.stdout, stderr: result.stderr, durationMs: result.runtimeMs,
+          memoryUsageKb: result.memoryUsageKb ?? null,
           outputTruncated: result.outputTruncated, exitCode: result.exitCode,
           status: compared ? passed ? 'PASSED' : 'WRONG_ANSWER' : result.status, passed });
         if (result.status === 'INTERNAL_ERROR') break;
@@ -68,11 +70,18 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
       const failure = record.results.find((result) => !['PASSED', 'WRONG_ANSWER', 'SUCCESS'].includes(result.status));
       record.status = failure?.status ?? 'SUCCESS';
       record.passedCount = record.status === 'INTERNAL_ERROR' ? 0 : record.results.filter((result) => result.passed).length;
-      record.stdout = record.results.map((result) => result.actualOutput).join('\n').slice(0, 32000);
-      record.stderr = record.results.map((result) => result.stderr).filter(Boolean).join('\n').slice(0, 32000);
+      const stdout = record.results.map((result) => result.actualOutput).join('\n');
+      const stderr = record.results.map((result) => result.stderr).filter(Boolean).join('\n');
+      // Bound each aggregate stream by UTF-8 bytes and flag aggregate truncation too.
+      const truncate = (value) => new StringDecoder('utf8').write(Buffer.from(value).subarray(0, 32000));
+      record.stdout = truncate(stdout);
+      record.stderr = truncate(stderr);
       record.runtimeMs = record.results.reduce((sum, result) => sum + result.durationMs, 0);
-      record.outputTruncated = record.results.some((result) => result.outputTruncated);
-      record.exitCode = failure?.exitCode ?? 0;
+      const memory = record.results.map((result) => result.memoryUsageKb).filter(Number.isFinite);
+      record.memoryUsageKb = memory.length ? Math.max(...memory) : null;
+      record.outputTruncated = record.results.some((result) => result.outputTruncated)
+        || Buffer.byteLength(stdout) > 32000 || Buffer.byteLength(stderr) > 32000;
+      record.exitCode = failure ? failure.exitCode ?? null : 0;
     } catch {
       Object.assign(record, internalError(), { passedCount: 0 });
     } finally {
@@ -97,7 +106,7 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
       const cpuTimeLimitMs = Math.min(Number(assignment.cpuTimeLimitMs) || 1000, 10000);
       const record = { ...metadata, id: `execution-${randomUUID()}`, assignmentVersionId: assignment.id,
         runtime: assignment.runtime, sourceCode, sourceHash: createHash('sha256').update(sourceCode).digest('hex'),
-        mode: input.mode, state: 'QUEUED', status: 'QUEUED', stdout: '', stderr: '', runtimeMs: 0,
+        mode: input.mode, state: 'QUEUED', status: 'QUEUED', stdout: '', stderr: '', runtimeMs: 0, memoryUsageKb: null,
         exitCode: null, passedCount: 0, totalCount: input.mode === 'STDIN' ? 0 : input.tests.length,
         executedAt: new Date().toISOString(),
         limits: { cpuTimeLimitMs, wallTimeLimitMs: cpuTimeLimitMs * 2 + 250,

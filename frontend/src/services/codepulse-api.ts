@@ -95,6 +95,7 @@ export type CodePulseExecutionResult = {
   stderr: string;
   exitCode: number | null;
   runtimeMs: number;
+  memoryUsageKb?: number | null;
   executedAt: string;
   passedCount?: number;
   totalCount?: number;
@@ -253,6 +254,8 @@ export type CodePulseRunResult = {
   status: 'PASSED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'OUTPUT_LIMIT' | 'COMPILE_ERROR' | 'SUCCESS' | 'TIME_LIMIT_EXCEEDED' | 'MEMORY_LIMIT_EXCEEDED' | 'OUTPUT_LIMIT_EXCEEDED' | 'INTERNAL_ERROR';
   passed: boolean;
   durationMs: number | null;
+  memoryUsageKb?: number | null;
+  outputTruncated?: boolean;
 };
 
 export type CodePulseRunSummary = {
@@ -412,8 +415,8 @@ export const codePulseApi = {
       `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode, ...options })),
   getExecution: (id: string) => request(() =>
     apiClient.get<{ item: CodePulseExecutionResult }>(`/codepulse/executions/${encodeURIComponent(id)}`)),
-  listExecutions: (workspaceId: string) => request(() =>
-    apiClient.get<{ items: CodePulseExecutionResult[] }>('/codepulse/executions', { params: { workspaceId } })),
+  listExecutions: (workspaceId: string, before?: string) => request(() =>
+    apiClient.get<{ items: CodePulseExecutionResult[]; nextCursor?: string | null }>('/codepulse/executions', { params: { workspaceId, before } })),
   revealWorkspaceHint: (id: string, hintId: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/hints/${encodeURIComponent(hintId)}`)),

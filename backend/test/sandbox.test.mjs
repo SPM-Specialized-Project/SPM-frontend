@@ -16,7 +16,12 @@ test('sandbox launch never mounts host paths or opens external network', () => {
 
 test('real Docker Python verdicts, CPU/wall/memory/output ceilings and isolation', async (t) => {
   const cases = [
-    ['stdin', 'print(input())', 'SUCCESS', { input: 'Hello' }, (r) => assert.equal(r.stdout, 'Hello\n')],
+    ['stdin', 'print(input())', 'SUCCESS', { input: 'Hello' }, (r) => { assert.equal(r.stdout, 'Hello\n'); assert.ok(r.memoryUsageKb > 0); }],
+    ['separate streams', 'import sys,time; print("<script>alert(1)</script>"); print("diagnostic", file=sys.stderr); time.sleep(0.05)', 'SUCCESS', {}, (r) => {
+      assert.equal(r.stdout, '<script>alert(1)</script>\n'); assert.equal(r.stderr, 'diagnostic\n');
+      assert.ok(r.runtimeMs >= 50); assert.ok(r.memoryUsageKb > 0);
+    }],
+    ['measured allocation', 'data = bytearray(20 * 1024 * 1024); print(len(data))', 'SUCCESS', {}, (r) => assert.ok(r.memoryUsageKb >= 20 * 1024)],
     ['syntax', 'def broken(:', 'COMPILE_ERROR'],
     ['runtime', 'raise ValueError("student error")', 'RUNTIME_ERROR'],
     ['recursion', 'def f(): return f()\nf()', 'RUNTIME_ERROR'],

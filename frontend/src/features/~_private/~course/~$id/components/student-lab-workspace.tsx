@@ -9,6 +9,7 @@ import {
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 
+import { ExecutionPanel } from './execution-panel';
 import { SandboxRunControls } from './sandbox-run-controls';
 
 type StudentLabWorkspaceProps = {
@@ -117,6 +118,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     try {
       const workspaceId = workspace.id;
       const result = await codePulseApi.executeWorkspace(workspaceId, sourceCode, { mode: runMode, stdin });
+      if (selectedRef.current === workspaceId) setWorkspace((current) => current ? { ...current, executionResult: result.data.item } : current);
       const execution = await waitForExecution(result.data.item, (progress) => {
         if (selectedRef.current === workspaceId) setMessage(progress.state === 'QUEUED' ? 'Đang chờ worker...' : 'Đang chạy...');
       });
@@ -274,30 +276,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
               </div>
 
               <div className="mt-6 grid gap-5 xl:grid-cols-2">
-                <section>
-                  <h6 className="font-semibold text-gray-900">
-                    Execution result
-                  </h6>
-                  {workspace.executionResult ? (
-                    <div className="mt-2 rounded-lg bg-slate-950 p-4 font-mono text-xs text-slate-100">
-                      <div className="mb-2 flex justify-between text-slate-400">
-                        <span>{workspace.executionResult.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : workspace.executionResult.status}</span>
-                        <span>
-                          {workspace.executionResult.runtimeMs} ms · exit{' '}
-                          {workspace.executionResult.exitCode}
-                        </span>
-                      </div>
-                      <p className="mb-2 text-slate-400">{workspace.executionResult.limits?.cpuTimeLimitMs} ms CPU · {workspace.executionResult.limits?.memoryLimitMb} MB</p>
-                      <pre className="whitespace-pre-wrap text-emerald-300">
-                        {[workspace.executionResult.stdout, workspace.executionResult.stderr].filter(Boolean).join('\n')}
-                      </pre>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-gray-500">
-                      Chưa có kết quả chạy cho problem này.
-                    </p>
-                  )}
-                </section>
+                <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={workspace.executionResult} />
 
                 <section>
                   <h6 className="font-semibold text-gray-900">Hints</h6>
