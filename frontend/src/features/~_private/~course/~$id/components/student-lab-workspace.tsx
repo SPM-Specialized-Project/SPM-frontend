@@ -141,6 +141,10 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     onSaved: setWorkspace,
   });
 
+  const replaceWorkspace = (item: CodePulseWorkspace) => {
+    setWorkspace(item);
+  };
+
   const save = async () => {
     if (!workspace) return;
     setLoading(true);
