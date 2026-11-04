@@ -30,6 +30,7 @@ export type CodePulseWorkspace = {
   assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
+  revision: number;
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
@@ -119,6 +120,7 @@ export type CodePulseExecutionResult = {
   stderr: string;
   exitCode: number | null;
   runtimeMs: number;
+  memoryUsageKb?: number | null;
   executedAt: string;
   passedCount?: number;
   totalCount?: number;
@@ -134,11 +136,42 @@ export type CodePulseWorkspaceHint = {
 
 export type CodePulseWorkspaceProblem = {
   id: string;
+  assignmentId: string;
+  assignmentVersionId: string;
   title: string;
   description: string;
   version: number;
   language: string;
   hints: CodePulseWorkspaceHint[];
+};
+
+export type CodePulseWorkspaceSubmissionStatus = 'PENDING' | 'JUDGING';
+
+export type CodePulseWorkspaceSubmission = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  labId: string;
+  labAssignmentId: string;
+  assignmentId: string;
+  assignmentVersionId: string;
+  assignmentVersion: {
+    id: string;
+    assignmentId: string;
+    version: number;
+    title: string;
+    language: string;
+  };
+  student: {
+    id: string;
+    membershipId: string;
+    name: string;
+    email: string;
+  };
+  sourceCode: string;
+  acceptedAt: string;
+  status: CodePulseWorkspaceSubmissionStatus;
+  gradingAttempts: unknown[];
 };
 
 export type CodePulseProblem = {
@@ -277,6 +310,8 @@ export type CodePulseRunResult = {
   status: 'PASSED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'OUTPUT_LIMIT' | 'COMPILE_ERROR' | 'SUCCESS' | 'TIME_LIMIT_EXCEEDED' | 'MEMORY_LIMIT_EXCEEDED' | 'OUTPUT_LIMIT_EXCEEDED' | 'INTERNAL_ERROR';
   passed: boolean;
   durationMs: number | null;
+  memoryUsageKb?: number | null;
+  outputTruncated?: boolean;
 };
 
 export type CodePulseRunSummary = {
@@ -428,25 +463,35 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
-  updateWorkspace: (id: string, sourceCode: string, baseRevision?: number) => request(() =>
+  updateWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}`, {
-        sourceCode,
-        ...(typeof baseRevision === 'number' ? { baseRevision } : {}),
-      })),
+      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode, baseRevision })),
   getWorkspaceStatus: (id: string) => request(() =>
     apiClient.get<{ item: { workspaceId: string; revision: number; updatedAt: string | null; lastSnapshotHash: string | null; snapshotCount: number } }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/status`)),
   getWorkspaceSnapshots: (id: string) => request(() =>
     apiClient.get<{ items: CodePulseSnapshot[] }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/snapshots`)),
-  executeWorkspace: (id: string, sourceCode: string, options?: { mode: 'STDIN' | 'PUBLIC_TESTS'; stdin: string }) => request(() =>
+  listWorkspaceSubmissions: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseWorkspaceSubmission[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`)),
+  submitWorkspace: (
+    id: string,
+    input: { sourceCode: string; requestKey: string; assignmentVersionId: string },
+  ) => request(() =>
+    apiClient.post<{ item: CodePulseWorkspaceSubmission; created: boolean }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`, input)),
+  executeWorkspace: (
+    id: string,
+    sourceCode: string,
+    options: { mode: 'STDIN' | 'PUBLIC_TESTS'; stdin: string; baseRevision: number },
+  ) => request(() =>
     apiClient.post<{ item: CodePulseExecutionResult }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode, ...options })),
   getExecution: (id: string) => request(() =>
     apiClient.get<{ item: CodePulseExecutionResult }>(`/codepulse/executions/${encodeURIComponent(id)}`)),
-  listExecutions: (workspaceId: string) => request(() =>
-    apiClient.get<{ items: CodePulseExecutionResult[] }>('/codepulse/executions', { params: { workspaceId } })),
+  listExecutions: (workspaceId: string, before?: string) => request(() =>
+    apiClient.get<{ items: CodePulseExecutionResult[]; nextCursor?: string | null }>('/codepulse/executions', { params: { workspaceId, before } })),
   revealWorkspaceHint: (id: string, hintId: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/hints/${encodeURIComponent(hintId)}`)),

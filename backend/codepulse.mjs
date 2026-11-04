@@ -1,4 +1,4 @@
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
 import { createHash, randomUUID } from 'node:crypto';
@@ -37,6 +37,7 @@ import {
   normalizeCourse13Memberships,
   USERS,
 } from './data/seeds.mjs';
+import { mutateSubmissions, readSubmissions } from './data/storage.mjs';
 
 const directory = DATA_DIRECTORY;
 const termFile = TERMS_FILE;
@@ -57,6 +58,8 @@ const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
 const MAX_MEMORY_LIMIT_MB = 1_024;
 const MAX_SOURCE_CODE_LENGTH = 200_000;
+const MAX_REQUEST_KEY_LENGTH = 128;
+const REQUEST_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
 
 const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
@@ -151,16 +154,33 @@ async function readRecords(file, initial) {
   }
 }
 
-function mutate(file, initial, callback) {
+function mutate(file, initial, callback, { durable = false } = {}) {
   const result = mutationQueue.then(async () => {
     const records = await readRecords(file, initial);
     const value = callback(records);
-    const temporary = `${file}.${randomUUID()}.tmp`;
-    try {
-      await writeFile(temporary, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
-      await rename(temporary, file);
-    } finally {
-      await rm(temporary, { force: true });
+    const serialized = `${JSON.stringify(records, null, 2)}\n`;
+    if (durable) {
+      const temporaryFile = `${file}.${randomUUID()}.tmp`;
+      try {
+        const handle = await open(temporaryFile, 'wx');
+        try {
+          await handle.writeFile(serialized, 'utf8');
+          await handle.sync();
+        } finally {
+          await handle.close();
+        }
+        await rename(temporaryFile, file);
+      } finally {
+        await rm(temporaryFile, { force: true });
+      }
+    } else {
+      const temporary = `${file}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporary, serialized, 'utf8');
+        await rename(temporary, file);
+      } finally {
+        await rm(temporary, { force: true });
+      }
     }
     return value;
   });
@@ -805,19 +825,80 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       practiceAccess: studentPracticeAccess(practiceContext),
     };
   };
+  const assertActiveSubmissionWindow = (context, acceptedAt) => {
+    if (!context.lab || !context.labAssignment) {
+      throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
+    }
+    if (context.lab.status !== 'LIVE') {
+      throw apiError(409, 'LAB_NOT_LIVE', 'Submissions are only accepted while the LAB is Live.');
+    }
+    const currentAccess = practiceAccessView(context.lab, context.labAssignment);
+    if (currentAccess.practiceAccess !== 'OPEN') {
+      if (currentAccess.practiceAccessReason === 'CLASSROOM_ARCHIVED') {
+        throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
+      }
+      if (currentAccess.practiceAccessReason === 'TERM_INACTIVE') {
+        throw apiError(409, 'PRACTICE_TERM_INACTIVE', 'The academic term is not active for submissions.');
+      }
+      if (currentAccess.practiceAccessReason === 'NOT_OPEN_YET') {
+        throw apiError(409, 'PRACTICE_WINDOW_NOT_OPEN', 'The practice window has not opened yet.');
+      }
+      throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'The practice window is closed.');
+    }
+    const acceptanceTime = acceptedAt.getTime();
+    const opensAt = Date.parse(context.labAssignment.practiceStartAt);
+    const closesAt = Date.parse(context.labAssignment.practiceEndAt);
+    if (acceptanceTime < opensAt) {
+      throw apiError(409, 'PRACTICE_WINDOW_NOT_OPEN', 'The practice window has not opened yet.');
+    }
+    if (acceptanceTime >= closesAt) {
+      throw apiError(409, 'PRACTICE_WINDOW_CLOSED', 'The practice window is closed.');
+    }
+  };
+  const validateRequestKey = (value) => {
+    if (typeof value !== 'string'
+      || value.length < 8
+      || value.length > MAX_REQUEST_KEY_LENGTH
+      || !REQUEST_KEY_PATTERN.test(value)) {
+      throw apiError(400, 'INVALID_REQUEST_KEY', 'requestKey must be 8-128 URL-safe characters.');
+    }
+    return value;
+  };
+  const codeSubmissionView = (submission) => ({
+    id: submission.id,
+    workspaceId: submission.workspaceId,
+    classroomId: submission.classroomId,
+    labId: submission.labId,
+    labAssignmentId: submission.labAssignmentId,
+    assignmentId: submission.assignmentId,
+    assignmentVersionId: submission.assignmentVersionId,
+    assignmentVersion: submission.assignmentVersion,
+    student: submission.student,
+    sourceCode: submission.sourceCode,
+    acceptedAt: submission.acceptedAt,
+    status: submission.status,
+    gradingAttempts: structuredClone(submission.gradingAttempts ?? []),
+  });
   const workspaceView = (workspace, context) => {
-    const base = {
-      ...workspace,
-      revision: workspace.revision ?? 1,
-      executionResult: workspace.executionResult ?? null,
-    };
-    if (!context.labAssignment) return base;
+    const visibleWorkspace = { ...workspace };
+    delete visibleWorkspace.revisions;
+    const revision = Number.isInteger(workspace.revision) ? workspace.revision : 0;
+    if (!context.labAssignment) {
+      return {
+        ...visibleWorkspace,
+        revision,
+        executionResult: workspace.executionResult ?? null,
+      };
+    }
     const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
     return {
-      ...workspace,
+      ...visibleWorkspace,
+      revision,
       executionResult: workspace.executionResult ?? null,
       problem: {
         id: context.labAssignment.id,
+        assignmentId: context.labAssignment.assignmentId,
+        assignmentVersionId: context.labAssignment.assignmentVersionId,
         title: context.labAssignment.title,
         description: context.labAssignment.description ?? '',
         version: context.labAssignment.version,
@@ -830,6 +911,48 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         })),
       },
     };
+  };
+  const writeWorkspaceRevision = (current, sourceCode, baseRevision, savedAt) => {
+    const currentRevision = Number.isInteger(current.revision) ? current.revision : 0;
+    if (baseRevision !== currentRevision) {
+      const details = {
+        conflict: true,
+        currentRevision,
+        serverSourceCode: current.sourceCode,
+        serverUpdatedAt: current.updatedAt,
+        workspaceId: current.id,
+      };
+      const conflict = apiError(
+        409,
+        'REVISION_CONFLICT',
+        'Code đã bị thay đổi ở một phiên làm việc khác.',
+        details,
+      );
+      conflict.currentRevision = currentRevision;
+      throw conflict;
+    }
+    if (current.sourceCode === sourceCode) return current;
+
+    const nextRevision = currentRevision + 1;
+    current.revisions ??= [];
+    current.revisions.push({
+      revision: nextRevision,
+      sourceCode,
+      savedAt,
+    });
+    current.sourceCode = sourceCode;
+    current.revision = nextRevision;
+    current.updatedAt = savedAt;
+    return current;
+  };
+  const requireBaseRevision = (body) => {
+    if (body.baseRevision === undefined) {
+      throw apiError(400, 'BASE_REVISION_REQUIRED', 'baseRevision is required to save workspace code.');
+    }
+    if (!Number.isInteger(body.baseRevision) || body.baseRevision < 0) {
+      throw apiError(400, 'INVALID_BASE_REVISION', 'baseRevision must be a non-negative integer.');
+    }
+    return body.baseRevision;
   };
   const publishedAssignmentVersions = (classroomId) => {
     const storedVersions = assignmentVersions.filter((item) =>
@@ -1477,6 +1600,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         termId: classroomItem.termId,
         ownerEmail: user.email,
         sourceCode: '',
+        revision: 0,
+        revisions: [],
         ...(practiceContext
           ? {
             labId: practiceContext.lab.id,
@@ -1492,7 +1617,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
 
     sendJson(response, 200, {
-      item: workspace,
+      item: workspaceView(workspace, workspaceContext(workspace)),
       ...(practiceContext ? {
         practiceWindow: {
           ...practiceContext.labAssignment,
@@ -1578,8 +1703,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
       throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
     }
-    const version = resolvePublishedAssignmentVersion(assignment, practiceContext.labAssignment.assignmentVersionId);
     const acceptedAt = practiceAccess.acceptedAt;
+    if (workspace && workspace.sourceCode !== sourceCode) {
+      const baseRevision = Number.isInteger(workspace.revision) ? workspace.revision : 0;
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const current = records.find((record) => record.id === workspace.id) ?? notFound();
+        return writeWorkspaceRevision(current, sourceCode, baseRevision, acceptedAt);
+      }, { durable: true });
+    }
+    const version = resolvePublishedAssignmentVersion(assignment, practiceContext.labAssignment.assignmentVersionId);
     const submission = await gradeSubmission({
       assignment,
       version,
@@ -1603,16 +1735,6 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       records.push(submission);
       return submission;
     });
-    if (workspace && workspace.sourceCode !== sourceCode) {
-      await mutate(workspaceFile, initialWorkspaces, (records) => {
-        const stored = records.find((record) => record.id === workspace.id);
-        if (stored) {
-          stored.sourceCode = sourceCode;
-          stored.updatedAt = acceptedAt;
-        }
-        return stored;
-      });
-    }
     await recordActivity({
       type: 'SUBMIT',
       context: practiceContext,
@@ -1681,9 +1803,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       const item = visible.find((execution) => execution.id === parts[3]) ?? notFound();
       sendJson(response, 200, { item });
     } else {
-      sendJson(response, 200, { items: visible.filter((execution) =>
+      const matches = visible.filter((execution) =>
         (!requestUrl.searchParams.has('workspaceId') || execution.workspaceId === requestUrl.searchParams.get('workspaceId'))
-        && (!requestUrl.searchParams.has('classroomId') || execution.classroomId === requestUrl.searchParams.get('classroomId'))).reverse().slice(0, 100) });
+        && (!requestUrl.searchParams.has('classroomId') || execution.classroomId === requestUrl.searchParams.get('classroomId'))).reverse();
+      const before = requestUrl.searchParams.get('before');
+      const cursor = before ? matches.findIndex((execution) => execution.id === before) : -1;
+      if (before && cursor === -1) throw apiError(400, 'INVALID_CURSOR', 'Invalid execution history cursor.');
+      const items = matches.slice(cursor + 1, cursor + 101);
+      sendJson(response, 200, { items,
+        nextCursor: cursor + 101 < matches.length ? items.at(-1).id : null });
     }
     return;
   }
@@ -2013,32 +2141,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (item.status === 'ARCHIVED') throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom đã được lưu trữ và chỉ đọc.');
     const body = await readRequestBody(request);
     if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode phải là chuỗi.');
-
-    // Optimistic Concurrency Control (SCRUM-135)
-    const currentRev = workspace.revision ?? 1;
-    if (body.baseRevision !== undefined && typeof body.baseRevision === 'number') {
-      if (body.baseRevision !== currentRev) {
-        throw apiError(409, 'REVISION_CONFLICT', 'Code đã bị thay đổi ở một phiên làm việc khác.', {
-          conflict: true,
-          currentRevision: currentRev,
-          serverSourceCode: workspace.sourceCode,
-          serverUpdatedAt: workspace.updatedAt,
-          workspaceId: workspace.id,
-        });
-      }
+    if (body.sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
     }
-
-    const nextRev = currentRev + 1;
-    const nowIso = new Date().toISOString();
+    const baseRevision = requireBaseRevision(body);
+    const savedAt = new Date().toISOString();
     const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
-      current.sourceCode = body.sourceCode;
-      current.revision = nextRev;
-      current.updatedAt = nowIso;
-      return current;
-    });
-
-    // Record immutable snapshot on SAVE (SCRUM-134)
+      return writeWorkspaceRevision(current, body.sourceCode, baseRevision, savedAt);
+    }, { durable: true });
     await recordWorkspaceSnapshot({
       workspace: updated,
       trigger: 'SAVE',
@@ -2060,6 +2171,150 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'submissions'
+    && (request.method === 'POST' || request.method === 'GET')) {
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const workspace = workspaces.find((item) => item.id === parts[3]) ?? notFound();
+    const context = workspaceContext(workspace);
+    const isOwner = user.role === 'student'
+      && normalizeEmail(workspace.ownerEmail) === normalizeEmail(user.email)
+      && isMember(context.classroomItem.id);
+    const lecturerCanRead = isDsaManager(context.classroomItem);
+
+    if (request.method === 'GET') {
+      if (!isOwner && !lecturerCanRead) deny();
+      const records = await readSubmissions();
+      const items = records
+        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id)
+        .map(codeSubmissionView);
+      sendJson(response, 200, { items });
+      return;
+    }
+
+    if (!isOwner) deny();
+    if (workspace.termId !== context.classroomItem.termId) deny();
+    const body = await readRequestBody(request);
+    const requestKey = validateRequestKey(body.requestKey);
+    if (typeof body.sourceCode !== 'string') {
+      throw apiError(400, 'INVALID_INPUT', 'sourceCode must be a string.');
+    }
+    if (!body.sourceCode.trim()) {
+      throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
+    }
+    if (body.sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code cannot exceed ${MAX_SOURCE_CODE_LENGTH} characters.`);
+    }
+    if (!context.lab || !context.labAssignment) {
+      throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
+    }
+    if (body.assignmentVersionId !== undefined
+      && body.assignmentVersionId !== context.labAssignment.assignmentVersionId) {
+      throw apiError(409, 'ASSIGNMENT_VERSION_MISMATCH', 'The requested problem version is not pinned to this workspace.');
+    }
+
+    const requestReceivedAt = new Date();
+    const membership = memberships.find((member) =>
+      belongsToClassroom(member, context.classroomItem.id)
+      && normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(user.email)
+      && isActiveMembership(member));
+    if (!membership) deny();
+
+    const canonicalPayload = JSON.stringify({
+      workspaceId: workspace.id,
+      classroomId: workspace.classroomId,
+      labId: workspace.labId,
+      labAssignmentId: workspace.labAssignmentId,
+      assignmentId: workspace.assignmentId,
+      assignmentVersionId: context.labAssignment.assignmentVersionId,
+      sourceCode: body.sourceCode,
+    });
+    const payloadHash = createHash('sha256').update(canonicalPayload).digest('hex');
+    const result = await mutateSubmissions((records) => {
+      const existing = records.find((record) =>
+        record.kind === 'CODE_SUBMISSION'
+        && normalizeEmail(record.student.email) === normalizeEmail(user.email)
+        && record.requestKey === requestKey);
+      if (existing) {
+        if (existing.payloadHash !== payloadHash) {
+          throw apiError(409, 'IDEMPOTENCY_CONFLICT', 'This requestKey was already accepted with a different payload.');
+        }
+        return { submission: existing, created: false };
+      }
+
+      assertActiveSubmissionWindow(context, requestReceivedAt);
+      const submission = {
+        kind: 'CODE_SUBMISSION',
+        id: `submission-${randomUUID()}`,
+        courseId: String(context.classroomItem.courseId),
+        termId: workspace.termId,
+        classroomId: workspace.classroomId,
+        labId: workspace.labId,
+        labAssignmentId: workspace.labAssignmentId,
+        assignmentId: workspace.assignmentId,
+        assignmentVersionId: context.labAssignment.assignmentVersionId,
+        assignmentVersion: {
+          id: context.labAssignment.assignmentVersionId,
+          assignmentId: context.labAssignment.assignmentId,
+          version: context.labAssignment.version,
+          title: context.labAssignment.title,
+          language: context.labAssignment.language ?? 'PYTHON',
+        },
+        workspaceId: workspace.id,
+        student: {
+          id: membership.studentId ?? user.email,
+          membershipId: membership.id,
+          name: membership.studentName ?? user.name ?? user.email,
+          email: user.email,
+        },
+        sourceCode: body.sourceCode,
+        acceptedAt: requestReceivedAt.toISOString(),
+        requestKey,
+        payloadHash,
+        status: 'PENDING',
+        gradingAttempts: [],
+      };
+      records.push(submission);
+      return { submission, created: true };
+    });
+
+    if (result.created) {
+      const activityContext = requestReceivedAt.getTime() >= parseDate(context.lab.startAt)
+        && requestReceivedAt.getTime() < parseDate(context.lab.endAt)
+        ? 'IN_LAB'
+        : 'OUTSIDE_LAB';
+      await recordActivity({
+        type: 'SUBMIT',
+        context,
+        activityAt: result.submission.acceptedAt,
+        metadata: {
+          assignmentId: workspace.assignmentId,
+          assignmentVersionId: context.labAssignment.assignmentVersionId,
+          activityContext,
+          workspaceId: workspace.id,
+          submissionId: result.submission.id,
+        },
+      });
+    }
+
+    sendJson(response, result.created ? 201 : 200, {
+      item: codeSubmissionView(result.submission),
+      created: result.created,
+    });
+    return;
+  }
+
+  if (parts[2] === 'submissions' && parts[3] && !parts[4] && request.method === 'GET') {
+    const records = await readSubmissions();
+    const submission = records.find((record) =>
+      record.kind === 'CODE_SUBMISSION' && record.id === parts[3]) ?? notFound();
+    const classroomItem = classroom(submission.classroomId);
+    const canRead = normalizeEmail(submission.student.email) === normalizeEmail(user.email)
+      || isDsaManager(classroomItem);
+    if (!canRead) deny();
+    sendJson(response, 200, { item: codeSubmissionView(submission) });
+    return;
+  }
+
   if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'execute' && request.method === 'POST') {
     if (user.role !== 'student') deny();
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
@@ -2070,8 +2325,23 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const access = assertWorkspaceWritable(workspace, context);
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
+    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', `Code không được vượt quá ${MAX_SOURCE_CODE_LENGTH} ký tự.`);
+    }
     if (!sourceCode.trim()) throw apiError(422, 'EMPTY_SOURCE_CODE', 'Source code cannot be empty.');
-    if (sourceCode.length > MAX_SOURCE_CODE_LENGTH) throw apiError(413, 'SOURCE_CODE_TOO_LARGE', 'Source exceeds 200000 characters.');
+    if (body.baseRevision !== undefined) {
+      const baseRevision = requireBaseRevision(body);
+      const currentRevision = Number.isInteger(workspace.revision) ? workspace.revision : 0;
+      if (baseRevision !== currentRevision) {
+        const conflict = apiError(
+          409,
+          'REVISION_CONFLICT',
+          `Workspace is at revision ${currentRevision}; reload it before running again.`,
+        );
+        conflict.currentRevision = currentRevision;
+        throw conflict;
+      }
+    }
     const linkedAssignment = assignments.find((assignment) => assignment.id === workspace.assignmentId
       && assignment.classroomId === workspace.classroomId && assignment.status === 'PUBLISHED');
     const versionId = context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId;
@@ -2087,14 +2357,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
       workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
     await markAssignmentVersionUsed(version.id);
-    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
-      const current = records.find((record) => record.id === workspace.id) ?? notFound();
-      current.sourceCode = sourceCode;
-      current.updatedAt = new Date().toISOString();
-      return current;
-    });
     await recordWorkspaceSnapshot({
-      workspace: updated,
+      workspace,
       trigger: 'RUN',
       sourceCode,
     });

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const DEPLOY_RUNNER_LABELS = ['self-hosted', 'linux', 'x64', 'local-deploy'];
+export const DEPLOY_RUNNER_LABELS = ['self-hosted', 'windows', 'x64', 'local-deploy'];
 
 export async function requireIdleDeployRunner({ repository, token,
   apiUrl = 'https://api.github.com', request = fetch }) {
@@ -32,7 +32,7 @@ export async function requireIdleDeployRunner({ repository, token,
     if (seen >= data.total_count || data.runners.length < 100) break;
     if (page === 100) throw new Error('Runner inventory pagination limit reached. Deployment stopped.');
   }
-  const detail = matching.length ? JSON.stringify(matching) : 'no runner matches self-hosted/linux/x64/local-deploy';
+  const detail = matching.length ? JSON.stringify(matching) : 'no runner matches self-hosted/windows/x64/local-deploy';
   throw new Error(`No idle local-deploy runner is online: ${detail}. Deployment stopped; retry when a runner is idle.`);
 }
 

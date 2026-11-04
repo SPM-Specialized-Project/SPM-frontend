@@ -12,6 +12,7 @@ import {
   type CodePulseVersionHistory,
 } from '@/services/codepulse-api';
 
+import { ExecutionSnapshot, ExecutionStatus } from './execution-panel';
 import { MonacoCodeEditor } from './monaco-code-editor';
 
 type AssignmentEditorProps = {
@@ -376,10 +377,9 @@ export function AssignmentEditor({ classroomId, classroom, canEdit }: Assignment
                         {versionHistory.executions?.map((execution) => (
                           <details key={execution.id} className="mt-2 rounded border border-gray-200 p-3 text-sm">
                             <summary className="cursor-pointer text-gray-800">
-                              {execution.ownerEmail} · {execution.mode} · {execution.state === 'FINISHED' ? execution.status : execution.state} · {new Date(execution.executedAt).toLocaleString()}
+                              {execution.ownerEmail} · {execution.mode} · <ExecutionStatus execution={execution} /> · {new Date(execution.executedAt).toLocaleString()}
                             </summary>
-                            <pre className="mt-2 whitespace-pre-wrap rounded bg-gray-950 p-3 text-xs text-gray-100">{execution.sourceCode}</pre>
-                            <pre className="mt-2 whitespace-pre-wrap text-xs">{[execution.stdout, execution.stderr].filter(Boolean).join('\n')}</pre>
+                            <ExecutionSnapshot execution={execution} />
                           </details>
                         ))}
                       </div>

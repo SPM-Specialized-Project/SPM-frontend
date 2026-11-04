@@ -1,19 +1,39 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { ConflictResolutionModal } from './conflict-resolution-modal';
+import {
+  useCodePulseWorkspaceAutosave,
+  type WorkspaceAutosaveStatus,
+} from '@/hooks/use-codepulse-workspace-autosave';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseLab,
   type CodePulseLabAssignment,
+  type CodePulseWorkspaceSubmission,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 
+import { ConflictResolutionModal } from './conflict-resolution-modal';
+import { ExecutionPanel } from './execution-panel';
 import { SandboxRunControls } from './sandbox-run-controls';
 
 type StudentLabWorkspaceProps = {
   labs: CodePulseLab[];
+};
+
+const saveStatusLabel: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'Saving...',
+  saved: 'Saved',
+  dirty: 'Unsaved changes',
+  offline: 'Offline',
+};
+
+const saveStatusClass: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'text-slate-500',
+  saved: 'text-emerald-700',
+  dirty: 'text-amber-700',
+  offline: 'text-rose-700',
 };
 
 export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
@@ -32,6 +52,14 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     serverSourceCode: string;
     serverUpdatedAt?: string;
   } | null>(null);
+  const [confirmingSubmission, setConfirmingSubmission] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submission, setSubmission] = useState<CodePulseWorkspaceSubmission>();
+  const [submissionError, setSubmissionError] = useState('');
+  const [pendingRequest, setPendingRequest] = useState<{
+    sourceCode: string;
+    requestKey: string;
+  }>();
   const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
   const [stdin, setStdin] = useState('');
   const selectedRef = useRef(selectedWorkspaceId);
@@ -61,12 +89,38 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   }, [assignments, selectedWorkspaceId]);
 
   useEffect(() => {
+    const handleOffline = () => {
+      setIsOnline(false);
+      setIsReconnecting(false);
+    };
+    const handleOnline = () => {
+      setIsOnline(true);
+      setIsReconnecting(true);
+    };
+    window.addEventListener('offline', handleOffline);
+    window.addEventListener('online', handleOnline);
+    return () => {
+      window.removeEventListener('offline', handleOffline);
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
+
+  useEffect(() => {
     let active = true;
     const workspaceId = selectedWorkspaceId;
     if (!workspaceId) {
       setWorkspace(undefined);
       return;
     }
+    setLoading(true);
+    setMessage('');
+    setWorkspace(undefined);
+    setSubmission(undefined);
+    setSubmissionError('');
+    setPendingRequest(undefined);
+    setConfirmingSubmission(false);
+    setSubmitting(false);
+    setConflictModal(null);
     const loadWorkspace = async () => {
       setLoading(true);
       setMessage('');
@@ -79,6 +133,13 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
           ...current,
           [workspaceId]: current[workspaceId] ?? result.data.item.sourceCode,
         }));
+        if (result.data.item.problem) {
+          void codePulseApi.listWorkspaceSubmissions(workspaceId)
+            .then((history) => {
+              if (active) setSubmission(history.data.items.at(-1));
+            })
+            .catch(() => {});
+        }
       } catch (error) {
         if (!active) return;
         setMessage(
@@ -97,41 +158,47 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
+  const {
+    status: saveStatus,
+    error: saveError,
+    saveNow,
+  } = useCodePulseWorkspaceAutosave({
+    workspace:
+      workspace?.id === selectedWorkspaceId ? workspace : undefined,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+    onSaved: setWorkspace,
+    onConflict: (conflict) => {
+      setIsReconnecting(false);
+      setConflictModal({ isOpen: true, ...conflict });
+      setMessage('⚠️ Phát hiện xung đột phiên bản! Vui lòng chọn cách giải quyết trong hộp thoại.');
+    },
+  });
+
+  useEffect(() => {
+    if (!isReconnecting) return;
+    if (saveStatus === 'saved' || (saveStatus === 'dirty' && saveError)) {
+      setIsReconnecting(false);
+    }
+  }, [isReconnecting, saveError, saveStatus]);
 
   const replaceWorkspace = (item: CodePulseWorkspace) => {
     setWorkspace(item);
-    setDrafts((current) => ({ ...current, [item.id]: item.sourceCode }));
   };
 
   const save = async (forcedRevision?: number) => {
     if (!workspace) return;
     setLoading(true);
     try {
-      const baseRev = forcedRevision !== undefined ? forcedRevision : (workspace.revision ?? 1);
-      const result = await codePulseApi.updateWorkspace(
-        workspace.id,
-        sourceCode,
-        baseRev,
-      );
-      replaceWorkspace(result.data.item);
-      setMessage('Đã lưu mã nguồn thành công.');
-      setConflictModal(null);
-    } catch (error: any) {
-      const errorDetails = error?.details ?? error?.response?.data?.details;
-      const status = error?.status ?? error?.response?.status;
-      if (status === 409 && errorDetails?.conflict) {
-        setConflictModal({
-          isOpen: true,
-          currentRevision: errorDetails.currentRevision,
-          serverSourceCode: errorDetails.serverSourceCode,
-          serverUpdatedAt: errorDetails.serverUpdatedAt,
-        });
-        setMessage('⚠️ Phát hiện xung đột phiên bản! Vui lòng chọn cách giải quyết trong hộp thoại.');
-      } else {
-        setMessage(
-          error instanceof Error ? error.message : 'Không thể lưu workspace.',
-        );
+      const savedWorkspace = await saveNow(forcedRevision);
+      if (savedWorkspace) {
+        setConflictModal(null);
+        setMessage('Đã lưu mã nguồn thành công.');
       }
+    } catch (error) {
+      setMessage(
+        error instanceof Error ? error.message : 'Không thể lưu workspace.',
+      );
     } finally {
       setLoading(false);
     }
@@ -149,6 +216,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
             ...current,
             sourceCode: conflictModal.serverSourceCode,
             revision: conflictModal.currentRevision,
+            updatedAt: conflictModal.serverUpdatedAt ?? current.updatedAt,
           }
         : undefined,
     );
@@ -165,8 +233,15 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
     if (!workspace) return;
     setLoading(true);
     try {
+      const savedWorkspace = await saveNow();
+      if (!savedWorkspace) return;
       const workspaceId = workspace.id;
-      const result = await codePulseApi.executeWorkspace(workspaceId, sourceCode, { mode: runMode, stdin });
+      const result = await codePulseApi.executeWorkspace(workspaceId, savedWorkspace.sourceCode, {
+        mode: runMode,
+        stdin,
+        baseRevision: savedWorkspace.revision,
+      });
+      if (selectedRef.current === workspaceId) setWorkspace((current) => current ? { ...current, executionResult: result.data.item } : current);
       const execution = await waitForExecution(result.data.item, (progress) => {
         if (selectedRef.current === workspaceId) setMessage(progress.state === 'QUEUED' ? 'Đang chờ worker...' : 'Đang chạy...');
       });
@@ -179,6 +254,42 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
       );
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() ??
+    `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
+  const submit = async () => {
+    if (!workspace?.problem || submitting || !practiceOpen) return;
+    const logicalRequest =
+      pendingRequest?.sourceCode === sourceCode
+        ? pendingRequest
+        : { sourceCode, requestKey: createRequestKey() };
+    setPendingRequest(logicalRequest);
+    setSubmitting(true);
+    setSubmissionError('');
+    try {
+      const result = await codePulseApi.submitWorkspace(workspace.id, {
+        sourceCode: logicalRequest.sourceCode,
+        requestKey: logicalRequest.requestKey,
+        assignmentVersionId: workspace.problem.assignmentVersionId,
+      });
+      setSubmission(result.data.item);
+      setPendingRequest(undefined);
+      setConfirmingSubmission(false);
+      setMessage(
+        result.data.created
+          ? 'Đã tiếp nhận bài nộp chính thức.'
+          : 'Đã khôi phục bài nộp đã được tiếp nhận trước đó.',
+      );
+    } catch (error) {
+      setSubmissionError(
+        error instanceof Error ? error.message : 'Không thể nộp bài.',
+      );
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -291,7 +402,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                 <textarea
                   aria-label="Source code"
                   value={sourceCode}
-                  readOnly={!practiceOpen}
+                  readOnly={!practiceOpen || Boolean(conflictModal)}
                   onChange={(event) =>
                     setDrafts((current) => ({
                       ...current,
@@ -302,6 +413,19 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   spellCheck={false}
                 />
               </label>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span
+                  className={saveStatusClass[saveStatus]}
+                  aria-live="polite"
+                >
+                  {saveStatusLabel[saveStatus]}
+                </span>
+                {saveError && (
+                  <span role="alert" className="text-rose-700">
+                    {saveError}
+                  </span>
+                )}
+              </div>
               <SandboxRunControls mode={runMode} stdin={stdin} disabled={loading || !practiceOpen}
                 onMode={setRunMode} onStdin={setStdin} />
               <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
@@ -322,6 +446,17 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   >
                     Run
                   </button>
+                  <button
+                    type="button"
+                    disabled={loading || submitting || !practiceOpen || !sourceCode.trim()}
+                    onClick={() => {
+                      setSubmissionError('');
+                      setConfirmingSubmission(true);
+                    }}
+                    className="rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
+                  >
+                    Submit
+                  </button>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -329,7 +464,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                     className={`inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-xs font-semibold shadow-sm ${
                       !isOnline
                         ? 'border border-rose-300 bg-rose-50 text-rose-800'
-                        : isReconnecting
+                        : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
                         ? 'border border-amber-300 bg-amber-50 text-amber-800 animate-pulse'
                         : 'border border-emerald-300 bg-emerald-50 text-emerald-800'
                     }`}
@@ -338,7 +473,7 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       className={`h-2.5 w-2.5 rounded-full ${
                         !isOnline
                           ? 'bg-rose-500'
-                          : isReconnecting
+                          : isReconnecting || saveStatus === 'saving' || saveStatus === 'dirty'
                           ? 'bg-amber-500'
                           : 'bg-emerald-500'
                       }`}
@@ -347,36 +482,27 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                       ? '○ Offline (Đang đệm vào bộ nhớ)'
                       : isReconnecting
                       ? '◌ Đang kết nối lại...'
+                      : saveStatus === 'saving'
+                      ? '◌ Đang đồng bộ...'
+                      : saveStatus === 'dirty'
+                      ? `● Chưa lưu • Bản #${workspace?.revision ?? 0}`
                       : `● Trực tuyến • Bản lưu #${workspace?.revision ?? 1}`}
                   </span>
                 </div>
               </div>
 
+              {submission && (
+                <p className="mt-3 text-sm text-slate-600" aria-live="polite">
+                  Submission <span className="font-mono">{submission.id}</span>{' '}
+                  <span className="font-semibold text-blue-700">
+                    {submission.status === 'PENDING' ? 'Pending' : 'Judging'}
+                  </span>
+                  {' '}· accepted {new Date(submission.acceptedAt).toLocaleString('vi-VN')}
+                </p>
+              )}
+
               <div className="mt-6 grid gap-5 xl:grid-cols-2">
-                <section>
-                  <h6 className="font-semibold text-gray-900">
-                    Execution result
-                  </h6>
-                  {workspace.executionResult ? (
-                    <div className="mt-2 rounded-lg bg-slate-950 p-4 font-mono text-xs text-slate-100">
-                      <div className="mb-2 flex justify-between text-slate-400">
-                        <span>{workspace.executionResult.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : workspace.executionResult.status}</span>
-                        <span>
-                          {workspace.executionResult.runtimeMs} ms · exit{' '}
-                          {workspace.executionResult.exitCode}
-                        </span>
-                      </div>
-                      <p className="mb-2 text-slate-400">{workspace.executionResult.limits?.cpuTimeLimitMs} ms CPU · {workspace.executionResult.limits?.memoryLimitMb} MB</p>
-                      <pre className="whitespace-pre-wrap text-emerald-300">
-                        {[workspace.executionResult.stdout, workspace.executionResult.stderr].filter(Boolean).join('\n')}
-                      </pre>
-                    </div>
-                  ) : (
-                    <p className="mt-2 text-sm text-gray-500">
-                      Chưa có kết quả chạy cho problem này.
-                    </p>
-                  )}
-                </section>
+                <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={workspace.executionResult} />
 
                 <section>
                   <h6 className="font-semibold text-gray-900">Hints</h6>
@@ -414,6 +540,58 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
                   </div>
                 </section>
               </div>
+              {confirmingSubmission && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation">
+                  <div
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="lab-submission-confirmation-title"
+                    className="w-full max-w-md rounded-xl bg-white p-5 shadow-xl"
+                  >
+                    <h5 id="lab-submission-confirmation-title" className="text-lg font-bold text-gray-900">
+                      Xác nhận nộp bài chính thức
+                    </h5>
+                    <p className="mt-2 text-sm text-gray-600">
+                      Source code hiện tại sẽ được lưu thành snapshot bất biến.
+                    </p>
+                    <dl className="mt-4 space-y-3 rounded-lg border border-gray-200 bg-slate-50 p-4 text-sm">
+                      <div>
+                        <dt className="text-xs font-semibold text-gray-500">Problem</dt>
+                        <dd className="mt-1 font-semibold text-gray-900">{workspace.problem.title}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs font-semibold text-gray-500">Pinned version</dt>
+                        <dd className="mt-1 font-mono text-gray-900">
+                          v{workspace.problem.version} · {workspace.problem.assignmentVersionId}
+                        </dd>
+                      </div>
+                    </dl>
+                    {submissionError && (
+                      <p className="mt-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800" role="alert">
+                        {submissionError}
+                      </p>
+                    )}
+                    <div className="mt-5 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        disabled={submitting}
+                        onClick={() => setConfirmingSubmission(false)}
+                        className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-40"
+                      >
+                        Hủy
+                      </button>
+                      <button
+                        type="button"
+                        disabled={submitting || !practiceOpen}
+                        onClick={() => void submit()}
+                        className="rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-gray-300"
+                      >
+                        {submitting ? 'Đang nộp...' : 'Nộp bài'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ) : null}
         </div>
