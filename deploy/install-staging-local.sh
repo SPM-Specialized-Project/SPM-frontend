@@ -55,8 +55,9 @@ sed "s|__CLOUDFLARED_PATH__|$cloudflared_path|g" \
   | sudo tee /etc/systemd/system/spm-staging-quick-tunnel.service >/dev/null
 sudo install -m 0644 deploy/nginx/spm-staging.conf \
   /etc/nginx/sites-available/spm-staging.conf
-sudo install -m 0755 deploy/bin/spm-staging-deploy \
-  /usr/local/sbin/spm-staging-deploy
+sed 's/\r$//' deploy/bin/spm-staging-deploy \
+  | sudo tee /usr/local/sbin/spm-staging-deploy >/dev/null
+sudo chmod 0755 /usr/local/sbin/spm-staging-deploy
 sudo ln -sfn /etc/nginx/sites-available/spm-staging.conf \
   /etc/nginx/sites-enabled/spm-staging.conf
 

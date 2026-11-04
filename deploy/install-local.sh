@@ -64,8 +64,9 @@ sed "s|__CLOUDFLARED_PATH__|$cloudflared_path|g" \
   | sudo tee /etc/systemd/system/spm-quick-tunnel.service >/dev/null
 sudo install -m 0644 deploy/nginx/spm.conf \
   /etc/nginx/sites-available/spm.conf
-sudo install -m 0755 deploy/bin/spm-deploy \
-  /usr/local/sbin/spm-deploy
+sed 's/\r$//' deploy/bin/spm-deploy \
+  | sudo tee /usr/local/sbin/spm-deploy >/dev/null
+sudo chmod 0755 /usr/local/sbin/spm-deploy
 sudo ln -sfn /etc/nginx/sites-available/spm.conf \
   /etc/nginx/sites-enabled/spm.conf
 
