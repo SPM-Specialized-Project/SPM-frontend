@@ -197,7 +197,7 @@ async function configurePublic(config) {
 }
 
 try {
-  if (process.platform !== 'linux' || process.getuid() !== 0) throw new Error('Deployment setup must run as root on the Linux runner.');
+  if (process.platform !== 'linux' || process.getuid() !== 0) throw new Error('Deployment setup must run as root inside the Linux deployment environment.');
   const [phase, file] = process.argv.slice(2);
   const input = JSON.parse(readFileSync(file, 'utf8'));
   const config = configurationFromEnvironment({
