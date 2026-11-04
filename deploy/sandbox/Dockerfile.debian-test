@@ -1,0 +1,9 @@
+# Trusted test harness only. Its Docker socket must never enter a student sandbox.
+FROM docker:29-cli AS docker-cli
+FROM node:22-bookworm-slim
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+RUN groupadd --gid 10001 spm && useradd --uid 10001 --gid spm --create-home spm
+COPY backend /workspace/backend
+WORKDIR /workspace/backend
+USER spm
+CMD ["node", "--test"]
