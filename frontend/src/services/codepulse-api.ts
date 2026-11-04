@@ -34,7 +34,6 @@ export type CodePulseWorkspace = {
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
-  revision?: number;
 };
 
 
