@@ -90,6 +90,7 @@ sudo visudo -cf /etc/sudoers.d/spm-staging-quick-tunnel
 
 sudo systemctl daemon-reload
 sudo systemctl enable nginx spm-staging-backend spm-staging-quick-tunnel.service
+sudo bash deploy/observability/install-host.sh
 sudo nginx -t
 sudo systemctl reload-or-restart nginx
 

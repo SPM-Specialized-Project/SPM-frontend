@@ -2,6 +2,20 @@
 
 Frontend có thể gửi lỗi và dữ liệu trải nghiệm trình duyệt tới từng nhà cung cấp riêng. Code dùng Datadog RUM, Sentry React SDK và Grafana Faro. SDK chỉ khởi tạo khi có đủ biến cấu hình; thiếu cấu hình thì app vẫn chạy như bình thường.
 
+## Chạy Grafana và Loki local
+
+Từ thư mục gốc repository, chạy PowerShell:
+
+```powershell
+.\deploy\observability\start-local.ps1
+```
+
+Mở Grafana qua Nginx tại `http://localhost:8081/observation/grafana/`. Tài khoản là `admin`; mật khẩu được tạo ngẫu nhiên và lưu trong `%LOCALAPPDATA%\SPM-Observability\grafana.env`. Có thể xem trực tiếp tại `http://localhost:3001/`, nhưng chỉ nên dùng đường dẫn Nginx khi truy cập UI. Dừng dịch vụ bằng `.\deploy\observability\stop-local.ps1`; dữ liệu vẫn được giữ trong Docker volumes.
+
+Grafana đã được provision datasource Loki (`http://loki:3100`) và Loki không mở cổng ra máy chủ. Khi triển khai trên WSL, Alloy đọc journal của `spm-backend.service` và `spm-staging-backend.service`, rồi gửi log vào Loki. Trong Grafana chọn **Explore → Loki** và chạy `{job="spm-backend"}` hoặc `{job="spm-staging-backend"}`. Bản local trên Windows chỉ khởi động Grafana và Loki; log sẽ trống cho tới khi có nguồn gửi log.
+
+Trên WSL deploy host, mật khẩu admin được lưu riêng ở `/etc/spm-observability/grafana.env`; chủ máy có thể đọc bằng `sudo cat /etc/spm-observability/grafana.env`. Không chạy lệnh đó trong GitHub Actions vì nó sẽ in credential vào log.
+
 ## Cấu hình local
 
 1. Tạo ứng dụng trình duyệt trong các dịch vụ bạn định dùng:
@@ -29,21 +43,20 @@ Tạo các **Actions variables** trong GitHub repository, tại **Settings → S
 | `GRAFANA_FARO_URL` | URL collector trong Web SDK Configuration của Grafana |
 | `GRAFANA_APP_NAME` | Tên frontend trong Grafana, mặc định `code-pulse-frontend` |
 | `GRAFANA_SESSION_SAMPLING_RATE` | Tỷ lệ phiên Grafana từ `0` đến `1`, mặc định `1` |
-| `GRAFANA_DASHBOARD_URL` | URL dashboard hoặc Frontend App trong Grafana |
 
-Các workflow build chuyển những biến này vào frontend và sinh cấu hình redirect Nginx. Chỉ dùng khóa public dành cho browser. `VITE_*` không phải nơi lưu secret; không đưa Sentry auth token, Datadog API key hay Grafana API key vào đó.
+Các workflow build chuyển biến telemetry vào frontend và sinh map Nginx cho URL Datadog/Sentry đã cấu hình. Grafana UI chạy riêng cùng Loki. Chỉ dùng khóa public dành cho browser. `VITE_*` không phải nơi lưu secret; không đưa Sentry auth token, Datadog API key hay Grafana API key vào đó.
 
-## Mở giao diện gốc của từng công cụ
+## Mở giao diện qua Nginx
 
-Nginx chuyển thẳng các đường dẫn sau tới UI/dashboard của nhà cung cấp; không cần route TypeScript trong frontend:
+Grafana được host tại đây, không chuyển hướng ra `grafana.com`:
 
-- `/observation/datadog`
-- `/observation/grafana`
-- `/observation/sentry`
+- Local: `http://localhost:8081/observation/grafana/`
+- Deploy GitHub Actions: `<Quick Tunnel URL>/observation/grafana/`
+- Grafana container: port `3000`; chỉ publish loopback `127.0.0.1:3001`; Nginx proxy theo path `/observation/grafana/`.
 
-Điền `*_DASHBOARD_URL` để Nginx chuyển tới dashboard/workspace cụ thể của bạn. Nếu chưa có URL, Nginx chuyển tới giao diện sản phẩm: Datadog RUM Explorer theo site đã chọn, Grafana Cloud portal hoặc trang chọn organization của Sentry. Các đường dẫn cũ `/obsesrvation/...` cũng được hỗ trợ. Đừng đặt access token hoặc secret trong dashboard URL.
+`/observation/datadog` và `/observation/sentry` dùng URL tenant/project riêng trong `DATADOG_DASHBOARD_URL` và `SENTRY_DASHBOARD_URL`. Nginx redirect thẳng tới đúng URL đã cấu hình. Khi chưa có URL, Nginx trả HTTP 503 kèm hướng dẫn cấu hình; không tự chuyển tới trang chung `datadog.com`, `grafana.com` hay `sentry.io`. Datadog/Sentry không được chạy trong Compose này. Các path gõ nhầm cũ `/obsesrvation/...` vẫn được hỗ trợ.
 
-Khi deploy qua GitHub Actions, Cloudflare Quick Tunnel có thể cấp hostname mới ở mỗi lần khởi động. Nginx dùng `server_name _` nên các path vẫn hoạt động trên hostname hiện tại; Nginx gửi redirect HTTP 302 trực tiếp tới URL dashboard đã cấu hình.
+Quick Tunnel có hostname ngẫu nhiên sau mỗi lần khởi động; dùng URL mới trong Actions summary. Nginx nhận hostname hiện tại và tiếp tục proxy Grafana ở cùng path.
 
 ## Dùng trong code
 
@@ -65,7 +78,7 @@ Các trường `feature` và context tự thêm chỉ nên chứa nhãn kỹ thu
 
 - **Datadog:** mở **Digital Experience → RUM Explorer**, lọc `service:code-pulse-frontend`, `env:staging` hoặc `env:production`; xem views, tài nguyên mạng, Web Vitals và lỗi.
 - **Sentry:** mở dự án browser rồi xem **Issues**; lọc theo môi trường và release để so sánh lỗi giữa các lần deploy.
-- **Grafana:** mở **Frontend → Frontend Apps → ứng dụng frontend**; xem lỗi, lượt điều hướng, phiên và Web Vitals. Với Grafana tự host, cần collector tương thích Faro, chẳng hạn Faro receiver của Grafana Alloy.
+- **Grafana/Loki:** mở **Explore → Loki**, rồi lọc `job="spm-backend"` hoặc `job="spm-staging-backend"` để xem log backend theo môi trường. Frontend Faro là luồng telemetry riêng và cần `GRAFANA_FARO_URL`.
 
 ## Mặc định thu thập và riêng tư
 
