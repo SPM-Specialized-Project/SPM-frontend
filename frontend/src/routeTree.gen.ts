@@ -32,6 +32,9 @@ import { Route as PrivateProfileIdIndexRouteImport } from './features/~_private/
 import { Route as PrivateObsesrvationSentryIndexRouteImport } from './features/~_private/~obsesrvation/~sentry/~index'
 import { Route as PrivateObsesrvationGrafanaIndexRouteImport } from './features/~_private/~obsesrvation/~grafana/~index'
 import { Route as PrivateObsesrvationDatadogIndexRouteImport } from './features/~_private/~obsesrvation/~datadog/~index'
+import { Route as PrivateObservationSentryIndexRouteImport } from './features/~_private/~observation/~sentry/~index'
+import { Route as PrivateObservationGrafanaIndexRouteImport } from './features/~_private/~observation/~grafana/~index'
+import { Route as PrivateObservationDatadogIndexRouteImport } from './features/~_private/~observation/~datadog/~index'
 import { Route as PrivateLibraryQueryIndexRouteImport } from './features/~_private/~library/~$query/~index'
 import { Route as PrivateCourseIdIndexRouteImport } from './features/~_private/~course/~$id/~index'
 import { Route as PrivateScheduleRequestNewIndexRouteImport } from './features/~_private/~schedule/~request/~new/~index'
@@ -169,6 +172,24 @@ const PrivateObsesrvationDatadogIndexRoute =
     path: '/obsesrvation/datadog/',
     getParentRoute: () => PrivateRoute,
   } as any)
+const PrivateObservationSentryIndexRoute =
+  PrivateObservationSentryIndexRouteImport.update({
+    id: '/observation/sentry/',
+    path: '/observation/sentry/',
+    getParentRoute: () => PrivateRoute,
+  } as any)
+const PrivateObservationGrafanaIndexRoute =
+  PrivateObservationGrafanaIndexRouteImport.update({
+    id: '/observation/grafana/',
+    path: '/observation/grafana/',
+    getParentRoute: () => PrivateRoute,
+  } as any)
+const PrivateObservationDatadogIndexRoute =
+  PrivateObservationDatadogIndexRouteImport.update({
+    id: '/observation/datadog/',
+    path: '/observation/datadog/',
+    getParentRoute: () => PrivateRoute,
+  } as any)
 const PrivateLibraryQueryIndexRoute =
   PrivateLibraryQueryIndexRouteImport.update({
     id: '/library/$query/',
@@ -250,6 +271,9 @@ export interface FileRoutesByFullPath {
   '/system-monitoring': typeof PrivateSystemMonitoringIndexRoute
   '/course/$id': typeof PrivateCourseIdIndexRoute
   '/library/$query': typeof PrivateLibraryQueryIndexRoute
+  '/observation/datadog': typeof PrivateObservationDatadogIndexRoute
+  '/observation/grafana': typeof PrivateObservationGrafanaIndexRoute
+  '/observation/sentry': typeof PrivateObservationSentryIndexRoute
   '/obsesrvation/datadog': typeof PrivateObsesrvationDatadogIndexRoute
   '/obsesrvation/grafana': typeof PrivateObsesrvationGrafanaIndexRoute
   '/obsesrvation/sentry': typeof PrivateObsesrvationSentryIndexRoute
@@ -285,6 +309,9 @@ export interface FileRoutesByTo {
   '/system-monitoring': typeof PrivateSystemMonitoringIndexRoute
   '/course/$id': typeof PrivateCourseIdIndexRoute
   '/library/$query': typeof PrivateLibraryQueryIndexRoute
+  '/observation/datadog': typeof PrivateObservationDatadogIndexRoute
+  '/observation/grafana': typeof PrivateObservationGrafanaIndexRoute
+  '/observation/sentry': typeof PrivateObservationSentryIndexRoute
   '/obsesrvation/datadog': typeof PrivateObsesrvationDatadogIndexRoute
   '/obsesrvation/grafana': typeof PrivateObsesrvationGrafanaIndexRoute
   '/obsesrvation/sentry': typeof PrivateObsesrvationSentryIndexRoute
@@ -322,6 +349,9 @@ export interface FileRoutesById {
   '/_private/system-monitoring/': typeof PrivateSystemMonitoringIndexRoute
   '/_private/course/$id/': typeof PrivateCourseIdIndexRoute
   '/_private/library/$query/': typeof PrivateLibraryQueryIndexRoute
+  '/_private/observation/datadog/': typeof PrivateObservationDatadogIndexRoute
+  '/_private/observation/grafana/': typeof PrivateObservationGrafanaIndexRoute
+  '/_private/observation/sentry/': typeof PrivateObservationSentryIndexRoute
   '/_private/obsesrvation/datadog/': typeof PrivateObsesrvationDatadogIndexRoute
   '/_private/obsesrvation/grafana/': typeof PrivateObsesrvationGrafanaIndexRoute
   '/_private/obsesrvation/sentry/': typeof PrivateObsesrvationSentryIndexRoute
@@ -359,6 +389,9 @@ export interface FileRouteTypes {
     | '/system-monitoring'
     | '/course/$id'
     | '/library/$query'
+    | '/observation/datadog'
+    | '/observation/grafana'
+    | '/observation/sentry'
     | '/obsesrvation/datadog'
     | '/obsesrvation/grafana'
     | '/obsesrvation/sentry'
@@ -394,6 +427,9 @@ export interface FileRouteTypes {
     | '/system-monitoring'
     | '/course/$id'
     | '/library/$query'
+    | '/observation/datadog'
+    | '/observation/grafana'
+    | '/observation/sentry'
     | '/obsesrvation/datadog'
     | '/obsesrvation/grafana'
     | '/obsesrvation/sentry'
@@ -430,6 +466,9 @@ export interface FileRouteTypes {
     | '/_private/system-monitoring/'
     | '/_private/course/$id/'
     | '/_private/library/$query/'
+    | '/_private/observation/datadog/'
+    | '/_private/observation/grafana/'
+    | '/_private/observation/sentry/'
     | '/_private/obsesrvation/datadog/'
     | '/_private/obsesrvation/grafana/'
     | '/_private/obsesrvation/sentry/'
@@ -620,6 +659,27 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof PrivateObsesrvationDatadogIndexRouteImport
       parentRoute: typeof PrivateRoute
     }
+    '/_private/observation/sentry/': {
+      id: '/_private/observation/sentry/'
+      path: '/observation/sentry'
+      fullPath: '/observation/sentry'
+      preLoaderRoute: typeof PrivateObservationSentryIndexRouteImport
+      parentRoute: typeof PrivateRoute
+    }
+    '/_private/observation/grafana/': {
+      id: '/_private/observation/grafana/'
+      path: '/observation/grafana'
+      fullPath: '/observation/grafana'
+      preLoaderRoute: typeof PrivateObservationGrafanaIndexRouteImport
+      parentRoute: typeof PrivateRoute
+    }
+    '/_private/observation/datadog/': {
+      id: '/_private/observation/datadog/'
+      path: '/observation/datadog'
+      fullPath: '/observation/datadog'
+      preLoaderRoute: typeof PrivateObservationDatadogIndexRouteImport
+      parentRoute: typeof PrivateRoute
+    }
     '/_private/library/$query/': {
       id: '/_private/library/$query/'
       path: '/library/$query'
@@ -713,6 +773,9 @@ interface PrivateRouteChildren {
   PrivateSystemMonitoringIndexRoute: typeof PrivateSystemMonitoringIndexRoute
   PrivateCourseIdIndexRoute: typeof PrivateCourseIdIndexRoute
   PrivateLibraryQueryIndexRoute: typeof PrivateLibraryQueryIndexRoute
+  PrivateObservationDatadogIndexRoute: typeof PrivateObservationDatadogIndexRoute
+  PrivateObservationGrafanaIndexRoute: typeof PrivateObservationGrafanaIndexRoute
+  PrivateObservationSentryIndexRoute: typeof PrivateObservationSentryIndexRoute
   PrivateObsesrvationDatadogIndexRoute: typeof PrivateObsesrvationDatadogIndexRoute
   PrivateObsesrvationGrafanaIndexRoute: typeof PrivateObsesrvationGrafanaIndexRoute
   PrivateObsesrvationSentryIndexRoute: typeof PrivateObsesrvationSentryIndexRoute
@@ -747,6 +810,9 @@ const PrivateRouteChildren: PrivateRouteChildren = {
   PrivateSystemMonitoringIndexRoute: PrivateSystemMonitoringIndexRoute,
   PrivateCourseIdIndexRoute: PrivateCourseIdIndexRoute,
   PrivateLibraryQueryIndexRoute: PrivateLibraryQueryIndexRoute,
+  PrivateObservationDatadogIndexRoute: PrivateObservationDatadogIndexRoute,
+  PrivateObservationGrafanaIndexRoute: PrivateObservationGrafanaIndexRoute,
+  PrivateObservationSentryIndexRoute: PrivateObservationSentryIndexRoute,
   PrivateObsesrvationDatadogIndexRoute: PrivateObsesrvationDatadogIndexRoute,
   PrivateObsesrvationGrafanaIndexRoute: PrivateObsesrvationGrafanaIndexRoute,
   PrivateObsesrvationSentryIndexRoute: PrivateObsesrvationSentryIndexRoute,
