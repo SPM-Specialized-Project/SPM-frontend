@@ -8,23 +8,35 @@ const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const distDirectory = path.join(frontendRoot, 'dist');
 const env = { ...loadEnv('production', frontendRoot, 'VITE_'), ...process.env };
 
+function datadogRumExplorerUrl(site) {
+  const normalizedSite = (site || 'datadoghq.com')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^app\./i, '')
+    .split('/')[0]
+    .toLowerCase();
+  const supportedSite = /^(?:[a-z0-9-]+\.)*(?:datadoghq\.com|datadoghq\.eu|ddog-gov\.com)$/;
+
+  return supportedSite.test(normalizedSite)
+    ? `https://app.${normalizedSite}/rum/explorer`
+    : 'https://app.datadoghq.com/rum/explorer';
+}
+
 const providers = [
   {
     name: 'datadog',
     target: env.VITE_DATADOG_DASHBOARD_URL,
-    fallback:
-      'https://docs.datadoghq.com/real_user_monitoring/application_monitoring/browser/setup/client/',
+    fallback: datadogRumExplorerUrl(env.VITE_DATADOG_SITE),
   },
   {
     name: 'grafana',
     target: env.VITE_GRAFANA_DASHBOARD_URL,
-    fallback:
-      'https://grafana.com/docs/grafana-cloud/observe-and-act/monitor-applications/frontend-observability/get-started/instrument-react/',
+    fallback: 'https://grafana.com/orgs/',
   },
   {
     name: 'sentry',
     target: env.VITE_SENTRY_DASHBOARD_URL,
-    fallback: 'https://docs.sentry.io/platforms/javascript/guides/react/',
+    fallback: 'https://sentry.io/organizations/',
   },
 ];
 

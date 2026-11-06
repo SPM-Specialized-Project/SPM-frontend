@@ -41,7 +41,7 @@ Nginx chuyển thẳng các đường dẫn sau tới UI/dashboard của nhà cu
 - `/observation/grafana`
 - `/observation/sentry`
 
-Điền `*_DASHBOARD_URL` để Nginx chuyển tới dashboard/workspace của bạn. Nếu chưa có URL, Nginx chuyển tới hướng dẫn chính thức của dịch vụ đó. Các đường dẫn cũ `/obsesrvation/...` cũng được hỗ trợ. Đừng đặt access token hoặc secret trong dashboard URL.
+Điền `*_DASHBOARD_URL` để Nginx chuyển tới dashboard/workspace cụ thể của bạn. Nếu chưa có URL, Nginx chuyển tới giao diện sản phẩm: Datadog RUM Explorer theo site đã chọn, Grafana Cloud portal hoặc trang chọn organization của Sentry. Các đường dẫn cũ `/obsesrvation/...` cũng được hỗ trợ. Đừng đặt access token hoặc secret trong dashboard URL.
 
 Khi deploy qua GitHub Actions, Cloudflare Quick Tunnel có thể cấp hostname mới ở mỗi lần khởi động. Nginx dùng `server_name _` nên các path vẫn hoạt động trên hostname hiện tại; Nginx gửi redirect HTTP 302 trực tiếp tới URL dashboard đã cấu hình.
 
