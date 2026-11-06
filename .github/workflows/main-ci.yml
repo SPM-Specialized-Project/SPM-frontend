@@ -122,7 +122,6 @@ jobs:
           VITE_GRAFANA_FARO_URL: ${{ vars.GRAFANA_FARO_URL }}
           VITE_GRAFANA_APP_NAME: ${{ vars.GRAFANA_APP_NAME }}
           VITE_GRAFANA_SESSION_SAMPLING_RATE: ${{ vars.GRAFANA_SESSION_SAMPLING_RATE }}
-          VITE_GRAFANA_DASHBOARD_URL: ${{ vars.GRAFANA_DASHBOARD_URL }}
         run: |
           npm ci
           npm run build
@@ -190,6 +189,8 @@ jobs:
 
           - Frontend: [$env:MAIN_URL/]($env:MAIN_URL/)
           - Backend health: [$env:MAIN_URL/api/health]($env:MAIN_URL/api/health)
+          - Local Grafana with Loki: [$env:MAIN_URL/observation/grafana/]($env:MAIN_URL/observation/grafana/)
+          - Datadog/Sentry: configure DATADOG_DASHBOARD_URL and SENTRY_DASHBOARD_URL to your account URLs.
           - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
           - Repository owner for main: configured GITEA_MAIN_OWNER, or codepulse-bot-main.
           - Gitea uses the same PostgreSQL database and volumes as staging.

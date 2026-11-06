@@ -8,40 +8,19 @@ const frontendRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 
 const distDirectory = path.join(frontendRoot, 'dist');
 const env = { ...loadEnv('production', frontendRoot, 'VITE_'), ...process.env };
 
-function datadogRumExplorerUrl(site) {
-  const normalizedSite = (site || 'datadoghq.com')
-    .trim()
-    .replace(/^https?:\/\//i, '')
-    .replace(/^app\./i, '')
-    .split('/')[0]
-    .toLowerCase();
-  const supportedSite = /^(?:[a-z0-9-]+\.)*(?:datadoghq\.com|datadoghq\.eu|ddog-gov\.com)$/;
-
-  return supportedSite.test(normalizedSite)
-    ? `https://app.${normalizedSite}/rum/explorer`
-    : 'https://app.datadoghq.com/rum/explorer';
-}
-
 const providers = [
   {
     name: 'datadog',
     target: env.VITE_DATADOG_DASHBOARD_URL,
-    fallback: datadogRumExplorerUrl(env.VITE_DATADOG_SITE),
-  },
-  {
-    name: 'grafana',
-    target: env.VITE_GRAFANA_DASHBOARD_URL,
-    fallback: 'https://grafana.com/orgs/',
   },
   {
     name: 'sentry',
     target: env.VITE_SENTRY_DASHBOARD_URL,
-    fallback: 'https://sentry.io/organizations/',
   },
 ];
 
-function safeTarget(value, fallback) {
-  if (!value?.trim()) return fallback;
+function safeTarget(value) {
+  if (!value?.trim()) return '';
 
   try {
     const url = new URL(value);
@@ -49,12 +28,12 @@ function safeTarget(value, fallback) {
       url.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(url.hostname);
 
     if ((url.protocol !== 'https:' && !localHttp) || url.username || url.password) {
-      return fallback;
+      return '';
     }
 
     return url.toString();
   } catch {
-    return fallback;
+    return '';
   }
 }
 
@@ -63,19 +42,28 @@ function nginxString(value) {
 }
 
 const lines = [
-  '# Generated during frontend build. Nginx redirects observability paths to provider UIs.',
-  'map $uri $spm_observability_redirect {',
-  '    default "";',
+  '# Generated during frontend build. Grafana is proxied locally; only configured account URLs are mapped.',
+  'map $http_upgrade $spm_connection_upgrade {',
+  '    default upgrade;',
+  '    "" close;',
+  '}',
 ];
 
 for (const provider of providers) {
-  const target = nginxString(safeTarget(provider.target, provider.fallback));
+  const target = safeTarget(provider.target);
   lines.push(
-    `    ~^/(observation|obsesrvation)/${provider.name}/?$ ${target};`,
+    `map $uri $spm_observability_${provider.name}_url {`,
+    '    default "";',
   );
+  if (target) {
+    lines.push(
+      `    ~^/(observation|obsesrvation)/${provider.name}/?$ ${nginxString(target)};`,
+    );
+  }
+  lines.push('}');
 }
 
-lines.push('}', '');
+lines.push('');
 
 await mkdir(distDirectory, { recursive: true });
 await writeFile(
