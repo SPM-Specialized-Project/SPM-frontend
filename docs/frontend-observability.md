@@ -23,12 +23,25 @@ Tạo các **Actions variables** trong GitHub repository, tại **Settings → S
 | `DATADOG_CLIENT_TOKEN` | Datadog Browser Client Token |
 | `DATADOG_SITE` | Site của tổ chức, ví dụ `datadoghq.com` |
 | `DATADOG_SESSION_SAMPLE_RATE` | Tỷ lệ phiên Datadog từ `0` đến `100`, mặc định `100` |
+| `DATADOG_DASHBOARD_URL` | URL RUM Explorer hoặc dashboard Datadog của bạn |
 | `SENTRY_DSN` | DSN của dự án browser |
+| `SENTRY_DASHBOARD_URL` | URL project Issues của Sentry |
 | `GRAFANA_FARO_URL` | URL collector trong Web SDK Configuration của Grafana |
 | `GRAFANA_APP_NAME` | Tên frontend trong Grafana, mặc định `code-pulse-frontend` |
 | `GRAFANA_SESSION_SAMPLING_RATE` | Tỷ lệ phiên Grafana từ `0` đến `1`, mặc định `1` |
+| `GRAFANA_DASHBOARD_URL` | URL dashboard hoặc Frontend App trong Grafana |
 
 Các workflow build đã chuyển những biến này vào bundle; environment được gắn nhãn `staging` hoặc `production`, và release là commit SHA. Chỉ dùng khóa public dành cho browser. `VITE_*` không phải nơi lưu secret; không đưa Sentry auth token, Datadog API key hay Grafana API key vào đó.
+
+## Mở giao diện gốc của từng công cụ
+
+Sau khi đăng nhập Code Pulse, các đường dẫn sau chuyển thẳng sang dashboard của nhà cung cấp:
+
+- `/obsesrvation/datadog`
+- `/obsesrvation/grafana`
+- `/obsesrvation/sentry`
+
+Điền `*_DASHBOARD_URL` để mở thẳng dashboard/workspace của bạn. Nếu chưa có URL, đường dẫn sẽ mở hướng dẫn chính thức của dịch vụ đó. Các route này dùng giao diện gốc của từng nhà cung cấp, không nhúng dashboard vào Code Pulse. Đừng đặt access token hoặc secret trong dashboard URL.
 
 ## Dùng trong code
 
