@@ -31,19 +31,19 @@ Tạo các **Actions variables** trong GitHub repository, tại **Settings → S
 | `GRAFANA_SESSION_SAMPLING_RATE` | Tỷ lệ phiên Grafana từ `0` đến `1`, mặc định `1` |
 | `GRAFANA_DASHBOARD_URL` | URL dashboard hoặc Frontend App trong Grafana |
 
-Các workflow build đã chuyển những biến này vào bundle; environment được gắn nhãn `staging` hoặc `production`, và release là commit SHA. Chỉ dùng khóa public dành cho browser. `VITE_*` không phải nơi lưu secret; không đưa Sentry auth token, Datadog API key hay Grafana API key vào đó.
+Các workflow build chuyển những biến này vào frontend và sinh cấu hình redirect Nginx. Chỉ dùng khóa public dành cho browser. `VITE_*` không phải nơi lưu secret; không đưa Sentry auth token, Datadog API key hay Grafana API key vào đó.
 
 ## Mở giao diện gốc của từng công cụ
 
-Sau khi đăng nhập Code Pulse, các đường dẫn sau chuyển thẳng sang dashboard của nhà cung cấp:
+Nginx chuyển thẳng các đường dẫn sau tới UI/dashboard của nhà cung cấp; không cần route TypeScript trong frontend:
 
 - `/observation/datadog`
 - `/observation/grafana`
 - `/observation/sentry`
 
-Điền `*_DASHBOARD_URL` để mở thẳng dashboard/workspace của bạn. Nếu chưa có URL, đường dẫn sẽ mở hướng dẫn chính thức của dịch vụ đó. Các route này dùng giao diện gốc của từng nhà cung cấp, không nhúng dashboard vào Code Pulse. Đừng đặt access token hoặc secret trong dashboard URL.
+Điền `*_DASHBOARD_URL` để Nginx chuyển tới dashboard/workspace của bạn. Nếu chưa có URL, Nginx chuyển tới hướng dẫn chính thức của dịch vụ đó. Các đường dẫn cũ `/obsesrvation/...` cũng được hỗ trợ. Đừng đặt access token hoặc secret trong dashboard URL.
 
-Khi deploy qua GitHub Actions, Cloudflare Quick Tunnel có thể cấp hostname mới ở mỗi lần khởi động. Nginx dùng `server_name _` và có location riêng cho ba đường dẫn trên; nó luôn trả SPA shell trên hostname hiện tại. Frontend sau đó chuyển trình duyệt tới URL dashboard tuyệt đối đã cấu hình, nên hostname ngẫu nhiên của tunnel không làm thay đổi các path. Các đường dẫn cũ viết nhầm `/obsesrvation/...` vẫn được giữ tương thích.
+Khi deploy qua GitHub Actions, Cloudflare Quick Tunnel có thể cấp hostname mới ở mỗi lần khởi động. Nginx dùng `server_name _` nên các path vẫn hoạt động trên hostname hiện tại; Nginx gửi redirect HTTP 302 trực tiếp tới URL dashboard đã cấu hình.
 
 ## Dùng trong code
 
