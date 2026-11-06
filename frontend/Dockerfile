@@ -17,8 +17,8 @@ FROM nginx:stable-alpine
 # Copy built static files from the builder stage
 COPY --from=builder /app/dist /usr/share/nginx/html
 
-# Use a custom nginx config to enable SPA fallback (uncomment if you add nginx.conf)
-# COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Serve the SPA and resolve direct visits to frontend routes.
+COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 3000
 CMD ["nginx", "-g", "daemon off;"]

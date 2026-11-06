@@ -43,6 +43,8 @@ Sau khi đăng nhập Code Pulse, các đường dẫn sau chuyển thẳng sang
 
 Điền `*_DASHBOARD_URL` để mở thẳng dashboard/workspace của bạn. Nếu chưa có URL, đường dẫn sẽ mở hướng dẫn chính thức của dịch vụ đó. Các route này dùng giao diện gốc của từng nhà cung cấp, không nhúng dashboard vào Code Pulse. Đừng đặt access token hoặc secret trong dashboard URL.
 
+Khi deploy qua GitHub Actions, Cloudflare Quick Tunnel có thể cấp hostname mới ở mỗi lần khởi động. Nginx dùng `server_name _` và có location riêng cho ba đường dẫn trên; nó luôn trả SPA shell trên hostname hiện tại. Frontend sau đó chuyển trình duyệt tới URL dashboard tuyệt đối đã cấu hình, nên hostname ngẫu nhiên của tunnel không làm thay đổi các path.
+
 ## Dùng trong code
 
 `ObservabilityErrorBoundary` bao quanh app và gửi lỗi React được bắt tới mọi SDK đang bật. Lỗi JavaScript không được xử lý cũng được các SDK tự thu nhận. Với lỗi đã xử lý trong `catch`, gọi helper chung:
