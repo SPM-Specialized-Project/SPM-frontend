@@ -6,6 +6,7 @@ After=network.target
 Type=simple
 User=spm
 Group=spm
+SupplementaryGroups=docker
 WorkingDirectory=/opt/spm-frontend/current/backend
 Environment=NODE_ENV=production
 EnvironmentFile=-/etc/spm-frontend/backend.env

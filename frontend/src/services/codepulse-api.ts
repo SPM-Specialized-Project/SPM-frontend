@@ -30,9 +30,33 @@ export type CodePulseWorkspace = {
   assignmentId?: string;
   ownerEmail: string;
   sourceCode: string;
+  revision: number;
   executionResult: CodePulseExecutionResult | null;
   problem?: CodePulseWorkspaceProblem;
   updatedAt?: string;
+};
+
+
+export type RevisionConflictDetails = {
+  conflict: boolean;
+  currentRevision: number;
+  serverSourceCode: string;
+  serverUpdatedAt?: string;
+  workspaceId: string;
+};
+
+export type CodePulseSnapshot = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  assignmentId?: string;
+  assignmentVersionId?: string | null;
+  studentEmail: string;
+  sourceCode: string;
+  hash: string;
+  revision: number;
+  trigger: 'SAVE' | 'RUN' | 'SUBMIT' | 'MANUAL';
+  createdAt: string;
 };
 
 export type CodePulseRuntime = 'PYTHON' | 'CPP';
@@ -80,11 +104,22 @@ export type CodePulseAssignmentInput = Omit<
 
 export type CodePulseExecutionResult = {
   id: string;
-  status: 'COMPLETED' | 'FAILED' | 'RUNTIME_ERROR';
+  status: 'QUEUED' | 'RUNNING' | 'SUCCESS' | 'COMPILE_ERROR' | 'RUNTIME_ERROR' | 'TIME_LIMIT_EXCEEDED' | 'MEMORY_LIMIT_EXCEEDED' | 'OUTPUT_LIMIT_EXCEEDED' | 'INTERNAL_ERROR';
+  state: 'QUEUED' | 'RUNNING' | 'FINISHED';
+  mode: 'STDIN' | 'PUBLIC_TESTS';
+  assignmentId: string;
+  assignmentVersionId: string;
+  runtime: CodePulseRuntime;
+  sourceHash: string;
+  sourceCode: string;
+  limits: { cpuTimeLimitMs: number; wallTimeLimitMs: number; memoryLimitMb: number };
+  ownerEmail: string;
+  outputTruncated?: boolean;
   stdout: string;
   stderr: string;
-  exitCode: number;
+  exitCode: number | null;
   runtimeMs: number;
+  memoryUsageKb?: number | null;
   executedAt: string;
   passedCount?: number;
   totalCount?: number;
@@ -100,11 +135,42 @@ export type CodePulseWorkspaceHint = {
 
 export type CodePulseWorkspaceProblem = {
   id: string;
+  assignmentId: string;
+  assignmentVersionId: string;
   title: string;
   description: string;
   version: number;
   language: string;
   hints: CodePulseWorkspaceHint[];
+};
+
+export type CodePulseWorkspaceSubmissionStatus = 'PENDING' | 'JUDGING';
+
+export type CodePulseWorkspaceSubmission = {
+  id: string;
+  workspaceId: string;
+  classroomId: string;
+  labId: string;
+  labAssignmentId: string;
+  assignmentId: string;
+  assignmentVersionId: string;
+  assignmentVersion: {
+    id: string;
+    assignmentId: string;
+    version: number;
+    title: string;
+    language: string;
+  };
+  student: {
+    id: string;
+    membershipId: string;
+    name: string;
+    email: string;
+  };
+  sourceCode: string;
+  acceptedAt: string;
+  status: CodePulseWorkspaceSubmissionStatus;
+  gradingAttempts: unknown[];
 };
 
 export type CodePulseProblem = {
@@ -237,17 +303,21 @@ export type CodePulseLabSubmission = CodePulseSubmission & {
 export type CodePulseRunResult = {
   testCaseId: string;
   input: string;
-  expectedOutput: string;
+  expectedOutput: string | null;
   actualOutput: string;
   stderr: string;
-  status: 'PASSED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'OUTPUT_LIMIT' | 'COMPILE_ERROR';
+  status: 'PASSED' | 'WRONG_ANSWER' | 'RUNTIME_ERROR' | 'TIMEOUT' | 'OUTPUT_LIMIT' | 'COMPILE_ERROR' | 'SUCCESS' | 'TIME_LIMIT_EXCEEDED' | 'MEMORY_LIMIT_EXCEEDED' | 'OUTPUT_LIMIT_EXCEEDED' | 'INTERNAL_ERROR';
   passed: boolean;
   durationMs: number | null;
+  memoryUsageKb?: number | null;
+  outputTruncated?: boolean;
 };
 
 export type CodePulseRunSummary = {
   assignmentId: string;
   assignmentVersionId: string;
+  status?: CodePulseExecutionResult['status'];
+  mode?: 'STDIN' | 'PUBLIC_TESTS';
   runtime: CodePulseRuntime;
   results: CodePulseRunResult[];
   passedCount: number;
@@ -279,6 +349,7 @@ export type CodePulseSubmission = {
 export type CodePulseVersionHistory = {
   item: CodePulseAssignmentVersion;
   submissions: Array<CodePulseSubmission & { studentEmail: string | null }>;
+  executions?: CodePulseExecutionResult[];
 };
 
 export const codePulseApi = {
@@ -391,12 +462,35 @@ export const codePulseApi = {
     apiClient.post<{ item: CodePulseLabSubmission }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/assignments/${encodeURIComponent(labAssignmentId)}/submit`,
       { sourceCode })),
-  updateWorkspace: (id: string, sourceCode: string) => request(() =>
+  updateWorkspace: (id: string, sourceCode: string, baseRevision: number) => request(() =>
     apiClient.patch<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode })),
-  executeWorkspace: (id: string, sourceCode: string) => request(() =>
-    apiClient.post<{ item: CodePulseWorkspace }>(
-      `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode })),
+      `/codepulse/workspaces/${encodeURIComponent(id)}`, { sourceCode, baseRevision })),
+  getWorkspaceStatus: (id: string) => request(() =>
+    apiClient.get<{ item: { workspaceId: string; revision: number; updatedAt: string | null; lastSnapshotHash: string | null; snapshotCount: number } }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/status`)),
+  getWorkspaceSnapshots: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseSnapshot[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/snapshots`)),
+  listWorkspaceSubmissions: (id: string) => request(() =>
+    apiClient.get<{ items: CodePulseWorkspaceSubmission[] }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`)),
+  submitWorkspace: (
+    id: string,
+    input: { sourceCode: string; requestKey: string; assignmentVersionId: string },
+  ) => request(() =>
+    apiClient.post<{ item: CodePulseWorkspaceSubmission; created: boolean }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/submissions`, input)),
+  executeWorkspace: (
+    id: string,
+    sourceCode: string,
+    options: { mode: 'STDIN' | 'PUBLIC_TESTS'; stdin: string; baseRevision: number },
+  ) => request(() =>
+    apiClient.post<{ item: CodePulseExecutionResult }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/execute`, { sourceCode, ...options })),
+  getExecution: (id: string) => request(() =>
+    apiClient.get<{ item: CodePulseExecutionResult }>(`/codepulse/executions/${encodeURIComponent(id)}`)),
+  listExecutions: (workspaceId: string, before?: string) => request(() =>
+    apiClient.get<{ items: CodePulseExecutionResult[]; nextCursor?: string | null }>('/codepulse/executions', { params: { workspaceId, before } })),
   revealWorkspaceHint: (id: string, hintId: string) => request(() =>
     apiClient.post<{ item: CodePulseWorkspace }>(
       `/codepulse/workspaces/${encodeURIComponent(id)}/hints/${encodeURIComponent(hintId)}`)),
@@ -404,3 +498,14 @@ export const codePulseApi = {
     apiClient.patch<{ item: { id: string; status: 'revoked' } }>(
       `/codepulse/memberships/${encodeURIComponent(id)}`, { status: 'revoked' })),
 };
+
+export async function waitForExecution(item: CodePulseExecutionResult, onProgress?: (item: CodePulseExecutionResult) => void) {
+  let current = item;
+  for (let poll = 0; current.state !== 'FINISHED'; poll += 1) {
+    if (poll >= 480) throw new Error('Run is still processing. Check Execution history.');
+    onProgress?.(current);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    current = (await codePulseApi.getExecution(current.id)).data.item;
+  }
+  return current;
+}

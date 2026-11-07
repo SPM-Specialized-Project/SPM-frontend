@@ -3,6 +3,9 @@ import http from 'node:http';
 import { PORT, SUBMISSIONS_FILE } from './config.mjs';
 import { handleRequest } from './routes.mjs';
 import { sendJson } from './http.mjs';
+import { initializeCodePulseExecutions } from './codepulse.mjs';
+
+await initializeCodePulseExecutions();
 
 const server = http.createServer((request, response) => {
   handleRequest(request, response).catch((error) => {
@@ -11,6 +14,8 @@ const server = http.createServer((request, response) => {
       code: error?.code ?? 'BACKEND_ERROR',
       message: error?.message ?? 'Backend error.',
       ...(error?.errors ? { errors: error.errors } : {}),
+      ...(error?.details ? { details: error.details } : {}),
+      ...(error?.currentRevision !== undefined ? { currentRevision: error.currentRevision } : {}),
     });
   });
 });

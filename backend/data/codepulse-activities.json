@@ -1,0 +1,15 @@
+[
+  {
+    "id": "activity-1792851399690-x0oo9q",
+    "type": "SAVE",
+    "classroomId": "class-1",
+    "labId": "lab-1790744799755",
+    "labAssignmentId": "lab-assignment-lab-1790744799755-3",
+    "assignmentId": "problem-3",
+    "termId": "term-2026-1",
+    "ownerEmail": "student@gmail.com",
+    "occurredAt": "2026-10-24T14:16:39.683Z",
+    "activityContext": "IN_LAB",
+    "workspaceId": "workspace-lab-1790744799755-lab-assignment-lab-1790744799755-3-membership-13-student-account-1"
+  }
+]

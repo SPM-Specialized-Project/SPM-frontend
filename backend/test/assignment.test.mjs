@@ -138,6 +138,13 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.equal(studentWorkspace.status, 200);
   assert.equal(studentWorkspace.data.item.assignmentId, 'problem-1');
   assert.equal(studentWorkspace.data.item.ownerEmail, 'student@gmail.com');
+  assert.equal(studentWorkspace.data.item.revision, 0);
+  const savedStudentWorkspace = await api(`/api/codepulse/workspaces/${studentWorkspace.data.item.id}`, student, 'PATCH', {
+    sourceCode: 'print("pasted solution")',
+    baseRevision: studentWorkspace.data.item.revision,
+  });
+  assert.equal(savedStudentWorkspace.status, 200);
+  assert.equal(savedStudentWorkspace.data.item.sourceCode, 'print("pasted solution")');
   const runResult = await api('/api/codepulse/classrooms/class-1/assignments/problem-1/run', student, 'POST', {
     sourceCode: 'print(input())',
   });
@@ -146,11 +153,6 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   assert.equal(runResult.data.item.totalCount, 1);
   assert.equal(runResult.data.item.results[0].status, 'PASSED');
   assert.equal(runResult.data.item.results[0].actualOutput.trim(), 'Hello');
-  const savedStudentWorkspace = await api(`/api/codepulse/workspaces/${studentWorkspace.data.item.id}`, student, 'PATCH', {
-    sourceCode: 'print("pasted solution")',
-  });
-  assert.equal(savedStudentWorkspace.status, 200);
-  assert.equal(savedStudentWorkspace.data.item.sourceCode, 'print("pasted solution")');
   assert.equal((await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}`, student)).status, 404);
 
   const incompletePublish = await api(`/api/codepulse/classrooms/class-1/assignments/${draft.data.item.id}/publish`, lecturer, 'POST');

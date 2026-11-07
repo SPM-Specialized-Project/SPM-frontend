@@ -483,6 +483,9 @@ async function handleRequest(request, response) {
     if (index < 0) throw apiError(404, 'SUBMISSION_NOT_FOUND', `Không tìm thấy submission ${parts[2]}.`);
 
     const current = records[index];
+    if (current.kind === 'CODE_SUBMISSION') {
+      throw apiError(409, 'IMMUTABLE_SUBMISSION', 'Accepted code submissions cannot be modified.');
+    }
     if (!['student', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền sửa bài nộp.');
     }
