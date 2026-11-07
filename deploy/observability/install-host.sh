@@ -10,6 +10,7 @@ sudo install -d -m 0755 "$install_root" "$install_root/loki" \
   "$install_root/grafana/provisioning/datasources" "$install_root/alloy"
 sudo install -d -m 0700 "$secrets_root"
 sudo install -m 0644 "$source_root/compose.yml" "$install_root/compose.yml"
+sudo install -m 0644 "$source_root/compose.host.yml" "$install_root/compose.host.yml"
 sudo install -m 0644 "$source_root/local-nginx.conf" "$install_root/local-nginx.conf"
 sudo install -m 0644 "$source_root/nginx-observability-defaults.conf" \
   "$install_root/nginx-observability-defaults.conf"
@@ -24,7 +25,6 @@ if ! sudo test -f "$env_file"; then
     'GRAFANA_ADMIN_USER=admin' \
     "GRAFANA_ADMIN_PASSWORD=$grafana_password" \
     'GRAFANA_ROOT_URL=%(protocol)s://%(domain)s/observation/grafana/' \
-    'GRAFANA_HOST_PORT=3001' \
     'OBSERVABILITY_VOLUME_PREFIX=spm-observability' \
     | sudo tee "$env_file" >/dev/null
   unset grafana_password
@@ -32,10 +32,16 @@ if ! sudo test -f "$env_file"; then
   sudo chmod 0600 "$env_file"
 fi
 
+if sudo grep -q '^GRAFANA_HOST_PORT=' "$env_file"; then
+  sudo sed -i '/^GRAFANA_HOST_PORT=/d' "$env_file"
+  sudo chmod 0600 "$env_file"
+fi
+
 sudo docker compose \
   --project-name spm-observability \
   --env-file "$env_file" \
   --file "$install_root/compose.yml" \
+  --file "$install_root/compose.host.yml" \
   --profile host-logs up --detach
 
-echo 'Local Grafana/Loki services are installed. Grafana is only published on loopback port 3001.'
+echo 'Local Grafana/Loki services are installed. Grafana is only published on loopback port 3101.'

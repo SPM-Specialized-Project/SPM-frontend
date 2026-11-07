@@ -10,7 +10,7 @@ Từ thư mục gốc repository, chạy PowerShell:
 .\deploy\observability\start-local.ps1
 ```
 
-Mở Grafana qua Nginx tại `http://localhost:8081/observation/grafana/`. Tài khoản là `admin`; mật khẩu được tạo ngẫu nhiên và lưu trong `%LOCALAPPDATA%\SPM-Observability\grafana.env`. Có thể xem trực tiếp tại `http://localhost:3001/`, nhưng chỉ nên dùng đường dẫn Nginx khi truy cập UI. Dừng dịch vụ bằng `.\deploy\observability\stop-local.ps1`; dữ liệu vẫn được giữ trong Docker volumes.
+Mở Grafana qua Nginx tại `http://localhost:8081/observation/grafana/`. Tài khoản là `admin`; mật khẩu được tạo ngẫu nhiên và lưu trong `%LOCALAPPDATA%\SPM-Observability\grafana.env`. Local chỉ mở gateway Nginx ở cổng `8081`; cổng Grafana `3000` nằm trong Docker network và không publish ra host. Dừng dịch vụ bằng `.\deploy\observability\stop-local.ps1`; dữ liệu vẫn được giữ trong Docker volumes.
 
 Grafana đã được provision datasource Loki (`http://loki:3100`) và Loki không mở cổng ra máy chủ. Khi triển khai trên WSL, Alloy đọc journal của `spm-backend.service` và `spm-staging-backend.service`, rồi gửi log vào Loki. Trong Grafana chọn **Explore → Loki** và chạy `{job="spm-backend"}` hoặc `{job="spm-staging-backend"}`. Bản local trên Windows chỉ khởi động Grafana và Loki; log sẽ trống cho tới khi có nguồn gửi log.
 
@@ -52,7 +52,8 @@ Grafana được host tại đây, không chuyển hướng ra `grafana.com`:
 
 - Local: `http://localhost:8081/observation/grafana/`
 - Deploy GitHub Actions: `<Quick Tunnel URL>/observation/grafana/`
-- Grafana container: port `3000`; chỉ publish loopback `127.0.0.1:3001`; Nginx proxy theo path `/observation/grafana/`.
+- Local: Nginx gateway port `8081` → Grafana container port `3000` trong Docker network.
+- Deploy host: Grafana container port `3000` → loopback `127.0.0.1:3101` → host Nginx path `/observation/grafana/`. Cổng `3101` không mở công khai.
 
 `/observation/datadog` và `/observation/sentry` dùng URL tenant/project riêng trong `DATADOG_DASHBOARD_URL` và `SENTRY_DASHBOARD_URL`. Nginx redirect thẳng tới đúng URL đã cấu hình. Khi chưa có URL, Nginx trả HTTP 503 kèm hướng dẫn cấu hình; không tự chuyển tới trang chung `datadog.com`, `grafana.com` hay `sentry.io`. Datadog/Sentry không được chạy trong Compose này. Các path gõ nhầm cũ `/obsesrvation/...` vẫn được hỗ trợ.
 
