@@ -93,8 +93,11 @@ function initializeDatadog(): Promise<void> {
     return Promise.resolve();
   }
 
-  return import('@datadog/browser-rum')
-    .then(({ datadogRum }) => {
+  return Promise.all([
+    import('@datadog/browser-rum'),
+    import('@datadog/browser-rum-react'),
+  ])
+    .then(([{ datadogRum }, { reactPlugin }]) => {
       clients.datadog = datadogRum;
       datadogRum.init({
         applicationId,
@@ -107,12 +110,16 @@ function initializeDatadog(): Promise<void> {
           import.meta.env.VITE_DATADOG_SESSION_SAMPLE_RATE,
           100,
         ),
-        sessionReplaySampleRate: 0,
-        trackUserInteractions: false,
+        sessionReplaySampleRate: percentage(
+          import.meta.env.VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE,
+          20,
+        ),
+        trackUserInteractions: true,
         trackResources: true,
         trackLongTasks: true,
         trackAnonymousUser: false,
         defaultPrivacyLevel: 'mask',
+        plugins: [reactPlugin({ router: false })],
         beforeSend: (event) => {
           if ('view' in event && event.view) {
             const view = event.view as { url?: string; referrer?: string };
