@@ -73,7 +73,7 @@ function appendOutput(name, value) {
 
 async function verifyLocal() {
   for (const route of ['/api/health', '/', '/git/', '/observation/grafana/api/health']) {
-    await requestOk(baseUrl + route, 10);
+    await requestOk(baseUrl + route, route === '/observation/grafana/api/health' ? 30 : 10);
   }
   console.log(`Local ${deployment} services passed health checks at ${baseUrl}.`);
 }
