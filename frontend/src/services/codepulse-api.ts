@@ -352,6 +352,68 @@ export type CodePulseVersionHistory = {
   executions?: CodePulseExecutionResult[];
 };
 
+export type CodePulseAssessmentState =
+  | 'PENDING'
+  | 'EVALUATING'
+  | 'EVALUATED'
+  | 'INSUFFICIENT_EVIDENCE'
+  | 'FAILED';
+
+export type CodePulseAssessment = {
+  id: string;
+  classroomId: string;
+  workspaceId: string;
+  studentEmail: string;
+  assignmentId: string;
+  assignmentVersionId: string | null;
+  snapshotId: string | null;
+  executionId: string | null;
+  submissionId: string | null;
+  milestone: 'SAVE' | 'RUN' | 'SUBMIT';
+  provider?: string | null;
+  model?: string | null;
+  state: CodePulseAssessmentState;
+  inputCoverage: { snapshot: boolean; problemVersion: boolean; executionContext: boolean };
+  resultCode?: string | null;
+  findingCount?: number;
+  createdAt: string;
+  updatedAt: string;
+  evaluatedAt?: string;
+};
+
+export type CodePulseCaseEvidence = {
+  id: string;
+  caseId: string;
+  assessmentId: string;
+  snapshotId: string;
+  executionId: string | null;
+  submissionId: string | null;
+  rationale: string;
+  references: Array<
+    | { kind: 'CODE'; snapshotId: string; lineStart: number; lineEnd: number; excerpt: string }
+    | { kind: 'TEST'; executionId: string; testCaseId: string; status: string; traceExcerpt?: string }
+    | { kind: 'EVENT'; eventId: string }
+  >;
+  createdAt: string;
+};
+
+export type CodePulseIssueCase = {
+  id: string;
+  classroomId: string;
+  workspaceId: string;
+  studentEmail: string;
+  assignmentId: string;
+  assignmentVersionId: string | null;
+  problemTypeId: string;
+  problemType: { id: string; name: string; description?: string };
+  episodeNumber: number;
+  status: 'ACTIVE' | 'RESOLVED' | 'DISMISSED';
+  createdAt: string;
+  updatedAt: string;
+  evidence: CodePulseCaseEvidence[];
+  relatedTestCaseIds: string[];
+};
+
 export const codePulseApi = {
   listTerms: (courseId = '13') => request(() => apiClient.get<{ items: CodePulseTerm[] }>('/codepulse/terms', { params: { courseId } })),
   createTerm: (item: Omit<CodePulseTerm, 'id' | 'status'>) => request(() =>
@@ -373,6 +435,17 @@ export const codePulseApi = {
   getDashboard: (id: string) => request(() =>
     apiClient.get<{ classroom: CodePulseClassroom; activeMembers: number }>(
       `/codepulse/classrooms/${encodeURIComponent(id)}/dashboard`)),
+  listAssessments: (classroomId: string) => request(() =>
+    apiClient.get<{ items: CodePulseAssessment[] }>('/codepulse/assessments', {
+      params: { classroomId },
+    })),
+  listIssueCases: (classroomId: string) => request(() =>
+    apiClient.get<{ items: CodePulseIssueCase[] }>('/codepulse/issue-cases', {
+      params: { classroomId },
+    })),
+  updateIssueCase: (id: string, status: 'RESOLVED' | 'DISMISSED') => request(() =>
+    apiClient.patch<{ item: Pick<CodePulseIssueCase, 'id' | 'status' | 'updatedAt'> }>(
+      `/codepulse/issue-cases/${encodeURIComponent(id)}`, { status })),
   getProblem: (classroomId: string, problemId: string) => request(() =>
     apiClient.get<{ item: CodePulseProblem }>(
       `/codepulse/classrooms/${encodeURIComponent(classroomId)}/problems/${encodeURIComponent(problemId)}`)),
