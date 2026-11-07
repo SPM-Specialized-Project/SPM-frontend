@@ -52,6 +52,19 @@ async function waitForVersion() {
   throw new Error('Gitea API did not become ready. Inspect the Gitea container logs in Actions.');
 }
 
+async function waitForGrafana() {
+  const url = 'http://127.0.0.1:3101/api/health';
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2000) });
+      if (response.ok) return;
+    } catch {}
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+  throw new Error('Grafana did not become ready after its public URL was updated.');
+}
+
 async function setup(config) {
   const deployment = deploymentFor(config.deployment);
   const backendEnvironment = deployment.environmentFile;
@@ -191,6 +204,22 @@ async function configurePublic(config) {
     run('docker', ['compose', '-p', state.project, '-f', baseFile, '-f', overrideFile, 'up', '-d', '--no-deps', 'gitea']);
   }
   await waitForVersion();
+
+  const grafanaEnvironmentFile = '/etc/spm-observability/grafana.env';
+  const grafanaRootUrl = new URL('/observation/grafana/', config.publicUrl).toString();
+  const grafanaEnvironment = readFileSync(grafanaEnvironmentFile, 'utf8');
+  if (readEnvironmentValue(grafanaEnvironment, 'GRAFANA_ROOT_URL') !== grafanaRootUrl) {
+    atomicWrite(grafanaEnvironmentFile, updateEnvironment(grafanaEnvironment, {
+      GRAFANA_ROOT_URL: grafanaRootUrl,
+    }), 0o600);
+    run('docker', ['compose', '--project-name', 'spm-observability',
+      '--env-file', grafanaEnvironmentFile,
+      '--file', '/opt/spm-observability/compose.yml',
+      '--file', '/opt/spm-observability/compose.host.yml',
+      '--profile', 'host-logs', 'up', '-d', '--no-deps', 'grafana']);
+    await waitForGrafana();
+  }
+
   atomicWrite(stateFile, JSON.stringify(state) + '\n');
   console.log('Gitea canonical public URL uses ' + state.canonicalEnvironment + '.');
   console.log('GITEA_PUBLIC_URL=' + rootUrl);
