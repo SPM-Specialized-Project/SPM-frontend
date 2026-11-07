@@ -1,6 +1,8 @@
 # CodePulse issue detection
 
-CodePulse stores one asynchronous assessment record for each saved, run, or submitted snapshot. Each record pins the problem version and tracks snapshot, execution, and submission coverage. The worker never participates in the student request's grading or sandbox result.
+CodePulse stores one asynchronous assessment record for each saved, run, or submitted snapshot. Each record pins the problem version and tracks snapshot, execution, and submission coverage. Events receive an idempotency key and a monotonically increasing sequence per workspace. Repeated event IDs return the original assessment. The worker holds later events when a sequence is missing, then resumes them in order when the gap is filled or after a service restart.
+
+Immutable submissions queue a sandbox execution against their pinned assignment version after the submission is accepted. The assessment worker waits for that execution result in the background; the submission endpoint does not wait for AI inference or test completion. If the runner cannot accept the job, the assessment records an infrastructure failure and does not create an issue case.
 
 ## Local AI providers
 
@@ -42,9 +44,11 @@ The provider must return JSON with a `findings` array. Each finding must use one
 
 ## Records and lecturer review
 
-`codepulse-issue-detection.json` stores assessments, approved problem types, issue cases, case evidence, and related test cases. Assessment states are `PENDING`, `EVALUATING`, `EVALUATED`, `INSUFFICIENT_EVIDENCE`, and `FAILED`. Only lecturers assigned to a classroom can list these records or change an active case to `RESOLVED` or `DISMISSED`. Students have no assessment or case diagnostics endpoint.
+`codepulse-issue-detection.json` stores assessments, approved problem types, issue cases, case evidence, and related test cases. Assessment states are `PENDING`, `EVALUATING`, `EVALUATED`, `INSUFFICIENT_EVIDENCE`, and `FAILED`. Only lecturers assigned to a classroom can list these records or change an active case to `RESOLVED` or `DISMISSED`. Students have no assessment or case diagnostics endpoint. The existing immutable snapshot API is `GET`/`POST /api/codepulse/workspaces/:workspaceId/snapshots`; lecturer reads are limited to workspaces in classrooms they manage.
 
-The lecturer view is in the DSA course's Terms and classrooms section. It refreshes assessment states periodically and shows case rationale, snapshot excerpts, execution references, and related test case IDs.
+The lecturer view is in the DSA course's Terms and classrooms section. It provides a student summary table, case and milestone filters, case lifecycle controls, and inspectable snapshot/test evidence. Authenticated server-sent events update the view after assessment or case changes; a slower polling refresh is retained for recovery if the stream is unavailable. The stream is limited to lecturers assigned to the requested classroom.
+
+Backend regression coverage in `backend/test/issue-detection.test.mjs` exercises concurrent event ordering, duplicate delivery, active-case evidence accumulation, sequence-gap recovery, restart recovery, and the separation of runner errors, provider failures, and unverifiable findings. The snapshot endpoint's immutability and revision behavior are also covered by `backend/test/snapshot-conflict.test.mjs`.
 
 ## Evaluation quality gate
 

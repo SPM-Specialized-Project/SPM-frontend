@@ -41,7 +41,7 @@ const failingStatuses = new Set([
 
 function createStateStore(file) {
   let queue = Promise.resolve();
-  const read = async () => {
+  const readState = async () => {
     await mkdir(path.dirname(file), { recursive: true });
     try {
       const value = JSON.parse(await readFile(file, 'utf8'));
@@ -62,9 +62,14 @@ function createStateStore(file) {
       return state;
     }
   };
-  const mutate = (callback) => {
-    const result = queue.then(async () => {
-      const state = await read();
+  const enqueue = (operation) => {
+    const result = queue.then(operation);
+    queue = result.then(() => undefined, () => undefined);
+    return result;
+  };
+  const read = () => enqueue(readState);
+  const mutate = (callback) => enqueue(async () => {
+      const state = await readState();
       const value = await callback(state);
       const temporary = `${file}.${randomUUID()}.tmp`;
       try {
@@ -75,9 +80,6 @@ function createStateStore(file) {
       }
       return value;
     });
-    queue = result.catch(() => {});
-    return result;
-  };
   return { read, mutate };
 }
 const DEFAULT_OLLAMA_MODEL = 'qwen3:4b';
@@ -310,9 +312,99 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
   const store = createStateStore(file);
   const awaitingExecution = new Map();
   const pendingIds = [];
+  const queuedIds = new Set();
+  const inFlightIds = new Set();
+  const listeners = new Set();
   let initialized = false;
+  let initializing = null;
   let working = false;
   let pumpRequested = false;
+
+  const emit = (event) => {
+    for (const listener of listeners) {
+      try { listener(event); } catch {}
+    }
+  };
+
+  const missingSequence = (state, assessment) => {
+    const present = new Set(state.assessments
+      .filter((item) => item.workspaceId === assessment.workspaceId
+        && Number.isInteger(item.eventSequence)
+        && item.eventSequence > 0
+        && item.eventSequence < assessment.eventSequence)
+      .map((item) => item.eventSequence));
+    for (let sequence = 1; sequence < assessment.eventSequence; sequence += 1) {
+      if (!present.has(sequence)) return sequence;
+    }
+    return null;
+  };
+
+  const orderAssessments = (items) => {
+    const byWorkspace = new Map();
+    for (const assessment of items) {
+      if (!byWorkspace.has(assessment.workspaceId)) byWorkspace.set(assessment.workspaceId, []);
+      byWorkspace.get(assessment.workspaceId).push(assessment);
+    }
+    const queues = [...byWorkspace.entries()].map(([workspaceId, assessments]) => ({
+      workspaceId,
+      assessments: assessments.sort((left, right) => left.eventSequence - right.eventSequence),
+    }));
+    const ordered = [];
+    while (queues.some((queue) => queue.assessments.length)) {
+      queues.sort((left, right) => {
+        const leftNext = left.assessments[0];
+        const rightNext = right.assessments[0];
+        if (!leftNext && !rightNext) return 0;
+        if (!leftNext) return 1;
+        if (!rightNext) return -1;
+        return leftNext.createdAt.localeCompare(rightNext.createdAt)
+          || left.workspaceId.localeCompare(right.workspaceId)
+          || leftNext.eventSequence - rightNext.eventSequence;
+      });
+      ordered.push(queues[0].assessments.shift());
+    }
+    return ordered;
+  };
+
+  const refreshPendingQueue = async () => {
+    const result = await store.mutate((state) => {
+      const changed = [];
+      const pending = state.assessments.filter((item) => item.state === 'PENDING');
+      const ready = [];
+      for (const assessment of pending) {
+        const gap = missingSequence(state, assessment);
+        if (gap !== null) {
+          if (assessment.resultCode !== 'EVENT_SEQUENCE_GAP' || assessment.missingEventSequence !== gap) {
+            assessment.resultCode = 'EVENT_SEQUENCE_GAP';
+            assessment.missingEventSequence = gap;
+            assessment.updatedAt = new Date().toISOString();
+            changed.push({ classroomId: assessment.classroomId, assessmentId: assessment.id });
+          }
+          continue;
+        }
+        if (assessment.resultCode === 'EVENT_SEQUENCE_GAP') {
+          assessment.resultCode = null;
+          delete assessment.missingEventSequence;
+          assessment.updatedAt = new Date().toISOString();
+          changed.push({ classroomId: assessment.classroomId, assessmentId: assessment.id });
+        }
+        ready.push(assessment);
+      }
+      return { ready: orderAssessments(ready), changed };
+    });
+
+    for (const item of result.changed) emit({ type: 'assessment', ...item });
+    const priority = new Map(result.ready.map((assessment, index) => [assessment.id, index]));
+    for (const assessment of result.ready) {
+      if (queuedIds.has(assessment.id) || inFlightIds.has(assessment.id)) continue;
+      const index = pendingIds.findIndex((id) => priority.has(id)
+        && priority.get(assessment.id) < priority.get(id));
+      if (index === -1) pendingIds.push(assessment.id);
+      else pendingIds.splice(index, 0, assessment.id);
+      queuedIds.add(assessment.id);
+    }
+    if (pendingIds.length) schedule();
+  };
 
   const schedule = () => {
     if (pumpRequested) return;
@@ -320,16 +412,33 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
     setImmediate(() => { pumpRequested = false; void pump(); });
   };
 
-  const finish = async (id, patch) => store.mutate((state) => {
-    const assessment = state.assessments.find((item) => item.id === id);
-    if (!assessment || terminalStates.has(assessment.state)) return assessment;
-    Object.assign(assessment, patch, { updatedAt: new Date().toISOString() });
-    return assessmentView(assessment);
-  });
+  const finish = async (id, patch) => {
+    const result = await store.mutate((state) => {
+      const assessment = state.assessments.find((item) => item.id === id);
+      if (!assessment || terminalStates.has(assessment.state)) return assessment;
+      Object.assign(assessment, patch, { updatedAt: new Date().toISOString() });
+      return assessmentView(assessment);
+    });
+    if (result) emit({ type: 'assessment', classroomId: result.classroomId, assessmentId: result.id });
+    return result;
+  };
 
   const process = async (id) => {
     let assessment = await store.read().then((state) => state.assessments.find((item) => item.id === id));
     if (!assessment || assessment.state !== 'PENDING') return;
+    const initialState = await store.read();
+    const missingEventSequence = missingSequence(initialState, assessment);
+    if (missingEventSequence !== null) {
+      await store.mutate((state) => {
+        const current = state.assessments.find((item) => item.id === id);
+        if (!current || current.state !== 'PENDING') return;
+        current.resultCode = 'EVENT_SEQUENCE_GAP';
+        current.missingEventSequence = missingEventSequence;
+        current.updatedAt = new Date().toISOString();
+      });
+      emit({ type: 'assessment', classroomId: assessment.classroomId, assessmentId: id });
+      return;
+    }
     if (!assessment.inputCoverage?.snapshot || !assessment.inputCoverage?.problemVersion) {
       await finish(id, { state: 'INSUFFICIENT_EVIDENCE', resultCode: 'PINNED_INPUT_UNAVAILABLE', evaluatedAt: new Date().toISOString() });
       return;
@@ -366,6 +475,7 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
           current.inputCoverage.executionContext = true;
           current.updatedAt = new Date().toISOString();
         });
+        emit({ type: 'assessment', classroomId: assessment.classroomId, assessmentId: id });
       }
       assessment = await store.read().then((state) => state.assessments.find((item) => item.id === id));
       execution = assessment?.analysisInput?.execution ?? null;
@@ -382,6 +492,7 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
 
     await finish(id, { state: 'EVALUATING', startedAt: new Date().toISOString() });
     assessment = await store.read().then((state) => state.assessments.find((item) => item.id === id));
+    if (!assessment) return;
     try {
       const snapshot = await resolveSnapshot(assessment.snapshotId);
       if (!snapshot) {
@@ -476,6 +587,8 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
           updatedAt: new Date().toISOString(),
         });
       });
+      emit({ type: 'assessment', classroomId: assessment.classroomId, assessmentId: id });
+      emit({ type: 'issue-cases', classroomId: assessment.classroomId, assessmentId: id });
     } catch (error) {
       const code = failureCode(error);
       console.error(`CodePulse assessment ${id} failed (${code}).`);
@@ -487,12 +600,15 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
     if (working || !pendingIds.length) return;
     working = true;
     const id = pendingIds.shift();
+    queuedIds.delete(id);
+    inFlightIds.add(id);
     try {
       await process(id);
     } catch (error) {
       console.error(`CodePulse assessment ${id} could not be processed (${failureCode(error)}).`);
       try { await finish(id, { state: 'FAILED', resultCode: failureCode(error), evaluatedAt: new Date().toISOString() }); } catch {}
     } finally {
+      inFlightIds.delete(id);
       working = false;
       if (pendingIds.length) schedule();
     }
@@ -501,75 +617,127 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
   return {
     async initialize() {
       if (initialized) return;
-      const state = await store.read();
-      const resumable = await store.mutate((latest) => {
-        const items = [];
-        for (const assessment of latest.assessments) {
-          if (assessment.state === 'EVALUATING') assessment.state = 'PENDING';
-          if (assessment.state === 'PENDING') items.push(assessment.id);
+      if (initializing) return initializing;
+      initializing = (async () => {
+        await store.mutate((latest) => {
+          const byWorkspace = new Map();
+          for (const assessment of latest.assessments) {
+            if (!byWorkspace.has(assessment.workspaceId)) byWorkspace.set(assessment.workspaceId, []);
+            byWorkspace.get(assessment.workspaceId).push(assessment);
+          }
+          for (const assessments of byWorkspace.values()) {
+            const used = new Set(assessments.filter((item) => Number.isInteger(item.eventSequence) && item.eventSequence > 0)
+              .map((item) => item.eventSequence));
+            for (const assessment of assessments.sort((left, right) => left.createdAt.localeCompare(right.createdAt))) {
+              assessment.eventId ??= assessment.id;
+              if (!Number.isInteger(assessment.eventSequence) || assessment.eventSequence < 1) {
+                let sequence = 1;
+                while (used.has(sequence)) sequence += 1;
+                assessment.eventSequence = sequence;
+                used.add(sequence);
+              }
+            }
+          }
+          for (const assessment of latest.assessments) {
+            if (assessment.state === 'EVALUATING') assessment.state = 'PENDING';
+          }
+        });
+        const state = await store.read();
+        if (state.problemTypes.length === 0) {
+          await store.mutate((latest) => { latest.problemTypes = structuredClone(APPROVED_PROBLEM_TYPES); });
         }
-        return items;
-      });
-      pendingIds.push(...resumable);
-      initialized = true;
-      if (state.problemTypes.length === 0) {
-        await store.mutate((latest) => { latest.problemTypes = structuredClone(APPROVED_PROBLEM_TYPES); });
+        await refreshPendingQueue();
+        initialized = true;
+      })();
+      try {
+        await initializing;
+      } catch (error) {
+        initializing = null;
+        throw error;
       }
-      schedule();
     },
-    async trigger({ workspace, snapshot, assignmentVersion, milestone, executionId = null, submissionId = null, executionPromise = null, execution = null }) {
+    async trigger({ workspace, snapshot, assignmentVersion, milestone, executionId = null, submissionId = null, executionPromise = null, execution = null, eventId, eventSequence }) {
       await this.initialize();
-      const state = await store.read();
-      const inputCoverage = {
-        snapshot: Boolean(snapshot?.id),
-        problemVersion: Boolean(assignmentVersion?.id),
-        executionContext: Boolean(execution),
-      };
-      const id = `assessment-${randomUUID()}`;
-      const assessment = {
-        id,
-        classroomId: workspace.classroomId,
-        workspaceId: workspace.id,
-        studentEmail: workspace.ownerEmail,
-        assignmentId: workspace.assignmentId,
-        assignmentVersionId: assignmentVersion?.id ?? null,
-        snapshotId: snapshot?.id ?? null,
-        executionId,
-        submissionId,
+      if (eventSequence !== undefined && (!Number.isInteger(eventSequence) || eventSequence < 1)) {
+        throw Object.assign(new Error('eventSequence must be a positive integer.'), { code: 'INVALID_EVENT_SEQUENCE' });
+      }
+      const resolvedEventId = eventId || JSON.stringify([
+        workspace.id,
         milestone,
-        ...primaryProviderMetadata(),
-        state: 'PENDING',
-        inputCoverage,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-        analysisInput: {
-          milestone,
-          executionContextId: executionId ?? submissionId,
-          snapshot: snapshot ? {
-            id: snapshot.id,
-            hash: snapshot.hash,
-            revision: snapshot.revision,
-          } : null,
-          problem: assignmentVersion ? {
-            id: assignmentVersion.assignmentId,
-            versionId: assignmentVersion.id,
-            version: assignmentVersion.version,
-            title: assignmentVersion.title,
-            description: assignmentVersion.description ?? '',
-            constraints: assignmentVersion.constraints ?? '',
-            inputFormat: assignmentVersion.inputFormat ?? '',
-            outputFormat: assignmentVersion.outputFormat ?? '',
-            runtime: assignmentVersion.runtime ?? assignmentVersion.language ?? null,
-          } : null,
-          execution: execution ? clone(execution) : null,
+        snapshot?.id ?? randomUUID(),
+        executionId ?? submissionId ?? '',
+      ]);
+      const result = await store.mutate((latest) => {
+        const existing = latest.assessments.find((item) => item.eventId === resolvedEventId);
+        if (existing) {
+          if (eventSequence !== undefined && existing.eventSequence !== eventSequence) {
+            throw Object.assign(new Error('This event ID is already bound to a different sequence.'), { code: 'EVENT_SEQUENCE_CONFLICT' });
+          }
+          return { assessment: existing, created: false };
+        }
+        const workspaceAssessments = latest.assessments.filter((item) => item.workspaceId === workspace.id);
+        const usedSequences = new Set(workspaceAssessments.map((item) => item.eventSequence).filter((value) => Number.isInteger(value) && value > 0));
+        const resolvedSequence = eventSequence ?? (Math.max(0, ...usedSequences) + 1);
+        if (usedSequences.has(resolvedSequence)) {
+          throw Object.assign(new Error('This event sequence is already assigned.'), { code: 'EVENT_SEQUENCE_CONFLICT' });
+        }
+        const assessment = {
+          id: `assessment-${randomUUID()}`,
+          eventId: resolvedEventId,
+          eventSequence: resolvedSequence,
+          classroomId: workspace.classroomId,
+          workspaceId: workspace.id,
+          studentEmail: workspace.ownerEmail,
+          assignmentId: workspace.assignmentId,
+          assignmentVersionId: assignmentVersion?.id ?? null,
+          snapshotId: snapshot?.id ?? null,
+          executionId,
           submissionId,
-          problemTypes: state.problemTypes.filter((item) => item.approved === true).map(({ id: typeId, name, description }) => ({ id: typeId, name, description })),
-        },
-      };
-      await store.mutate((latest) => latest.assessments.push(assessment));
-      if (executionPromise) awaitingExecution.set(id, executionPromise);
-      pendingIds.push(id);
-      schedule();
+          milestone,
+          ...primaryProviderMetadata(),
+          state: 'PENDING',
+          inputCoverage: {
+            snapshot: Boolean(snapshot?.id),
+            problemVersion: Boolean(assignmentVersion?.id),
+            executionContext: Boolean(execution),
+          },
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          analysisInput: {
+            eventId: resolvedEventId,
+            eventSequence: resolvedSequence,
+            milestone,
+            executionContextId: executionId ?? submissionId,
+            snapshot: snapshot ? {
+              id: snapshot.id,
+              hash: snapshot.hash,
+              revision: snapshot.revision,
+            } : null,
+            problem: assignmentVersion ? {
+              id: assignmentVersion.assignmentId,
+              versionId: assignmentVersion.id,
+              version: assignmentVersion.version,
+              title: assignmentVersion.title,
+              description: assignmentVersion.description ?? '',
+              constraints: assignmentVersion.constraints ?? '',
+              inputFormat: assignmentVersion.inputFormat ?? '',
+              outputFormat: assignmentVersion.outputFormat ?? '',
+              runtime: assignmentVersion.runtime ?? assignmentVersion.language ?? null,
+            } : null,
+            execution: execution ? clone(execution) : null,
+            submissionId,
+            problemTypes: latest.problemTypes.filter((item) => item.approved === true).map(({ id: typeId, name, description }) => ({ id: typeId, name, description })),
+          },
+        };
+        latest.assessments.push(assessment);
+        return { assessment, created: true };
+      });
+      const assessment = result.assessment;
+      if (executionPromise && assessment.state === 'PENDING' && !assessment.analysisInput?.execution) {
+        awaitingExecution.set(assessment.id, executionPromise);
+      }
+      if (result.created) emit({ type: 'assessment', classroomId: assessment.classroomId, assessmentId: assessment.id });
+      await refreshPendingQueue();
       return assessmentView(assessment);
     },
     async listAssessments(classroomId) {
@@ -591,7 +759,7 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
         }));
     },
     async updateIssueCaseStatus(id, status) {
-      return store.mutate((state) => {
+      const result = await store.mutate((state) => {
         const item = state.issueCases.find((candidate) => candidate.id === id);
         if (!item) return null;
         if (item.status !== 'ACTIVE' || !['RESOLVED', 'DISMISSED'].includes(status)) {
@@ -601,10 +769,16 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
         item.updatedAt = new Date().toISOString();
         return { ...item };
       });
+      if (result) emit({ type: 'issue-cases', classroomId: result.classroomId, issueCaseId: result.id });
+      return result;
     },
     async getIssueCase(id) {
       const state = await store.read();
       return state.issueCases.find((item) => item.id === id) ?? null;
+    },
+    subscribe(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
 }

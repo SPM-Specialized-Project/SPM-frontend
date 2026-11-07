@@ -20,6 +20,7 @@ import {
 SNAPSHOTS_FILE,
   EXECUTIONS_FILE,
   ISSUE_DETECTION_FILE,
+  CORS_ORIGIN,
 } from './config.mjs';
 import { createIssueDetectionService } from './issue-detection.mjs';
 import {
@@ -1169,6 +1170,38 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const item = classroom(classroomId);
     if (!isDsaManager(item)) deny();
     sendJson(response, 200, { items: await issueDetection.listAssessments(item.id) });
+    return;
+  }
+
+  if (parts[2] === 'issue-events' && !parts[3] && request.method === 'GET') {
+    if (user.role !== 'lecturer') deny();
+    const classroomId = requestUrl.searchParams.get('classroomId');
+    if (!classroomId) throw apiError(400, 'CLASSROOM_REQUIRED', 'classroomId is required.');
+    const item = classroom(classroomId);
+    if (!isDsaManager(item)) deny();
+
+    response.writeHead(200, {
+      'Access-Control-Allow-Credentials': 'true',
+      'Access-Control-Allow-Origin': CORS_ORIGIN,
+      'Cache-Control': 'no-cache, no-transform',
+      Connection: 'keep-alive',
+      'Content-Type': 'text/event-stream; charset=utf-8',
+      'X-Accel-Buffering': 'no',
+    });
+    response.flushHeaders?.();
+    response.write('event: ready\ndata: {}\n\n');
+    const unsubscribe = issueDetection.subscribe((event) => {
+      if (event.classroomId !== item.id || response.destroyed || response.writableEnded) return;
+      response.write(`event: update\ndata: ${JSON.stringify(event)}\n\n`);
+    });
+    const heartbeat = setInterval(() => {
+      if (!response.destroyed && !response.writableEnded) response.write(': keep-alive\n\n');
+    }, 15_000);
+    heartbeat.unref?.();
+    response.on('close', () => {
+      clearInterval(heartbeat);
+      unsubscribe();
+    });
     return;
   }
 
@@ -2500,13 +2533,46 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         },
       });
       try {
+        const assignment = assignments.find((item) => item.id === workspace.assignmentId
+          && item.classroomId === workspace.classroomId) ?? notFound();
+        const version = resolvePublishedAssignmentVersion(assignment, context.labAssignment.assignmentVersionId);
         const snapshot = await recordWorkspaceSnapshot({ workspace, trigger: 'SUBMIT', sourceCode: body.sourceCode, assignmentVersionId: context.labAssignment.assignmentVersionId });
+        let queuedExecution = null;
+        try {
+          queuedExecution = await executions.enqueue({
+            assignment: version,
+            sourceCode: body.sourceCode,
+            body: {},
+            assignmentId: workspace.assignmentId,
+            classroomId: workspace.classroomId,
+            ownerEmail: user.email,
+            workspaceId: workspace.id,
+            labId: workspace.labId,
+            labAssignmentId: workspace.labAssignmentId,
+          });
+        } catch (error) {
+          console.error(`CodePulse submission execution could not be queued (${error?.code ?? 'EXECUTION_QUEUE_ERROR'}).`);
+        }
+        const executionId = queuedExecution?.item.id ?? `submission-execution-${result.submission.id}`;
         await enqueueAssessment({
           workspace,
           snapshot,
-          assignmentVersion: resolveWorkspaceAssessmentVersion(workspace, context),
+          assignmentVersion: version,
           milestone: 'SUBMIT',
           submissionId: result.submission.id,
+          executionId,
+          ...(queuedExecution ? {
+            executionPromise: queuedExecution.completion,
+          } : {
+            execution: {
+              id: executionId,
+              state: 'FINISHED',
+              status: 'RUNNER_UNAVAILABLE',
+              mode: 'SUBMISSION',
+              runtime: version.runtime,
+              results: [],
+            },
+          }),
         });
       } catch (error) {
         console.error(`CodePulse immutable submission snapshot was unavailable (${error?.code ?? 'SNAPSHOT_WRITE_ERROR'}).`);
