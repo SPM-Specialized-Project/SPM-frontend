@@ -44,4 +44,20 @@ sudo docker compose \
   --file "$install_root/compose.host.yml" \
   --profile host-logs up --detach
 
+grafana_health_url='http://127.0.0.1:3101/api/health'
+grafana_deadline=$((SECONDS + 120))
+until curl --fail --silent --max-time 2 "$grafana_health_url" >/dev/null; do
+  if (( SECONDS >= grafana_deadline )); then
+    echo "Grafana did not become healthy within 120 seconds at $grafana_health_url." >&2
+    sudo docker compose \
+      --project-name spm-observability \
+      --env-file "$env_file" \
+      --file "$install_root/compose.yml" \
+      --file "$install_root/compose.host.yml" \
+      --profile host-logs ps --all >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
+
 echo 'Local Grafana/Loki services are installed. Grafana is only published on loopback port 3101.'
