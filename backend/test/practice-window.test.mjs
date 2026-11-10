@@ -158,7 +158,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
     { sourceCode: 'print(input())' },
   );
   assert.equal(inactiveTermSubmission.status, 403);
-  assert.equal(inactiveTermSubmission.data.code, 'PRACTICE_TERM_INACTIVE');
+  assert.equal(inactiveTermSubmission.data.code, 'FORBIDDEN');
   const inactiveTermSave = await request(
     baseUrl,
     `/api/codepulse/workspaces/${workspaceId}`,
@@ -167,7 +167,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
     { sourceCode: 'must not save in inactive term' },
   );
   assert.equal(inactiveTermSave.status, 403);
-  assert.equal(inactiveTermSave.data.code, 'PRACTICE_TERM_INACTIVE');
+  assert.equal(inactiveTermSave.data.code, 'FORBIDDEN');
 
   activeTerm.status = 'RESETTING';
   await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
