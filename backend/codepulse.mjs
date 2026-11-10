@@ -19,6 +19,7 @@ import {
   WORKSPACES_FILE,
 SNAPSHOTS_FILE,
   EXECUTIONS_FILE,
+  RESET_RECORDS_FILE,
 } from './config.mjs';
 import {
   assignmentRepositoryName,
@@ -53,6 +54,7 @@ const studentSubmissionsDirectory = STUDENT_SUBMISSIONS_DIRECTORY;
 const submissionFile = CODEPULSE_SUBMISSIONS_FILE;
 const activityFile = CODEPULSE_ACTIVITIES_FILE;
 const practiceWindowAuditFile = PRACTICE_WINDOW_AUDIT_FILE;
+const resetRecordFile = RESET_RECORDS_FILE;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -133,6 +135,7 @@ const initialLabs = [];
 const initialCodePulseSubmissions = [];
 const initialCodePulseActivities = [];
 const initialPracticeWindowAudit = [];
+const initialResetRecords = [];
 const initialWorkspaces = [
   { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 0 },
   { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 0 },
@@ -603,6 +606,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const deny = () => { throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập tài nguyên này.'); };
   const notFound = () => { throw apiError(404, 'NOT_FOUND', 'Không tìm thấy tài nguyên.'); };
   const terms = await readRecords(termFile, initialTerms);
+  for (const item of terms) {
+    if (String(item.status).toUpperCase() === 'RESETTING') executions.blockTerm(item.id);
+  }
   const classrooms = await readRecords(classroomFile, initialClassrooms);
   const assignments = await readRecords(assignmentFile, initialAssignments);
   const labs = await readRecords(labFile, initialLabs);
@@ -657,6 +663,16 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       && new Date(item.startDate).getTime() <= Date.now()
       && new Date(item.endDate).getTime() > Date.now(),
   );
+  const termAcceptsStudentWrites = (termId) => {
+    const current = terms.find((item) => item.id === termId);
+    return Boolean(current && current.status === 'ACTIVE'
+      && !['ENDED', 'RESETTING', 'RESETDONE'].includes(String(current.status).toUpperCase()));
+  };
+  const rejectResetBlockedTerm = (termId) => {
+    if (!termAcceptsStudentWrites(termId)) {
+      throw apiError(409, 'TERM_RESET_IN_PROGRESS', 'Học kỳ không còn tiếp nhận bài nộp, run hoặc đánh giá AI.');
+    }
+  };
   const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
   const normalizeLabAssignment = (assignment) => {
     const { openAt, closeAt } = practiceWindowValues(assignment);
@@ -806,6 +822,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return { classroomItem, lab, labAssignment };
   };
   const assertWorkspaceWritable = (workspace, context) => {
+    rejectResetBlockedTerm(context.classroomItem.termId);
     if (context.classroomItem.status === 'ARCHIVED') {
       throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
     }
@@ -1082,12 +1099,167 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return pending;
   };
 
-  if (parts[2] === 'terms' && request.method === 'GET') {
+  if (parts[2] === 'terms' && !parts[3] && request.method === 'GET') {
     const canViewAllCourseTerms = ['admin', 'lecturer'].includes(user.role);
     const items = terms.filter((item) => item.courseId === requestedCourseId && (canViewAllCourseTerms
       || (isCurrentStudentTerm(item)
         && classrooms.some((classroomItem) => classroomItem.termId === item.id && canAccessClass(classroomItem)))));
     sendJson(response, 200, { items });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset' && parts[5] === 'start' && request.method === 'POST') {
+    if (user.role !== 'admin') deny();
+    const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
+    if (String(current.status).toUpperCase() !== 'ENDED') {
+      throw apiError(409, 'TERM_NOT_ENDED', 'Chỉ có thể bắt đầu reset từ trạng thái ENDED.');
+    }
+    if (!current.resetDate || new Date(current.resetDate).getTime() > Date.now()) {
+      throw apiError(409, 'RESET_BOUNDARY_NOT_REACHED', 'Reset chỉ được thực hiện tại ranh giới chuyển tiếp đã xác nhận.');
+    }
+    await executions.blockTerm(current.id);
+    const updated = { ...current, status: 'RESETTING', resetStartedAt: new Date().toISOString(), resetStartedBy: user.email };
+    try {
+      await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated));
+    } catch (error) {
+      await executions.unblockTerm(current.id);
+      throw error;
+    }
+    sendJson(response, 200, { item: updated });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset' && parts[5] === 'execute' && request.method === 'POST') {
+    if (user.role !== 'admin') deny();
+    const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
+    if (String(current.status).toUpperCase() !== 'RESETTING') {
+      throw apiError(409, 'TERM_NOT_RESETTING', 'Term phải ở trạng thái RESETTING trước khi thực hiện purge.');
+    }
+
+    await executions.drainTerm(current.id);
+    const executedAt = new Date().toISOString();
+    const classroomIds = new Set(classrooms.filter((item) => item.termId === current.id).map((item) => item.id));
+    const workspaceIds = new Set();
+    let affected = {};
+    const reconciliation = {};
+    try {
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const purged = records.filter((item) => item.termId === current.id || classroomIds.has(item.classroomId));
+        purged.forEach((item) => workspaceIds.add(item.id));
+        affected.workspaces = purged.length;
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          if (records[index].termId === current.id || classroomIds.has(records[index].classroomId)) records.splice(index, 1);
+        }
+      }, { durable: true });
+
+      await mutate(snapshotFile, initialSnapshots, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id
+          && !classroomIds.has(item.classroomId)
+          && !workspaceIds.has(item.workspaceId));
+        affected.snapshots = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutate(submissionFile, initialCodePulseSubmissions, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.submissions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutateSubmissions((records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.legacySubmissions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      });
+      await mutate(activityFile, initialCodePulseActivities, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.activities = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutate(EXECUTIONS_FILE, [], (records) => {
+        const retained = records.filter((item) => item.termId !== current.id
+          && !classroomIds.has(item.classroomId)
+          && !workspaceIds.has(item.workspaceId));
+        affected.executions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+
+      affected.studentSubmissionFiles = 0;
+      try {
+        const studentFiles = await readdir(studentSubmissionsDirectory, { withFileTypes: true });
+        for (const entry of studentFiles.filter((item) => item.isFile() && item.name.endsWith('.json'))) {
+          const file = path.join(studentSubmissionsDirectory, entry.name);
+          const records = JSON.parse(await readFile(file, 'utf8'));
+          if (!Array.isArray(records)) continue;
+          const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+          affected.studentSubmissionFiles += records.length - retained.length;
+          if (retained.length === 0 && records.length > 0) await rm(file, { force: true });
+          else if (retained.length !== records.length) await writeFile(file, `${JSON.stringify(retained, null, 2)}\n`, 'utf8');
+        }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+
+      reconciliation.workspaces = (await readRecords(workspaceFile, initialWorkspaces)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.snapshots = (await readRecords(snapshotFile, initialSnapshots)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId) && !workspaceIds.has(item.workspaceId));
+      reconciliation.submissions = (await readRecords(submissionFile, initialCodePulseSubmissions)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.legacySubmissions = (await readSubmissions()).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.activities = (await readRecords(activityFile, initialCodePulseActivities)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.executions = (await readRecords(EXECUTIONS_FILE, [])).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId) && !workspaceIds.has(item.workspaceId));
+      reconciliation.problemBank = true;
+    } catch (error) {
+      const record = {
+        id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'INCOMPLETE',
+        executedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation,
+        errors: [error instanceof Error ? error.message : String(error)], immutable: true,
+      };
+      await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+      throw apiError(500, 'TERM_RESET_INCOMPLETE', 'Reset đã ghi nhận lỗi và được đánh dấu chưa hoàn tất.', { resetRecordId: record.id });
+    }
+
+    if (!Object.values(reconciliation).every(Boolean)) {
+      throw apiError(409, 'TERM_RESET_RECONCILIATION_FAILED', 'Không thể xác nhận reset vì chưa đối soát đủ dữ liệu.');
+    }
+    const completedAt = new Date().toISOString();
+    const updated = { ...current, status: 'RESETDONE', resetCompletedAt: completedAt };
+    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
+    const record = {
+      id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'COMPLETE',
+      executedAt, completedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation, errors: [], immutable: true,
+    };
+    await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+    sendJson(response, 200, { item: updated, resetRecord: record });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset-records' && request.method === 'GET') {
+    if (!['admin', 'lecturer'].includes(user.role)) deny();
+    const current = term(parts[3]);
+    const records = await readRecords(resetRecordFile, initialResetRecords);
+    sendJson(response, 200, { items: records.filter((item) => item.termId === current.id) });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset-records' && parts[5] && parts[6] === 'acknowledge' && request.method === 'POST') {
+    if (user.role !== 'lecturer') deny();
+    const records = await readRecords(resetRecordFile, initialResetRecords);
+    const record = records.find((item) => item.termId === parts[3] && item.id === parts[5]);
+    if (!record) notFound();
+    const acknowledgement = {
+      acknowledgedAt: new Date().toISOString(), acknowledgedBy: user.email,
+    };
+    const updated = await mutate(resetRecordFile, initialResetRecords, (items) => {
+      const currentRecord = items.find((item) => item.id === record.id);
+      currentRecord.acknowledgements = [...(currentRecord.acknowledgements ?? []), acknowledgement];
+      return currentRecord;
+    }, { durable: true });
+    sendJson(response, 200, { item: updated });
     return;
   }
 
@@ -1111,12 +1283,24 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const body = await readRequestBody(request);
     const current = term(parts[3]);
     if (current.courseId !== requestedCourseId) notFound();
+    if (['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'TERM_RESET_LOCKED', 'A term in reset or completed reset state is read-only.');
+    }
     const updated = { ...current, ...body.patch, courseId: current.courseId };
     if (!updated.name?.trim() || new Date(updated.endDate) <= new Date(updated.startDate)) {
       throw apiError(400, 'INVALID_TERM_DATES', 'Term có ngày không hợp lệ.');
     }
-    if (!['DRAFT', 'ACTIVE', 'ARCHIVED'].includes(updated.status)) {
+    if (!['DRAFT', 'ACTIVE', 'ENDED', 'RESETTING', 'RESETDONE', 'ARCHIVED'].includes(updated.status)) {
       throw apiError(400, 'INVALID_STATUS', 'Trạng thái term không hợp lệ.');
+    }
+    if (updated.status !== current.status && ['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'INVALID_STATUS_TRANSITION', 'Trạng thái reset chỉ có thể thay đổi qua workflow reset.');
+    }
+    if (updated.status !== current.status && ['RESETTING', 'RESETDONE'].includes(updated.status)) {
+      throw apiError(409, 'INVALID_STATUS_TRANSITION', 'Trạng thái reset chỉ có thể thay đổi qua workflow reset.');
+    }
+    if (updated.status === 'ENDED' && new Date(updated.endDate).getTime() > Date.now()) {
+      throw apiError(409, 'TERM_NOT_ENDED', 'Chỉ có thể kết thúc term tại hoặc sau ngày kết thúc đã cấu hình.');
     }
     await mutate(termFile, initialTerms, (records) => { Object.assign(records.find((record) => record.id === current.id), updated); return updated; });
     sendJson(response, 200, { item: updated });
@@ -1653,6 +1837,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       return;
     }
 
+    await executions.runTermTask(classroomItem.termId, async () => {
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : '';
     if (!sourceCode.trim()) throw apiError(400, 'SOURCE_CODE_REQUIRED', 'Hãy nhập code trước khi submit.');
@@ -1667,6 +1852,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const version = latestPublishedAssignmentVersion(assignment);
     const submission = await gradeSubmission({ assignment, version, sourceCode });
     sendJson(response, 201, { item: submissionView(submission) });
+    });
     return;
   }
 
@@ -1680,7 +1866,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     && request.method === 'POST') {
     if (user.role !== 'student') deny();
     const classroomItem = classroom(parts[3]);
+    rejectResetBlockedTerm(classroomItem.termId);
     if (!canAccessClass(classroomItem)) deny();
+    await executions.runTermTask(classroomItem.termId, async () => {
     const practiceContext = labAssignmentContext({
       classroomId: classroomItem.id,
       labId: parts[5],
@@ -1748,6 +1936,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       },
     });
     sendJson(response, 201, { item: { ...submission, ...submissionView(submission) } });
+    });
     return;
   }
 
@@ -1857,7 +2046,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
 
     const queued = await executions.enqueue({ assignment: gradingAssignment, sourceCode, body,
-      assignmentId: assignment.id, classroomId: classroomItem.id, ownerEmail: user.email,
+      assignmentId: assignment.id, classroomId: classroomItem.id, termId: classroomItem.termId, ownerEmail: user.email,
       workspaceId: savedWorkspace?.id ?? null, labId: practiceContext?.lab.id ?? null,
       labAssignmentId: practiceContext?.labAssignment.id ?? null });
     if (user.role === 'student' && gradingAssignment.status === 'PUBLISHED') await markAssignmentVersionUsed(gradingAssignment.id);
@@ -1985,6 +2174,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (user.role !== 'admin') deny();
     const current = term(parts[3]);
     if (current.courseId !== requestedCourseId) notFound();
+    if (['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'TERM_RESET_LOCKED', 'A term in reset or completed reset state cannot be deleted.');
+    }
     if (classrooms.some((classroomItem) => classroomItem.termId === current.id)) {
       throw apiError(409, 'TERM_IN_USE', 'Không thể xóa term đang được classroom sử dụng.');
     }
@@ -2354,18 +2546,20 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         testCases: normalizeTestCases(storedVersion.testCases ?? []) } : notFound();
     if (!ALLOWED_RUNTIMES.has(version.runtime)) throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Unsupported assignment runtime.');
     const queued = await executions.enqueue({ assignment: version, sourceCode, body,
-      assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
+      assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, termId: context.classroomItem.termId, ownerEmail: user.email,
       workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
     await markAssignmentVersionUsed(version.id);
-    await recordWorkspaceSnapshot({
-      workspace,
-      trigger: 'RUN',
-      sourceCode,
+    await executions.runTermTask(context.classroomItem.termId, async () => {
+      await recordWorkspaceSnapshot({
+        workspace,
+        trigger: 'RUN',
+        sourceCode,
+      });
+      await recordActivity({ type: 'RUN', context: access?.practiceContext,
+        activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
+          activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
+          executionId: queued.item.id, executionStatus: 'QUEUED' } });
     });
-    await recordActivity({ type: 'RUN', context: access?.practiceContext,
-      activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
-        activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
-        executionId: queued.item.id, executionStatus: 'QUEUED' } });
     sendJson(response, 202, { item: queued.item });
     return;
   }
