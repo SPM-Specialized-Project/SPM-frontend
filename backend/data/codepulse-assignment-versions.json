@@ -5,6 +5,21 @@
     "classroomId": "class-1",
     "version": 1,
     "title": "Singly Linked List",
+    "description": "Implement the core operations of a singly linked list.",
+    "language": "PYTHON",
+    "starterCode": "# Implement the singly linked list here\n",
+    "hints": [
+      {
+        "id": "problem-1-v1-hint-1",
+        "title": "Head pointer",
+        "content": "Keep the first node in a dedicated head reference."
+      },
+      {
+        "id": "problem-1-v1-hint-2",
+        "title": "Traversal",
+        "content": "Move through the list by following each node next reference."
+      }
+    ],
     "status": "PUBLISHED",
     "publishedAt": "2026-09-01T08:00:00.000Z"
   },
@@ -14,6 +29,21 @@
     "classroomId": "class-1",
     "version": 2,
     "title": "Doubly Linked List",
+    "description": "Implement insertion and deletion for a doubly linked list.",
+    "language": "PYTHON",
+    "starterCode": "# Implement the doubly linked list here\n",
+    "hints": [
+      {
+        "id": "problem-2-v2-hint-1",
+        "title": "Two directions",
+        "content": "Update both next and previous references when linking nodes."
+      },
+      {
+        "id": "problem-2-v2-hint-2",
+        "title": "Boundary nodes",
+        "content": "Handle head and tail updates as separate edge cases."
+      }
+    ],
     "status": "PUBLISHED",
     "publishedAt": "2026-09-02T08:00:00.000Z"
   },
@@ -23,6 +53,16 @@
     "classroomId": "class-1",
     "version": 1,
     "title": "Queue implementation",
+    "description": "Build a FIFO queue with enqueue and dequeue operations.",
+    "language": "PYTHON",
+    "starterCode": "# Implement the queue here\n",
+    "hints": [
+      {
+        "id": "problem-3-v1-hint-1",
+        "title": "FIFO",
+        "content": "Insert at the rear and remove from the front."
+      }
+    ],
     "status": "PUBLISHED",
     "publishedAt": "2026-09-03T08:00:00.000Z"
   },

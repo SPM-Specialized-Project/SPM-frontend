@@ -3,9 +3,10 @@ import http from 'node:http';
 import { PORT, SUBMISSIONS_FILE } from './config.mjs';
 import { handleRequest } from './routes.mjs';
 import { sendJson } from './http.mjs';
-import { initializeCodePulseExecutions } from './codepulse.mjs';
+import { initializeCodePulseExecutions, initializeCodePulseGrading } from './codepulse.mjs';
 
 await initializeCodePulseExecutions();
+await initializeCodePulseGrading();
 
 const server = http.createServer((request, response) => {
   handleRequest(request, response).catch((error) => {

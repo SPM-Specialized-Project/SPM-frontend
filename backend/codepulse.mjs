@@ -1,6 +1,11 @@
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
+import {
+  createGradingQueue,
+  lecturerJudgmentView,
+  studentJudgmentView,
+} from './grading.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -19,6 +24,8 @@ import {
   WORKSPACES_FILE,
 SNAPSHOTS_FILE,
   EXECUTIONS_FILE,
+  GRADING_JOBS_FILE,
+  JUDGMENTS_FILE,
 } from './config.mjs';
 import {
   assignmentRepositoryName,
@@ -53,6 +60,8 @@ const studentSubmissionsDirectory = STUDENT_SUBMISSIONS_DIRECTORY;
 const submissionFile = CODEPULSE_SUBMISSIONS_FILE;
 const activityFile = CODEPULSE_ACTIVITIES_FILE;
 const practiceWindowAuditFile = PRACTICE_WINDOW_AUDIT_FILE;
+const gradingJobFile = GRADING_JOBS_FILE;
+const judgmentFile = JUDGMENTS_FILE;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -133,6 +142,8 @@ const initialLabs = [];
 const initialCodePulseSubmissions = [];
 const initialCodePulseActivities = [];
 const initialPracticeWindowAudit = [];
+const initialGradingJobs = [];
+const initialJudgments = [];
 const initialWorkspaces = [
   { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 0 },
   { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 0 },
@@ -478,6 +489,43 @@ const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => 
   }
   return results;
 };
+
+const grading = createGradingQueue({
+  readJobs: () => readRecords(gradingJobFile, initialGradingJobs),
+  mutateJobs: (callback) => mutate(gradingJobFile, initialGradingJobs, callback, { durable: true }),
+  readJudgments: () => readRecords(judgmentFile, initialJudgments),
+  mutateJudgments: (callback) => mutate(judgmentFile, initialJudgments, callback, { durable: true }),
+  readSubmissions,
+  mutateSubmissions,
+  loadAssignmentVersion: async (submission) => {
+    if (submission.gradingSnapshot?.id === submission.assignmentVersionId
+      && submission.gradingSnapshot.assignmentId === submission.assignmentId) {
+      return structuredClone(submission.gradingSnapshot);
+    }
+    const [versions, storedAssignments] = await Promise.all([
+      readRecords(assignmentVersionFile, initialAssignmentVersions),
+      readRecords(assignmentFile, initialAssignments),
+    ]);
+    const version = versions.find((item) => item.id === submission.assignmentVersionId
+      && item.assignmentId === submission.assignmentId);
+    if (!version) return null;
+    const assignment = storedAssignments.find((item) => item.id === submission.assignmentId);
+    if (!assignment && !version.testCases) return null;
+    return {
+      ...(assignment ?? {}),
+      ...structuredClone(version),
+      id: version.id,
+      assignmentId: version.assignmentId,
+      runtime: version.runtime ?? version.language ?? assignment?.runtime,
+      cpuTimeLimitMs: version.cpuTimeLimitMs ?? assignment?.cpuTimeLimitMs,
+      memoryLimitMb: version.memoryLimitMb ?? assignment?.memoryLimitMb,
+      testCases: normalizeTestCases(version.testCases ?? assignment?.testCases),
+      comparator: normalizeComparator(version.comparator ?? assignment?.comparator),
+    };
+  },
+});
+
+export const initializeCodePulseGrading = () => grading.initialize();
 
 export async function getCodePulseClassrooms() {
   return readRecords(classroomFile, initialClassrooms);
@@ -864,7 +912,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     return value;
   };
-  const codeSubmissionView = (submission) => ({
+  const codeSubmissionView = (submission, judgment = null, viewerRole = user.role) => ({
     id: submission.id,
     workspaceId: submission.workspaceId,
     classroomId: submission.classroomId,
@@ -878,6 +926,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     acceptedAt: submission.acceptedAt,
     status: submission.status,
     gradingAttempts: structuredClone(submission.gradingAttempts ?? []),
+    judgment: judgment
+      ? (viewerRole === 'student' ? studentJudgmentView(judgment) : lecturerJudgmentView(judgment))
+      : null,
   });
   const workspaceView = (workspace, context) => {
     const visibleWorkspace = { ...workspace };
@@ -2184,9 +2235,14 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (request.method === 'GET') {
       if (!isOwner && !lecturerCanRead) deny();
       const records = await readSubmissions();
-      const items = records
-        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id)
-        .map(codeSubmissionView);
+      const submissions = records
+        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id);
+      const items = await Promise.all(submissions.map(async (submission) => {
+        const judgment = submission.latestJudgmentId
+          ? await grading.getJudgment(submission.latestJudgmentId)
+          : null;
+        return codeSubmissionView(submission, judgment, user.role);
+      }));
       sendJson(response, 200, { items });
       return;
     }
@@ -2228,6 +2284,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       assignmentVersionId: context.labAssignment.assignmentVersionId,
       sourceCode: body.sourceCode,
     });
+    const pinnedAssignment = assignments.find((assignment) =>
+      assignment.id === workspace.assignmentId
+      && assignment.classroomId === workspace.classroomId) ?? notFound();
+    const pinnedGradingVersion = resolvePublishedAssignmentVersion(
+      pinnedAssignment,
+      context.labAssignment.assignmentVersionId,
+    );
     const payloadHash = createHash('sha256').update(canonicalPayload).digest('hex');
     const result = await mutateSubmissions((records) => {
       const existing = records.find((record) =>
@@ -2258,6 +2321,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
           version: context.labAssignment.version,
           title: context.labAssignment.title,
           language: context.labAssignment.language ?? 'PYTHON',
+        },
+        // Server-only immutable snapshot. codeSubmissionView intentionally omits
+        // this object so hidden tests never cross the Student API boundary.
+        gradingSnapshot: {
+          id: pinnedGradingVersion.id,
+          assignmentId: pinnedGradingVersion.assignmentId,
+          version: pinnedGradingVersion.version,
+          runtime: pinnedGradingVersion.runtime,
+          cpuTimeLimitMs: pinnedGradingVersion.cpuTimeLimitMs,
+          memoryLimitMb: pinnedGradingVersion.memoryLimitMb,
+          comparator: structuredClone(pinnedGradingVersion.comparator),
+          testCases: structuredClone(pinnedGradingVersion.testCases),
         },
         workspaceId: workspace.id,
         student: {
@@ -2296,10 +2371,32 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       });
     }
 
+    // Stable job identity makes submit retries and duplicate delivery idempotent.
+    await grading.enqueue(result.submission.id);
+
     sendJson(response, result.created ? 201 : 200, {
-      item: codeSubmissionView(result.submission),
+      item: codeSubmissionView(result.submission, null, user.role),
       created: result.created,
     });
+    return;
+  }
+
+  if (parts[2] === 'submissions' && parts[3] && parts[4] === 'judgments'
+    && !parts[5] && request.method === 'GET') {
+    const records = await readSubmissions();
+    const submission = records.find((record) =>
+      record.kind === 'CODE_SUBMISSION' && record.id === parts[3]) ?? notFound();
+    const classroomItem = classroom(submission.classroomId);
+    const isOwner = normalizeEmail(submission.student.email) === normalizeEmail(user.email);
+    const lecturerCanRead = isDsaManager(classroomItem);
+    if (!isOwner && !lecturerCanRead) deny();
+    const judgments = await grading.listJudgments(submission.id);
+    const visible = lecturerCanRead
+      ? judgments.map(lecturerJudgmentView)
+      : judgments
+        .filter((judgment) => judgment.id === submission.latestJudgmentId)
+        .map(studentJudgmentView);
+    sendJson(response, 200, { items: visible });
     return;
   }
 
@@ -2311,7 +2408,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const canRead = normalizeEmail(submission.student.email) === normalizeEmail(user.email)
       || isDsaManager(classroomItem);
     if (!canRead) deny();
-    sendJson(response, 200, { item: codeSubmissionView(submission) });
+    const judgment = submission.latestJudgmentId
+      ? await grading.getJudgment(submission.latestJudgmentId)
+      : null;
+    sendJson(response, 200, { item: codeSubmissionView(submission, judgment, user.role) });
     return;
   }
 
