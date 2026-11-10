@@ -663,13 +663,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       && new Date(item.startDate).getTime() <= Date.now()
       && new Date(item.endDate).getTime() > Date.now(),
   );
-  const termAcceptsStudentWrites = (termId) => {
-    const current = terms.find((item) => item.id === termId);
-    return Boolean(current && current.status === 'ACTIVE'
-      && !['ENDED', 'RESETTING', 'RESETDONE'].includes(String(current.status).toUpperCase()));
-  };
   const rejectResetBlockedTerm = (termId) => {
-    if (!termAcceptsStudentWrites(termId)) {
+    const current = terms.find((item) => item.id === termId);
+    if (current && ['RESETTING', 'RESETDONE'].includes(String(current.status).toUpperCase())) {
       throw apiError(409, 'TERM_RESET_IN_PROGRESS', 'Học kỳ không còn tiếp nhận bài nộp, run hoặc đánh giá AI.');
     }
   };
@@ -855,7 +851,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
       }
       if (currentAccess.practiceAccessReason === 'TERM_INACTIVE') {
-        throw apiError(409, 'PRACTICE_TERM_INACTIVE', 'The academic term is not active for submissions.');
+        throw apiError(403, 'PRACTICE_TERM_INACTIVE', 'The academic term is not active for submissions.');
       }
       if (currentAccess.practiceAccessReason === 'NOT_OPEN_YET') {
         throw apiError(409, 'PRACTICE_WINDOW_NOT_OPEN', 'The practice window has not opened yet.');
@@ -2385,6 +2381,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
 
     if (!isOwner) deny();
     if (workspace.termId !== context.classroomItem.termId) deny();
+    rejectResetBlockedTerm(workspace.termId);
     const body = await readRequestBody(request);
     const requestKey = validateRequestKey(body.requestKey);
     if (typeof body.sourceCode !== 'string') {
