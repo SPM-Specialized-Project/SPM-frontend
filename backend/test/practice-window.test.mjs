@@ -167,7 +167,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
     { sourceCode: 'must not save in inactive term' },
   );
   assert.equal(inactiveTermSave.status, 403);
-  assert.equal(inactiveTermSave.data.code, 'FORBIDDEN');
+  assert.equal(inactiveTermSave.data.code, 'PRACTICE_TERM_INACTIVE');
 
   activeTerm.status = 'RESETTING';
   await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
