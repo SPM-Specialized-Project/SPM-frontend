@@ -206,7 +206,15 @@ const executions = createExecutionQueue({
   },
 });
 
-export const initializeCodePulseExecutions = () => executions.list();
+export const initializeCodePulseExecutions = async () => {
+  await executions.list();
+  const terms = await readRecords(termFile, initialTerms);
+  for (const item of terms) {
+    if (['RESETTING', 'RESETDONE'].includes(String(item.status).toUpperCase())) {
+      executions.blockTerm(item.id);
+    }
+  }
+};
 
 const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
   ...structuredClone(assignment),
@@ -606,9 +614,6 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   const deny = () => { throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập tài nguyên này.'); };
   const notFound = () => { throw apiError(404, 'NOT_FOUND', 'Không tìm thấy tài nguyên.'); };
   const terms = await readRecords(termFile, initialTerms);
-  for (const item of terms) {
-    if (String(item.status).toUpperCase() === 'RESETTING') executions.blockTerm(item.id);
-  }
   const classrooms = await readRecords(classroomFile, initialClassrooms);
   const assignments = await readRecords(assignmentFile, initialAssignments);
   const labs = await readRecords(labFile, initialLabs);
