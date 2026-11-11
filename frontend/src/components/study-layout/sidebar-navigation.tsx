@@ -6,9 +6,7 @@ import {
   IconKhoaHoc,
   IconLichHoc,
   IconLichSu,
-  IconThongKe,
   IconThuVien,
-  OverviewIcon,
 } from './sidebar-icons';
 import { SidebarItem } from './sidebar-item';
 
@@ -54,8 +52,6 @@ const commonItems: NavigationItem[] = [
   { name: 'Thư viện', route: '/library', icon: IconThuVien, iconMode: 'fill' },
   { name: 'Lịch học', route: '/schedule', icon: IconLichHoc, iconMode: 'fill' },
 ];
-
-const restrictedItems: NavigationItem[] = [];
 
 export function getSidebarStatsPermission() {
   return false;
