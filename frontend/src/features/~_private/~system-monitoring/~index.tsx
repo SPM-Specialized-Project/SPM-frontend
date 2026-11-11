@@ -1,8 +1,6 @@
 import {
   ArrowLeftIcon,
   ArrowPathIcon,
-  CheckCircleIcon,
-  ExclamationTriangleIcon,
   ShieldCheckIcon,
   ServerStackIcon,
   ClockIcon,
@@ -126,6 +124,7 @@ export function SystemMonitoringPage() {
       loadAlerts();
     }, 6000);
     return () => clearInterval(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleAlertStatus = async (alertId: string, newStatus: 'ACKNOWLEDGED' | 'RESOLVED' | 'DISMISSED') => {
@@ -345,7 +344,7 @@ export function SystemMonitoringPage() {
                       onClick={() => setAlertFilter(filter)}
                       className={`rounded px-3 py-1 text-xs font-medium transition ${
                         alertFilter === filter
-                          ? 'bg-white text-slate-900 shadow-sm font-semibold'
+                          ? 'bg-white font-semibold text-slate-900 shadow-sm'
                           : 'text-slate-600 hover:text-slate-900'
                       }`}
                     >
@@ -374,8 +373,8 @@ export function SystemMonitoringPage() {
                             <span
                               className={`rounded px-2 py-0.5 text-[11px] font-semibold uppercase ${
                                 alert.severity === 'CRITICAL'
-                                  ? 'bg-red-50 text-red-700 border border-red-200'
-                                  : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                  ? 'border border-red-200 bg-red-50 text-red-700'
+                                  : 'border border-amber-200 bg-amber-50 text-amber-800'
                               }`}
                             >
                               {alert.severity === 'CRITICAL' ? 'Mức nghiêm trọng' : 'Mức cảnh báo'}
