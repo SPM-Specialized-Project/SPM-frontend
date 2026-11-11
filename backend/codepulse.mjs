@@ -1,6 +1,7 @@
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
+import { evaluateExecutionAlert } from './alerts.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -193,13 +194,27 @@ const executions = createExecutionQueue({
   mutate: (callback) => mutate(EXECUTIONS_FILE, [], callback),
   onUpdate: async (execution) => {
     if (!execution.workspaceId) return;
+    let targetWorkspace = null;
     await mutate(workspaceFile, initialWorkspaces, (records) => {
       const workspace = records.find((item) => item.id === execution.workspaceId);
       if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
         || execution.state === 'QUEUED')) {
         workspace.executionResult = execution;
+        targetWorkspace = structuredClone(workspace);
       }
     });
+    if (execution.state === 'FINISHED' && targetWorkspace) {
+      try {
+        await evaluateExecutionAlert({
+          workspace: targetWorkspace,
+          executionResult: execution,
+          classroomId: targetWorkspace.classroomId,
+          studentEmail: targetWorkspace.ownerEmail,
+        });
+      } catch (err) {
+        console.error('Failed to evaluate execution alert:', err);
+      }
+    }
   },
 });
 
