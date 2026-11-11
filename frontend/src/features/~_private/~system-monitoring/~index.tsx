@@ -4,6 +4,7 @@ import {
   CheckCircleIcon,
   ExclamationTriangleIcon,
   ShieldCheckIcon,
+  DocumentArrowDownIcon,
   ServerStackIcon,
   ClockIcon,
   MagnifyingGlassIcon,
@@ -19,6 +20,9 @@ import {
   type AlertStats,
   type RequestTrace,
   type AuditLog,
+  type SemesterBackup,
+  type DrillResult,
+  type SessionReport,
 } from '@/services/admin-operations-api';
 
 export const Route = createFileRoute('/_private/system-monitoring/')({
@@ -32,7 +36,7 @@ export const Route = createFileRoute('/_private/system-monitoring/')({
   component: SystemMonitoringPage,
 });
 
-type MainTab = 'monitoring' | 'tracing';
+type MainTab = 'monitoring' | 'tracing' | 'retention';
 
 export function SystemMonitoringPage() {
   const navigate = useNavigate();
@@ -54,6 +58,16 @@ export function SystemMonitoringPage() {
 
   // Audit state
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+
+  // Backups state
+  const [backups, setBackups] = useState<SemesterBackup[]>([]);
+  const [backupCreating, setBackupCreating] = useState(false);
+  const [drillRunning, setDrillRunning] = useState<string | null>(null);
+  const [drillResult, setDrillResult] = useState<DrillResult | null>(null);
+
+  // Session report state
+  const [selectedSessionId, setSelectedSessionId] = useState('lab-1790744799755');
+  const [sessionReport, setSessionReport] = useState<SessionReport | null>(null);
 
   // Toast notification
   const [notification, setNotification] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
@@ -115,11 +129,31 @@ export function SystemMonitoringPage() {
     }
   };
 
+  const loadBackups = async () => {
+    try {
+      const list = await adminOperationsApi.getBackups();
+      setBackups(list);
+    } catch (e) {
+      console.error('Lỗi tải danh sách sao lưu:', e);
+    }
+  };
+
+  const loadSessionReport = async (sId: string) => {
+    try {
+      const rep = await adminOperationsApi.getSessionReport(sId);
+      setSessionReport(rep);
+    } catch {
+      showNotification('Không thể tải báo cáo buổi thực hành.', 'error');
+    }
+  };
+
   useEffect(() => {
     loadHealth();
     loadAlerts();
     loadAuditLogs();
+    loadBackups();
     loadTrace(traceRequestId);
+    loadSessionReport(selectedSessionId);
 
     const timer = setInterval(() => {
       loadHealth();
@@ -139,6 +173,35 @@ export function SystemMonitoringPage() {
       showNotification('Không thể cập nhật trạng thái cảnh báo.', 'error');
     } finally {
       setAlertActionLoading(null);
+    }
+  };
+
+  const handleCreateBackup = async () => {
+    setBackupCreating(true);
+    try {
+      const b = await adminOperationsApi.createBackup('term-2026-1');
+      showNotification(`Tạo bản sao lưu thành công: ${b.filename}`);
+      await loadBackups();
+      await loadAuditLogs();
+    } catch {
+      showNotification('Lỗi trong quá trình tạo bản sao lưu dữ liệu.', 'error');
+    } finally {
+      setBackupCreating(false);
+    }
+  };
+
+  const handleRunDrill = async (backupId: string) => {
+    setDrillRunning(backupId);
+    setDrillResult(null);
+    try {
+      const res = await adminOperationsApi.runDisasterRecoveryDrill(backupId);
+      setDrillResult(res);
+      showNotification('Diễn tập phục hồi thảm họa hoàn tất.');
+      await loadAuditLogs();
+    } catch {
+      showNotification('Lỗi trong quá trình diễn tập phục hồi.', 'error');
+    } finally {
+      setDrillRunning(null);
     }
   };
 
@@ -167,13 +230,13 @@ export function SystemMonitoringPage() {
               <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-semibold text-blue-800">
                 Quản trị hệ thống
               </span>
-              <span className="text-xs text-slate-400">SCRUM-81 / US-012.2</span>
+              <span className="text-xs text-slate-400">Phiên bản 2.4</span>
             </div>
             <h1 className="mt-1 text-2xl font-bold text-slate-900">
-              Giám sát hệ thống & Cảnh báo thông minh
+              Giám sát hệ thống & Báo cáo vận hành
             </h1>
             <p className="mt-1 text-sm text-slate-500">
-              Quản lý hàng đợi, worker nodes, quy tắc cảnh báo lỗi sinh viên, truy vết yêu cầu và nhật ký kiểm toán.
+              Hạ tầng thực thi sandbox, cảnh báo hỗ trợ sinh viên, truy vết yêu cầu và lưu trữ dữ liệu học kỳ.
             </p>
           </div>
 
@@ -187,6 +250,7 @@ export function SystemMonitoringPage() {
                 loadHealth();
                 loadAlerts();
                 loadAuditLogs();
+                loadBackups();
               }}
               className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
             >
@@ -234,12 +298,22 @@ export function SystemMonitoringPage() {
                 : 'text-slate-700 hover:bg-slate-300'
             }`}
           >
-            Truy vết & Nhật ký kiểm toán (UI-09)
+            Truy vết & Nhật ký kiểm toán
+          </button>
+          <button
+            onClick={() => setActiveTab('retention')}
+            className={`rounded-md px-5 py-2 text-sm font-medium transition ${
+              activeTab === 'retention'
+                ? 'bg-blue-600 text-white shadow'
+                : 'text-slate-700 hover:bg-slate-300'
+            }`}
+          >
+            Sao lưu & Báo cáo học kỳ
           </button>
         </div>
 
         {/* ============================================================== */}
-        {/* TAB 1: HẠ TẦNG & CẢNH BÁO THÔNG MINH                          */}
+        {/* TAB 1: HẠ TẦNG & CẢNH BÁO THÔNG MINH (SCRUM-81)               */}
         {/* ============================================================== */}
         {activeTab === 'monitoring' && (
           <div className="space-y-6">
@@ -542,7 +616,7 @@ export function SystemMonitoringPage() {
               <div className="flex items-center justify-between">
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">Nhật ký Kiểm toán Hệ thống (Audit Logs)</h3>
-                  <p className="text-xs text-slate-500">Bản ghi bất biến ghi nhận các thao tác cấu hình, cảnh báo và kiểm tra.</p>
+                  <p className="text-xs text-slate-500">Bản ghi bất biến ghi nhận các thao tác quản trị, sao lưu và diễn tập phục hồi.</p>
                 </div>
                 <span className="text-xs text-slate-400">Tổng cộng {auditLogs.length} bản ghi</span>
               </div>
@@ -585,6 +659,218 @@ export function SystemMonitoringPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ============================================================== */}
+        {/* TAB 3: SAO LƯU & BÁO CÁO HỌC KỲ (SCRUM-82)                      */}
+        {/* ============================================================== */}
+        {activeTab === 'retention' && (
+          <div className="space-y-6">
+            {/* Backup Management Section */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Lưu trữ Dữ liệu Học kỳ & Diễn tập Phục hồi Thảm họa</h3>
+                  <p className="text-xs text-slate-500">
+                    Bảo đảm lưu giữ dữ liệu xuyên suốt 4 tháng học kỳ, đối chiếu mã băm toàn vẹn SHA-256 và diễn tập phục hồi (Disaster Recovery Drill).
+                  </p>
+                </div>
+                <button
+                  disabled={backupCreating}
+                  onClick={handleCreateBackup}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white shadow-sm transition hover:bg-blue-700"
+                >
+                  <DocumentArrowDownIcon className="size-4" />
+                  <span>{backupCreating ? 'Đang sao lưu...' : 'Tạo bản sao lưu học kỳ mới'}</span>
+                </button>
+              </div>
+
+              {/* Drill Result Card */}
+              {drillResult && (
+                <div className={`mt-4 rounded-lg border p-4 text-xs ${drillResult.verified ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-red-200 bg-red-50 text-red-900'}`}>
+                  <div className="flex items-center justify-between">
+                    <span className="font-semibold">
+                      {drillResult.verified ? 'Báo cáo Diễn tập Phục hồi Thảm họa: ĐẠT TIÊU CHUẨN' : 'Diễn tập không đạt'}
+                    </span>
+                    <span className="text-[11px] text-slate-500">Thời gian thực thi: {drillResult.durationMs}ms</span>
+                  </div>
+                  <p className="mt-1">{drillResult.message}</p>
+                  <div className="mt-2.5 grid grid-cols-1 gap-2 font-mono text-[11px] sm:grid-cols-2">
+                    <div>Mã băm lưu trữ: <span className="text-slate-700">{drillResult.sha256Hash.slice(0, 24)}...</span></div>
+                    <div>Mã băm đối soát: <span className="text-slate-700">{drillResult.recomputedHash.slice(0, 24)}...</span></div>
+                  </div>
+                  <ul className="mt-2 list-inside list-disc space-y-0.5 text-slate-700">
+                    {drillResult.checks.map((chk, i) => (
+                      <li key={i}>{chk}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* Backups List Table */}
+              <div className="mt-4 overflow-x-auto">
+                <table className="w-full text-left text-xs">
+                  <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="p-3 font-semibold">Học kỳ</th>
+                      <th className="p-3 font-semibold">Tên tập tin</th>
+                      <th className="p-3 font-semibold">Thời điểm sao lưu</th>
+                      <th className="p-3 font-semibold">Dung lượng</th>
+                      <th className="p-3 font-semibold">Mã băm SHA-256</th>
+                      <th className="p-3 font-semibold">Dữ liệu lưu trữ</th>
+                      <th className="p-3 font-semibold text-right">Thao tác</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {backups.map((b) => (
+                      <tr key={b.id} className="hover:bg-slate-50">
+                        <td className="p-3 font-semibold text-blue-700">{b.termId}</td>
+                        <td className="p-3 font-mono text-slate-800">{b.filename}</td>
+                        <td className="whitespace-nowrap p-3 text-slate-500">
+                          {new Date(b.createdAt).toLocaleDateString('vi-VN')} {new Date(b.createdAt).toLocaleTimeString('vi-VN')}
+                        </td>
+                        <td className="p-3 text-slate-600">{(b.sizeBytes / 1024).toFixed(1)} KB</td>
+                        <td className="p-3 font-mono text-slate-500" title={b.sha256Hash}>
+                          {b.sha256Hash.slice(0, 16)}...
+                        </td>
+                        <td className="p-3 text-slate-600">
+                          {b.recordCounts.workspaces} workspaces, {b.recordCounts.submissions} bài nộp
+                        </td>
+                        <td className="p-3 text-right">
+                          <button
+                            disabled={drillRunning === b.id}
+                            onClick={() => handleRunDrill(b.id)}
+                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                          >
+                            {drillRunning === b.id ? 'Đang kiểm tra...' : 'Diễn tập phục hồi'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Session Report & Metrics Section */}
+            <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+              <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+                <div>
+                  <h3 className="text-base font-semibold text-slate-900">Báo cáo Tổng kết Buổi Thực hành (Session Report)</h3>
+                  <p className="text-xs text-slate-500">
+                    Thống kê tỷ lệ tham gia trong và ngoài giờ lab, mức độ hoàn thành bài tập, và kiểm soát an toàn mẫu số rỗng (N=0).
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-medium text-slate-600">Chọn buổi:</span>
+                  <select
+                    value={selectedSessionId}
+                    onChange={(e) => {
+                      setSelectedSessionId(e.target.value);
+                      loadSessionReport(e.target.value);
+                    }}
+                    className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-blue-500 focus:outline-none"
+                  >
+                    <option value="lab-1790744799755">LAB 01 - Cấu trúc liên kết (Linked Structures)</option>
+                    <option value="s-1">Buổi 1 - Mạng máy tính (Computer Network)</option>
+                    <option value="s-2">Lab - Hệ cơ sở dữ liệu (Database System)</option>
+                    <option value="empty-session-test">Kiểm thử Mẫu số Rỗng (N=0 / AC-14e)</option>
+                  </select>
+                </div>
+              </div>
+
+              {sessionReport?.denominatorWarning && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+                  <strong>Quy tắc AC-14e / AC-238 (Xử lý Mẫu số Rỗng N=0):</strong> Buổi học này chưa có sinh viên đăng ký. Hệ thống trả về <code className="font-semibold">null</code> và hiển thị <span className="rounded bg-amber-100 px-1 font-semibold">N/A</span> một cách an toàn, tránh lỗi chia cho 0 hoặc lỗi 500.
+                </div>
+              )}
+
+              {sessionReport && (
+                <div className="mt-5 space-y-5">
+                  {/* Summary metric cards */}
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <span className="text-xs font-medium text-slate-500">Tổng sinh viên đăng ký (N)</span>
+                      <div className="mt-1 text-2xl font-bold text-slate-900">{sessionReport.totalRegistered}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">{sessionReport.classroomName}</div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <span className="text-xs font-medium text-slate-500">Tỷ lệ tham gia (In-Lab)</span>
+                      <div className="mt-1 text-2xl font-bold text-blue-700">{sessionReport.participation.displayRate}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">
+                        Trong lab: {sessionReport.participation.inLabActive} | Ngoài lab: {sessionReport.participation.outsideLabActive}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <span className="text-xs font-medium text-slate-500">Điểm số trung bình</span>
+                      <div className="mt-1 text-2xl font-bold text-emerald-700">{sessionReport.scoreDistribution.displayAverageScore}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">Thang điểm 10 tiêu chuẩn</div>
+                    </div>
+
+                    <div className="rounded-lg border border-slate-200 p-4">
+                      <span className="text-xs font-medium text-slate-500">Tổng số bài tập</span>
+                      <div className="mt-1 text-2xl font-bold text-slate-900">{sessionReport.problems.length}</div>
+                      <div className="mt-0.5 text-xs text-slate-400">Bài tập trong ca thực hành</div>
+                    </div>
+                  </div>
+
+                  {/* Problem completion table */}
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase text-slate-500">Tiến độ bài tập thực hành</h4>
+                    <div className="mt-2 overflow-x-auto">
+                      <table className="w-full text-left text-xs">
+                        <thead className="border-b border-slate-200 bg-slate-50 text-slate-600">
+                          <tr>
+                            <th className="p-2.5 font-semibold">Tên bài thực hành</th>
+                            <th className="p-2.5 font-semibold">Số lượt nộp</th>
+                            <th className="p-2.5 font-semibold">Số bài đạt (Passed)</th>
+                            <th className="p-2.5 font-semibold">Tỷ lệ hoàn thành</th>
+                            <th className="p-2.5 font-semibold">Điểm trung bình</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {sessionReport.problems.map((prob) => (
+                            <tr key={prob.problemId} className="hover:bg-slate-50">
+                              <td className="p-2.5 font-medium text-slate-800">{prob.title}</td>
+                              <td className="p-2.5 text-slate-600">{prob.submissionsCount}</td>
+                              <td className="p-2.5 font-semibold text-emerald-700">{prob.passedCount}</td>
+                              <td className="p-2.5">
+                                <span className="rounded bg-slate-100 px-2 py-0.5 font-medium text-slate-800">
+                                  {prob.displayCompletionRate}
+                                </span>
+                              </td>
+                              <td className="p-2.5 text-slate-700">
+                                {prob.averageScore !== null ? `${prob.averageScore}/10` : 'N/A'}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Score distribution buckets */}
+                  <div>
+                    <h4 className="text-xs font-semibold uppercase text-slate-500">Phân bổ phổ điểm (Score Buckets)</h4>
+                    <div className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      {sessionReport.scoreDistribution.buckets.map((b) => (
+                        <div key={b.label} className="rounded-lg border border-slate-200 p-3 text-center">
+                          <span className="text-xs font-medium text-slate-500">{b.label}</span>
+                          <div className="mt-1 text-xl font-bold text-slate-900">{b.count} bài</div>
+                          <span className="text-[11px] text-slate-500">
+                            {b.percentage !== null ? `${b.percentage}%` : 'N/A'}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

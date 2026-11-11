@@ -42,6 +42,12 @@ import {
   getAuditLogs,
   recordAuditLog,
 } from './admin-operations.mjs';
+import {
+  getBackups,
+  createSemesterBackup,
+  verifyBackupDisasterRecovery,
+} from './backups.mjs';
+import { generateSessionReport } from './session-reports.mjs';
 
 const isMembershipRoute = (parts) =>
   parts[0] === 'api' &&
@@ -247,6 +253,14 @@ async function handleRequest(request, response) {
   const effectiveUser = { ...currentUser, role: viewerRole };
   const viewerEmail = currentUser.email;
 
+  const sessionReportMatch = requestUrl.pathname.match(/^\/api\/codepulse\/sessions\/([^/]+)\/report$/);
+  if (sessionReportMatch && request.method === 'GET') {
+    const sessionId = sessionReportMatch[1];
+    const report = await generateSessionReport(sessionId);
+    sendJson(response, 200, { item: report });
+    return;
+  }
+
   if (parts[0] === 'api' && parts[1] === 'admin') {
     const isAdminOrOperator = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(viewerRole);
     if (!isAdminOrOperator) {
@@ -303,6 +317,29 @@ async function handleRequest(request, response) {
         details: `Cập nhật trạng thái alert sang: ${body.status}`,
       });
       sendJson(response, 200, { item: updated });
+      return;
+    }
+
+    // Backups
+    if (parts[2] === 'backups' && !parts[3] && request.method === 'GET') {
+      const backups = await getBackups();
+      sendJson(response, 200, { items: backups, total: backups.length });
+      return;
+    }
+
+    if (parts[2] === 'backups' && !parts[3] && request.method === 'POST') {
+      const body = await readRequestBody(request).catch(() => ({}));
+      const created = await createSemesterBackup({
+        actorEmail: viewerEmail,
+        termId: body.termId || 'term-2026-1',
+      });
+      sendJson(response, 201, { item: created });
+      return;
+    }
+
+    if (parts[2] === 'backups' && parts[3] && parts[4] === 'verify' && request.method === 'POST') {
+      const result = await verifyBackupDisasterRecovery(parts[3], viewerEmail);
+      sendJson(response, 200, { item: result });
       return;
     }
 

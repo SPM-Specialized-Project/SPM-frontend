@@ -6,6 +6,11 @@ import {
   getAuditLogs,
   recordAuditLog,
 } from '../admin-operations.mjs';
+import {
+  getBackups,
+  createSemesterBackup,
+  verifyBackupDisasterRecovery,
+} from '../backups.mjs';
 
 test('Admin Operations - System Health & Worker Pool', async () => {
   const health = await getSystemOperationsHealth({ pendingCount: 2, activeCount: 1 });
@@ -58,4 +63,27 @@ test('Admin Operations - Audit Logs Append-Only Recording', async () => {
   const logs = await getAuditLogs();
   const found = logs.find((l) => l.id === logged.id);
   assert.ok(found, 'Recorded log should appear in audit logs list');
+});
+
+test('Semester Data Retention & Backup - Backup Creation & Disaster Recovery Drill', async () => {
+  // 1. Create a backup
+  const backup = await createSemesterBackup({
+    actorEmail: 'admin@test.com',
+    termId: 'term-2026-test',
+  });
+
+  assert.ok(backup.id);
+  assert.ok(backup.sha256Hash, 'Backup must include SHA-256 integrity hash');
+  assert.equal(backup.status, 'VERIFIED');
+  assert.ok(backup.sizeBytes > 0);
+
+  // 2. List backups
+  const backups = await getBackups();
+  assert.ok(backups.some((b) => b.id === backup.id));
+
+  // 3. Run Disaster Recovery Verification Drill
+  const drillResult = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
+  assert.equal(drillResult.verified, true, 'DR drill must verify backup integrity');
+  assert.equal(drillResult.checksumMatch, true, 'Checksum must match stored SHA-256');
+  assert.equal(drillResult.referentialIntegrity, true, 'Referential integrity must pass');
 });
