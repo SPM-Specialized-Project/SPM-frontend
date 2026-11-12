@@ -331,6 +331,15 @@ Infrastructure error phải biểu thị không có valid grading result. Hệ t
 - Student API payload không chứa hidden input hoặc hidden expected output.
 - Student kiểm tra network response vẫn không tìm thấy hidden secrets.
 
+### 11.3. Preconditions cho manual grading flow
+
+- Academic term và classroom đang ACTIVE; lecturer được gán vào classroom và student có membership ACTIVE.
+- LAB ở trạng thái LIVE; practice window của LAB và assignment bao trùm thời điểm submit, với `practiceAccess = OPEN`.
+- Assignment version được PUBLISHED, pin vào LAB và có ít nhất một public test cùng một hidden test đã xác minh.
+- Mỗi student có workspace thuộc đúng LAB, assignment và membership; legacy workspace thiếu `assignmentId` phải được resolve từ assignment đã pin.
+- Backend dùng thư mục dữ liệu test riêng và sandbox image đã được build từ source đang kiểm tra.
+- Đăng nhập bằng tài khoản lecturer và student riêng để kiểm tra cả quyền xem breakdown lẫn việc che hidden test.
+
 ## 12. Bộ test đầy đủ cần có trước khi chốt
 
 ### 12.1. Backend unit tests

@@ -232,13 +232,18 @@ const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
 });
 
 
-async function recordWorkspaceSnapshot({ workspace, trigger = 'SAVE', sourceCode = workspace.sourceCode }) {
+async function recordWorkspaceSnapshot({
+  workspace,
+  trigger = 'SAVE',
+  sourceCode = workspace.sourceCode,
+  assignmentId = workspace.assignmentId,
+}) {
   const hash = createHash('sha256').update(sourceCode || '').digest('hex');
   const snapshot = {
     id: `snapshot-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     workspaceId: workspace.id,
     classroomId: workspace.classroomId,
-    assignmentId: workspace.assignmentId,
+    assignmentId,
     assignmentVersionId: workspace.assignmentVersionId ?? null,
     studentEmail: workspace.ownerEmail,
     sourceCode: sourceCode || '',
@@ -944,6 +949,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
     return {
       ...visibleWorkspace,
+      ...(visibleWorkspace.assignmentId
+        ? {}
+        : { assignmentId: context.labAssignment.assignmentId }),
       revision,
       executionResult: workspace.executionResult ?? null,
       problem: {
@@ -1461,6 +1469,32 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs'
+    && parts[5] && parts[6] === 'submissions' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!isDsaManager(classroomItem)) deny();
+    const lab = labs.find((item) => item.id === parts[5] && item.classroomId === classroomItem.id) ?? notFound();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const labWorkspaceIds = new Set(workspaces
+      .filter((workspace) => workspace.classroomId === classroomItem.id && workspace.labId === lab.id)
+      .map((workspace) => workspace.id));
+    const submissions = await readSubmissions();
+    const items = await Promise.all(submissions
+      .filter((submission) => submission.kind === 'CODE_SUBMISSION'
+        && submission.classroomId === classroomItem.id
+        && submission.labId === lab.id
+        && labWorkspaceIds.has(submission.workspaceId))
+      .map(async (submission) => {
+        const judgment = submission.latestJudgmentId
+          ? await grading.getJudgment(submission.latestJudgmentId)
+          : null;
+        return codeSubmissionView(submission, judgment, user.role);
+      }));
+    items.sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
+    sendJson(response, 200, { items });
+    return;
+  }
+
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!isAssignedLecturer(classroomItem)) deny();
@@ -1637,9 +1671,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
     let workspace = currentWorkspaces.find((item) =>
       item.classroomId === classroomItem.id
-      && item.assignmentId === assignment.id
       && (!practiceContext
-        ? !item.labAssignmentId
+        ? item.assignmentId === assignment.id && !item.labAssignmentId
         : item.labId === practiceContext.lab.id && item.labAssignmentId === practiceContext.labAssignment.id)
       && item.ownerEmail === user.email);
 
@@ -2154,6 +2187,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         workspace,
         trigger: body.trigger || 'MANUAL',
         sourceCode,
+        assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
       });
       sendJson(response, 201, { item: snapshot });
       return;
@@ -2205,6 +2239,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       workspace: updated,
       trigger: 'SAVE',
       sourceCode: body.sourceCode,
+      assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
     });
     if (access) {
       await recordActivity({
@@ -2212,7 +2247,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context: access.practiceContext,
         activityAt: access.practiceAccess.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
           activityContext: access.practiceAccess.activityContext,
           workspaceId: workspace.id,
         },
@@ -2263,6 +2298,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (!context.lab || !context.labAssignment) {
       throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
     }
+    const assignmentId = context.labAssignment.assignmentId;
     if (body.assignmentVersionId !== undefined
       && body.assignmentVersionId !== context.labAssignment.assignmentVersionId) {
       throw apiError(409, 'ASSIGNMENT_VERSION_MISMATCH', 'The requested problem version is not pinned to this workspace.');
@@ -2280,12 +2316,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       classroomId: workspace.classroomId,
       labId: workspace.labId,
       labAssignmentId: workspace.labAssignmentId,
-      assignmentId: workspace.assignmentId,
+      assignmentId,
       assignmentVersionId: context.labAssignment.assignmentVersionId,
       sourceCode: body.sourceCode,
     });
     const pinnedAssignment = assignments.find((assignment) =>
-      assignment.id === workspace.assignmentId
+      assignment.id === assignmentId
       && assignment.classroomId === workspace.classroomId) ?? notFound();
     const pinnedGradingVersion = resolvePublishedAssignmentVersion(
       pinnedAssignment,
@@ -2313,7 +2349,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         classroomId: workspace.classroomId,
         labId: workspace.labId,
         labAssignmentId: workspace.labAssignmentId,
-        assignmentId: workspace.assignmentId,
+        assignmentId,
         assignmentVersionId: context.labAssignment.assignmentVersionId,
         assignmentVersion: {
           id: context.labAssignment.assignmentVersionId,
@@ -2362,7 +2398,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context,
         activityAt: result.submission.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId,
           assignmentVersionId: context.labAssignment.assignmentVersionId,
           activityContext,
           workspaceId: workspace.id,
@@ -2442,11 +2478,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         throw conflict;
       }
     }
-    const linkedAssignment = assignments.find((assignment) => assignment.id === workspace.assignmentId
+    const assignmentId = context.labAssignment?.assignmentId ?? workspace.assignmentId;
+    const linkedAssignment = assignments.find((assignment) => assignment.id === assignmentId
       && assignment.classroomId === workspace.classroomId && assignment.status === 'PUBLISHED');
     const versionId = context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId;
     const storedVersion = assignmentVersions.find((item) => item.id === versionId
-      && item.assignmentId === workspace.assignmentId && item.classroomId === workspace.classroomId
+      && item.assignmentId === assignmentId && item.classroomId === workspace.classroomId
       && item.status === 'PUBLISHED');
     const version = linkedAssignment
       ? versionId ? resolvePublishedAssignmentVersion(linkedAssignment, versionId) : latestPublishedAssignmentVersion(linkedAssignment)
@@ -2454,16 +2491,17 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         testCases: normalizeTestCases(storedVersion.testCases ?? []) } : notFound();
     if (!ALLOWED_RUNTIMES.has(version.runtime)) throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Unsupported assignment runtime.');
     const queued = await executions.enqueue({ assignment: version, sourceCode, body,
-      assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
+      assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
       workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
     await markAssignmentVersionUsed(version.id);
     await recordWorkspaceSnapshot({
       workspace,
       trigger: 'RUN',
       sourceCode,
+      assignmentId,
     });
     await recordActivity({ type: 'RUN', context: access?.practiceContext,
-      activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
+      activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId,
         activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
         executionId: queued.item.id, executionStatus: 'QUEUED' } });
     sendJson(response, 202, { item: queued.item });
@@ -2493,7 +2531,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context: access.practiceContext,
         activityAt: access.practiceAccess.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
           activityContext: access.practiceAccess.activityContext,
           workspaceId: workspace.id,
           hintId: hint.id,

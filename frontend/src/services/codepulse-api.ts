@@ -574,6 +574,12 @@ export const codePulseApi = {
         `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs`,
       ),
     ),
+  listLabSubmissions: (classroomId: string, labId: string) =>
+    request(() =>
+      apiClient.get<{ items: CodePulseWorkspaceSubmission[] }>(
+        `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/submissions`,
+      ),
+    ),
   createLab: (classroomId: string, item: CreateCodePulseLabInput) =>
     request(() =>
       apiClient.post<{ item: CodePulseLab }>(

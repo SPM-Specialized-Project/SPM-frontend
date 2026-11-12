@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -256,6 +256,35 @@ test('SCRUM-74 immutable submission is graded asynchronously with partial credit
   const workspaceId = labs.data.items
     .find((item) => item.id === labId)
     .assignments[0].workspaceId;
+  const workspacesPath = path.join(dataDirectory, 'codepulse-workspaces.json');
+  const workspaces = JSON.parse(await readFile(workspacesPath, 'utf8'));
+  const labWorkspace = workspaces.find((item) => item.id === workspaceId);
+  assert.ok(labWorkspace);
+  delete labWorkspace.assignmentId;
+  await writeJson(dataDirectory, 'codepulse-workspaces.json', workspaces);
+  const recoveredWorkspace = await request(
+    baseUrl,
+    `/api/codepulse/classrooms/class-1/workspace?labId=${labId}&labAssignmentId=${labs.data.items.find((item) => item.id === labId).assignments[0].id}`,
+    student,
+  );
+  assert.equal(recoveredWorkspace.status, 200);
+  assert.equal(recoveredWorkspace.data.item.id, workspaceId);
+  assert.equal(recoveredWorkspace.data.item.assignmentId, 'problem-1');
+  const runResult = await request(
+    baseUrl,
+    `/api/codepulse/workspaces/${workspaceId}/execute`,
+    student,
+    'POST',
+    { sourceCode: 'print("Hello")' },
+  );
+  assert.equal(runResult.status, 202);
+  const runSnapshots = await request(
+    baseUrl,
+    `/api/codepulse/workspaces/${workspaceId}/snapshots`,
+    student,
+  );
+  assert.equal(runSnapshots.status, 200);
+  assert.equal(runSnapshots.data.items.at(-1).assignmentId, 'problem-1');
   const accepted = await request(
     baseUrl,
     `/api/codepulse/workspaces/${workspaceId}/submissions`,
@@ -304,6 +333,21 @@ test('SCRUM-74 immutable submission is graded asynchronously with partial credit
   const lecturerResult = await request(baseUrl, route, lecturer);
   assert.equal(lecturerResult.status, 200);
   assert.match(JSON.stringify(lecturerResult.data), /secret input/);
+  const lecturerLabSubmissions = await request(
+    baseUrl,
+    `/api/codepulse/classrooms/class-1/labs/${labId}/submissions`,
+    lecturer,
+  );
+  assert.equal(lecturerLabSubmissions.status, 200);
+  assert.equal(lecturerLabSubmissions.data.items.length, 1);
+  assert.equal(lecturerLabSubmissions.data.items[0].id, accepted.data.item.id);
+  assert.match(JSON.stringify(lecturerLabSubmissions.data), /secret input/);
+  const studentLabSubmissions = await request(
+    baseUrl,
+    `/api/codepulse/classrooms/class-1/labs/${labId}/submissions`,
+    student,
+  );
+  assert.equal(studentLabSubmissions.status, 403);
 });
 
 test('SCRUM-74 grading keeps the submission snapshot after assignment-version drift', async (t) => {
