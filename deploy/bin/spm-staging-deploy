@@ -56,10 +56,10 @@ nginx -t
 systemctl reload-or-restart nginx
 
 curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:8080/api/health >/dev/null
+  http://127.0.0.1:18080/api/health >/dev/null
 curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:8080/ >/dev/null
+  http://127.0.0.1:18080/ >/dev/null
 curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:8080/git/ >/dev/null
+  http://127.0.0.1:18080/git/ >/dev/null
 
 echo "SPM staging deployed: $release_id"

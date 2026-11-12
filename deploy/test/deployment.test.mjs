@@ -54,7 +54,8 @@ test('existing database password takes precedence and cannot be replaced acciden
 test('public URL is normalized once and Compose preserves literal dollars in passwords', () => {
   assert.equal(publicRootUrl('https://example-test.trycloudflare.com'), 'https://example-test.trycloudflare.com/git/');
   for (const value of ['https://https://example-test.trycloudflare.com', 'http://example-test.trycloudflare.com',
-    'https://example-test.trycloudflare.com:8080', 'https://example-test.trycloudflare.com/git/', 'https://example.com']) {
+    'https://example-test.trycloudflare.com:8080', 'https://example-test.trycloudflare.com:18080',
+    'https://example-test.trycloudflare.com/git/', 'https://example.com']) {
     assert.throws(() => publicRootUrl(value));
   }
   const password = 'abc$VALUE${NOT_A_VARIABLE}';

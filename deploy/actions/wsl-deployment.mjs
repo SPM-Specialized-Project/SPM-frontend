@@ -9,7 +9,7 @@ const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.
 const phase = process.argv[2];
 const deployment = process.env.SPM_DEPLOY_ENVIRONMENT || 'staging';
 const isStaging = deployment === 'staging';
-const baseUrl = isStaging ? 'http://127.0.0.1:8080' : 'http://127.0.0.1';
+const baseUrl = isStaging ? 'http://127.0.0.1:18080' : 'http://127.0.0.1';
 const tunnelUnit = isStaging ? 'spm-staging-quick-tunnel.service' : 'spm-quick-tunnel.service';
 const deployCommand = isStaging ? '/usr/local/sbin/spm-staging-deploy' : '/usr/local/sbin/spm-deploy';
 
