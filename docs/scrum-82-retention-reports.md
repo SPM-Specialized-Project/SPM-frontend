@@ -2,6 +2,8 @@
 
 Branch: `Feat/Scrum-82`
 
+Manual test preconditions and checklist: [SCRUM-82 manual test](./scrum-82-manual-test.md).
+
 Tài liệu kỹ thuật và hướng dẫn vận hành cho User Story **`[SCRUM-82]` (US-012.3 / US-014.1)**:
 - Semester Data Retention (4 months data preservation across bi-weekly lab sessions).
 - Backup generation with SHA-256 integrity hash verification.
@@ -16,13 +18,15 @@ Tài liệu kỹ thuật và hướng dẫn vận hành cho User Story **`[SCRUM
 ### 1.1. Lưu trữ học kỳ & Diễn tập phục hồi thảm họa (US-012.3)
 - **Lưu trữ xuyên suốt học kỳ**: Dữ liệu ca thực hành được bảo toàn trong 4 tháng; các đợt lab định kỳ 2 tuần/lần không xóa dữ liệu lịch sử.
 - **Mã băm toàn vẹn SHA-256**: Mỗi bản sao lưu học kỳ được tính toán mã băm SHA-256 đối chiếu toàn vẹn tệp nén JSON.
-- **Diễn tập phục hồi thảm họa (Disaster Recovery Drill)**: Cung cấp API mô phỏng kiểm thử khôi phục khẩn cấp (`POST /api/admin/backups/:id/verify`), tự động tính lại mã băm kiểm tra sai lệch và xác minh tính toàn vẹn ràng buộc khóa ngoại (Foreign Key) giữa Classrooms, Assignments và Workspaces.
+- **Phạm vi bản sao lưu**: Chỉ lưu term được chọn cùng các classroom và bản ghi liên quan; không đưa dữ liệu của term khác vào tệp.
+- **Diễn tập phục hồi thảm họa (Disaster Recovery Drill)**: Cung cấp API kiểm thử khôi phục (`POST /api/admin/backups/:id/verify`), kiểm tra sự tồn tại của tệp, checksum, cấu trúc JSON và ràng buộc khóa ngoại giữa Classrooms, Assignments và Workspaces. Tệp thiếu, sai định dạng hoặc sai tham chiếu luôn làm drill thất bại.
 
 ### 1.2. Báo cáo buổi thực hành & Xử lý mẫu số rỗng (US-014.1)
-- **Chỉ số tham gia**: Tính toán tỷ lệ tham gia trong giờ lab (*In-Lab*) và ngoài giờ (*Outside-Lab*) dựa trên số sinh viên đăng ký $N$.
-- **Chỉ số hoàn thành**: Thống kê số lượt nộp, số bài đạt (*Passed*), tỷ lệ hoàn thành theo từng bài tập thực hành.
+- **Chỉ số tham gia**: Tính toán tỷ lệ tham gia trong giờ lab (*In-Lab*) và ngoài giờ (*Outside-Lab*) từ roster, attendance và activity cùng lab; không tự suy diễn hoạt động từ workspace không thuộc lab.
+- **Chỉ số hoàn thành**: Thống kê lượt nộp, lượt đạt (*Passed*), tỷ lệ hoàn thành và điểm từ submission đã lưu. Legacy session không có submission liên kết sẽ không hiển thị điểm giả.
 - **Phân bổ phổ điểm (Score Buckets)**: Nhóm 4 khoảng điểm chuẩn: `[0 - 5.0)`, `[5.0 - 7.0)`, `[7.0 - 8.5)`, `[8.5 - 10.0]`.
 - **Kiểm soát an toàn mẫu số rỗng (AC-14e / AC-238)**: Khi buổi học không có sinh viên đăng ký ($N=0$), hệ thống trả về giá trị `null` và hiển thị nhãn `N/A`, tuyệt đối không sinh lỗi chia cho 0, không trả về `NaN` và không gây lỗi HTTP 500.
+- **ID không tồn tại**: Báo cáo trả HTTP 404 thay vì hiển thị dữ liệu của buổi khác.
 
 ---
 

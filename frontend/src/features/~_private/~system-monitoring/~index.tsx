@@ -75,7 +75,7 @@ export function SystemMonitoringPage() {
   const [drillResult, setDrillResult] = useState<DrillResult | null>(null);
 
   // Session report state
-  const [selectedSessionId, setSelectedSessionId] = useState('lab-1790744799755');
+  const [selectedSessionId, setSelectedSessionId] = useState('lab-1790764823448');
   const [sessionReport, setSessionReport] = useState<SessionReport | null>(null);
 
   // Toast notification
@@ -154,6 +154,7 @@ export function SystemMonitoringPage() {
       const rep = await adminOperationsApi.getSessionReport(sId);
       setSessionReport(rep);
     } catch {
+      setSessionReport(null);
       showNotification('Không thể tải báo cáo buổi thực hành.', 'error');
     }
   };
@@ -208,7 +209,10 @@ export function SystemMonitoringPage() {
     try {
       const res = await adminOperationsApi.runDisasterRecoveryDrill(backupId);
       setDrillResult(res);
-      showNotification('Diễn tập phục hồi thảm họa hoàn tất.');
+      showNotification(
+        res.verified ? 'Diễn tập phục hồi đạt yêu cầu.' : 'Diễn tập phát hiện backup không hợp lệ.',
+        res.verified ? 'success' : 'error',
+      );
       await loadAuditLogs();
     } catch {
       showNotification('Lỗi trong quá trình diễn tập phục hồi.', 'error');
@@ -787,9 +791,10 @@ export function SystemMonitoringPage() {
                     }}
                     className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-800 focus:border-blue-500 focus:outline-none"
                   >
-                    <option value="lab-1790744799755">LAB 01 - Cấu trúc liên kết (Linked Structures)</option>
+                    <option value="lab-1790764823448">LAB 01 - PRACTICE</option>
                     <option value="s-1">Buổi 1 - Mạng máy tính (Computer Network)</option>
                     <option value="s-2">Lab - Hệ cơ sở dữ liệu (Database System)</option>
+                    <option value="s-3">Buổi tổng hợp - Hệ cơ sở dữ liệu (Database System)</option>
                     <option value="empty-session-test">Kiểm thử Mẫu số Rỗng (N=0 / AC-14e)</option>
                   </select>
                 </div>

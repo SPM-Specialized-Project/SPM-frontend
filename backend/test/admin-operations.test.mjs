@@ -1,11 +1,39 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { test } from 'node:test';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, mkdir, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 const testDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-admin-operations-'));
 process.env.BACKEND_DATA_DIRECTORY = testDataDirectory;
+await mkdir(testDataDirectory, { recursive: true });
+await Promise.all([
+  writeFile(path.join(testDataDirectory, 'codepulse-terms.json'), JSON.stringify([
+    { id: 'term-2026-test', name: 'Test Term' },
+    { id: 'term-other', name: 'Other Term' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-classrooms.json'), JSON.stringify([
+    { id: 'class-test', termId: 'term-2026-test' },
+    { id: 'class-other', termId: 'term-other' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-assignments.json'), JSON.stringify([
+    { id: 'assignment-test', classroomId: 'class-test' },
+    { id: 'assignment-other', classroomId: 'class-other' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-workspaces.json'), JSON.stringify([
+    { id: 'workspace-test', classroomId: 'class-test', assignmentId: 'assignment-test' },
+    { id: 'workspace-other', classroomId: 'class-other', assignmentId: 'assignment-other' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-submissions.json'), JSON.stringify([
+    { id: 'submission-test', classroomId: 'class-test', assignmentId: 'assignment-test', workspaceId: 'workspace-test' },
+    { id: 'submission-other', classroomId: 'class-other', assignmentId: 'assignment-other', workspaceId: 'workspace-other' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-alerts.json'), JSON.stringify([
+    { id: 'alert-test', classroomId: 'class-test' },
+    { id: 'alert-other', classroomId: 'class-other' },
+  ])),
+]);
 const {
   getSystemOperationsHealth,
   getRequestTrace,
@@ -18,6 +46,10 @@ const {
   createSemesterBackup,
   verifyBackupDisasterRecovery,
 } = await import('../backups.mjs');
+
+test('Backup list contains only persisted records', async () => {
+  assert.deepEqual(await getBackups(), []);
+});
 
 test.after(async () => {
   await rm(testDataDirectory, { recursive: true, force: true });
@@ -105,11 +137,62 @@ test('Semester Data Retention & Backup - Backup Creation & Disaster Recovery Dri
   assert.equal(backup.status, 'VERIFIED');
   assert.ok(backup.sizeBytes > 0);
 
+  const backupPath = path.join(testDataDirectory, 'backups', backup.filename);
+  const rawBackup = await readFile(backupPath, 'utf8');
+  assert.equal(createHash('sha256').update(rawBackup, 'utf8').digest('hex'), backup.sha256Hash);
+  const backupData = JSON.parse(rawBackup);
+  assert.deepEqual(backupData.tables.terms.map((term) => term.id), ['term-2026-test']);
+  assert.deepEqual(backupData.tables.classrooms.map((classroom) => classroom.id), ['class-test']);
+  assert.deepEqual(backupData.tables.assignments.map((assignment) => assignment.id), ['assignment-test']);
+  assert.deepEqual(backupData.tables.workspaces.map((workspace) => workspace.id), ['workspace-test']);
+  assert.deepEqual(backupData.tables.submissions.map((submission) => submission.id), ['submission-test']);
+  assert.deepEqual(backupData.tables.alerts.map((alert) => alert.id), ['alert-test']);
+
   const backups = await getBackups();
   assert.ok(backups.some((item) => item.id === backup.id));
 
   const drillResult = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
   assert.equal(drillResult.verified, true, 'DR drill must verify backup integrity');
   assert.equal(drillResult.checksumMatch, true, 'Checksum must match stored SHA-256');
+  assert.equal(drillResult.jsonValid, true, 'Backup JSON structure must be valid');
   assert.equal(drillResult.referentialIntegrity, true, 'Referential integrity must pass');
+});
+
+test('Disaster recovery drill fails closed for tampered, malformed, missing, and broken-reference backups', async () => {
+  const backup = await createSemesterBackup({ actorEmail: 'admin@test.com', termId: 'term-2026-test' });
+  const backupPath = path.join(testDataDirectory, 'backups', backup.filename);
+  const recordsPath = path.join(testDataDirectory, 'codepulse-backups.json');
+  const validBytes = await readFile(backupPath, 'utf8');
+
+  await writeFile(backupPath, `${validBytes} `, 'utf8');
+  const tampered = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
+  assert.equal(tampered.verified, false);
+  assert.equal(tampered.checksumMatch, false);
+  assert.equal(tampered.jsonValid, true);
+
+  await writeFile(backupPath, '{ invalid json', 'utf8');
+  const malformed = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
+  assert.equal(malformed.verified, false);
+  assert.equal(malformed.checksumMatch, false);
+  assert.equal(malformed.jsonValid, false);
+
+  const brokenData = JSON.parse(validBytes);
+  brokenData.tables.workspaces[0].classroomId = 'missing-classroom';
+  const brokenBytes = JSON.stringify(brokenData, null, 2);
+  await writeFile(backupPath, brokenBytes, 'utf8');
+  const records = JSON.parse(await readFile(recordsPath, 'utf8'));
+  records.find((item) => item.id === backup.id).sha256Hash = createHash('sha256').update(brokenBytes, 'utf8').digest('hex');
+  await writeFile(recordsPath, JSON.stringify(records, null, 2), 'utf8');
+  const brokenReference = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
+  assert.equal(brokenReference.checksumMatch, true);
+  assert.equal(brokenReference.jsonValid, true);
+  assert.equal(brokenReference.referentialIntegrity, false);
+  assert.equal(brokenReference.verified, false);
+
+  await rm(backupPath);
+  const missing = await verifyBackupDisasterRecovery(backup.id, 'admin@test.com');
+  assert.equal(missing.verified, false);
+  assert.equal(missing.checksumMatch, false);
+  assert.equal(missing.jsonValid, false);
+  assert.equal(missing.referentialIntegrity, false);
 });

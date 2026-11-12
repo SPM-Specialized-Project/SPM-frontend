@@ -5,88 +5,83 @@ import {
   SESSIONS_FILE,
   MEMBERSHIPS_FILE,
   ASSIGNMENTS_FILE,
-  EXECUTIONS_FILE,
+  CODEPULSE_SUBMISSIONS_FILE,
   CODEPULSE_ACTIVITIES_FILE,
   WORKSPACES_FILE,
 } from './config.mjs';
 
 async function readJsonSafe(filePath, defaultValue = []) {
   try {
-    const raw = await readFile(filePath, 'utf8');
-    const parsed = JSON.parse(raw);
-    return parsed;
+    const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+    return Array.isArray(parsed) ? parsed : defaultValue;
   } catch {
     return defaultValue;
   }
 }
 
+const normalizeEmail = (value) => String(value ?? '').trim().toLowerCase();
+const isActiveStudent = (membership) => membership.status === 'ACTIVE'
+  && (!membership.role || String(membership.role).toLowerCase() === 'student');
+
 export async function generateSessionReport(sessionId) {
-  const [
-    classrooms,
-    labs,
-    sessions,
-    memberships,
-    assignments,
-    executions,
-    activities,
-    workspaces,
-  ] = await Promise.all([
-    readJsonSafe(CLASSROOMS_FILE, []),
-    readJsonSafe(LABS_FILE, []),
-    readJsonSafe(SESSIONS_FILE, []),
-    readJsonSafe(MEMBERSHIPS_FILE, []),
-    readJsonSafe(ASSIGNMENTS_FILE, []),
-    readJsonSafe(EXECUTIONS_FILE, []),
-    readJsonSafe(CODEPULSE_ACTIVITIES_FILE, []),
-    readJsonSafe(WORKSPACES_FILE, []),
+  const [classrooms, labs, sessions, memberships, assignments, submissions, activities, workspaces] = await Promise.all([
+    readJsonSafe(CLASSROOMS_FILE),
+    readJsonSafe(LABS_FILE),
+    readJsonSafe(SESSIONS_FILE),
+    readJsonSafe(MEMBERSHIPS_FILE),
+    readJsonSafe(ASSIGNMENTS_FILE),
+    readJsonSafe(CODEPULSE_SUBMISSIONS_FILE),
+    readJsonSafe(CODEPULSE_ACTIVITIES_FILE),
+    readJsonSafe(WORKSPACES_FILE),
   ]);
 
-  // Try to find as lab first, then as session
-  const lab = labs.find((l) => l.id === sessionId);
-  const session = sessions.find((s) => s.id === sessionId);
-
-  if (!lab && !session && sessionId !== 'empty-session-test') {
-    // If not found by exact ID, use first lab or session as fallback demo
-    const fallbackLab = labs[0];
-    if (!fallbackLab) {
-      return buildEmptyReport(sessionId, 'Unknown Session');
-    }
-    return buildReportForLab({
-      lab: fallbackLab,
-      classrooms,
-      memberships,
-      assignments,
-      executions,
-      activities,
-      workspaces,
-    });
-  }
-
   if (sessionId === 'empty-session-test') {
-    return buildEmptyReport('empty-session-test', 'Empty Test Session (N=0)');
+    return buildEmptyReport(sessionId, 'Empty Test Session (N=0)');
   }
 
+  const lab = labs.find((item) => item.id === sessionId);
   if (lab) {
     return buildReportForLab({
       lab,
       classrooms,
       memberships,
       assignments,
-      executions,
+      submissions,
       activities,
       workspaces,
     });
   }
 
-  return buildReportForSession({
-    session,
-    classrooms,
-    memberships,
-    assignments,
-    executions,
-    activities,
-    workspaces,
-  });
+  const session = sessions.find((item) => item.id === sessionId);
+  if (session) return buildReportForSession(session);
+
+  return null;
+}
+
+function buildScoreDistribution(scores) {
+  const ranges = [
+    { label: '[0 - 5.0)', matches: (score) => score < 5 },
+    { label: '[5.0 - 7.0)', matches: (score) => score >= 5 && score < 7 },
+    { label: '[7.0 - 8.5)', matches: (score) => score >= 7 && score < 8.5 },
+    { label: '[8.5 - 10.0]', matches: (score) => score >= 8.5 && score <= 10 },
+  ];
+  const count = scores.length;
+  const averageScore = count
+    ? Number((scores.reduce((sum, score) => sum + score, 0) / count).toFixed(1))
+    : null;
+
+  return {
+    buckets: ranges.map(({ label, matches }) => {
+      const bucketCount = scores.filter(matches).length;
+      return {
+        label,
+        count: bucketCount,
+        percentage: count ? Number(((bucketCount / count) * 100).toFixed(1)) : null,
+      };
+    }),
+    averageScore,
+    displayAverageScore: averageScore === null ? 'N/A' : `${averageScore}/10`,
+  };
 }
 
 function buildEmptyReport(sessionId, title) {
@@ -102,145 +97,113 @@ function buildEmptyReport(sessionId, title) {
       displayRate: 'N/A',
     },
     problems: [],
-    scoreDistribution: {
-      buckets: [
-        { label: '[0 - 5.0)', count: 0, percentage: null },
-        { label: '[5.0 - 7.0)', count: 0, percentage: null },
-        { label: '[7.0 - 8.5)', count: 0, percentage: null },
-        { label: '[8.5 - 10.0]', count: 0, percentage: null },
-      ],
-      averageScore: null,
-      displayAverageScore: 'N/A',
-    },
+    scoreDistribution: buildScoreDistribution([]),
     denominatorWarning: true,
     generatedAt: new Date().toISOString(),
   };
 }
 
-function buildReportForLab({
-  lab,
-  classrooms,
-  memberships,
-  assignments,
-  executions,
-  activities,
-  workspaces,
-}) {
-  const classroom = classrooms.find((c) => c.id === lab.classroomId);
-  const classMembers = memberships.filter(
-    (m) => m.classroomId === lab.classroomId && m.role === 'student' && m.status === 'ACTIVE',
-  );
+function buildReportForLab({ lab, classrooms, memberships, assignments, submissions, activities, workspaces }) {
+  const classroom = classrooms.find((item) => item.id === lab.classroomId);
+  const classroomKeys = new Set([lab.classroomId, classroom?.courseId].filter(Boolean).map(String));
+  const classMembers = memberships.filter((membership) =>
+    classroomKeys.has(String(membership.classroomId)) && isActiveStudent(membership));
+  const registeredKeys = new Set(classMembers.map((membership) =>
+    normalizeEmail(membership.studentEmail) || String(membership.studentId ?? membership.id)));
+  const registeredEmails = new Set(classMembers.map((membership) => normalizeEmail(membership.studentEmail)).filter(Boolean));
+  const totalRegistered = registeredKeys.size;
 
-  const totalRegistered = classMembers.length;
+  const labWorkspaces = workspaces.filter((workspace) =>
+    workspace.labId === lab.id && workspace.classroomId === lab.classroomId);
+  const labWorkspaceIds = new Set(labWorkspaces.map((workspace) => workspace.id));
+  const activityMatchesLab = (activity) => activity.labId === lab.id
+    || (activity.workspaceId && labWorkspaceIds.has(activity.workspaceId));
+  const inLabEmails = new Set();
+  const outsideLabEmails = new Set();
+  const labStart = Date.parse(lab.startAt ?? '');
+  const labEnd = Date.parse(lab.endAt ?? '');
 
-  // Filter activities and executions for this lab
-  const labWorkspaces = workspaces.filter((w) => w.labId === lab.id || w.classroomId === lab.classroomId);
-  const workspaceIds = new Set(labWorkspaces.map((w) => w.id));
+  const addParticipation = (emailValue, context, timestamp) => {
+    const email = normalizeEmail(emailValue);
+    if (!email || !registeredEmails.has(email)) return;
 
-  // In-lab vs outside-lab participation
-  const activeStudentEmails = new Set();
-  const inLabStudentEmails = new Set();
-  const outsideLabStudentEmails = new Set();
-
-  const labStart = lab.startAt ? new Date(lab.startAt).getTime() : 0;
-  const labEnd = lab.endAt ? new Date(lab.endAt).getTime() : Infinity;
-
-  for (const act of activities) {
-    const actTime = new Date(act.activityAt || act.timestamp || 0).getTime();
-    const email = act.userEmail || act.studentEmail || act.context?.studentEmail;
-    if (email) {
-      activeStudentEmails.add(email);
-      if (actTime >= labStart && actTime <= labEnd) {
-        inLabStudentEmails.add(email);
-      } else {
-        outsideLabStudentEmails.add(email);
-      }
+    let isInLab;
+    if (context === 'IN_LAB') isInLab = true;
+    else if (context === 'OUTSIDE_LAB') isInLab = false;
+    else {
+      const time = Date.parse(timestamp ?? '');
+      if (!Number.isFinite(time)) return;
+      isInLab = (!Number.isFinite(labStart) || time >= labStart)
+        && (!Number.isFinite(labEnd) || time <= labEnd);
     }
+
+    (isInLab ? inLabEmails : outsideLabEmails).add(email);
+  };
+
+  for (const activity of activities.filter(activityMatchesLab)) {
+    addParticipation(
+      activity.ownerEmail ?? activity.userEmail ?? activity.studentEmail ?? activity.context?.studentEmail,
+      activity.activityContext,
+      activity.occurredAt ?? activity.activityAt ?? activity.timestamp,
+    );
   }
 
-  // Also include workspaces created / modified
-  for (const ws of labWorkspaces) {
-    if (ws.ownerEmail) {
-      activeStudentEmails.add(ws.ownerEmail);
-      inLabStudentEmails.add(ws.ownerEmail);
-    }
+  for (const workspace of labWorkspaces) {
+    addParticipation(workspace.ownerEmail, null, workspace.updatedAt ?? workspace.createdAt);
   }
 
-  const inLabCount = inLabStudentEmails.size;
-  const outsideLabCount = outsideLabStudentEmails.size;
+  const inLabCount = inLabEmails.size;
+  const outsideLabCount = outsideLabEmails.size;
+  const participationRate = totalRegistered ? (inLabCount / totalRegistered) * 100 : null;
+  const displayRate = participationRate === null ? 'N/A' : `${participationRate.toFixed(1)}%`;
 
-  // Safe division: AC-14e / AC-238
-  const participationRate = totalRegistered > 0 ? (inLabCount / totalRegistered) * 100 : null;
-  const displayRate = participationRate !== null ? `${participationRate.toFixed(1)}%` : 'N/A';
-
-  // Problem metrics
-  const labAssignments = (lab.assignments || []).map((la) => {
-    const assignDetail = assignments.find((a) => a.id === la.assignmentId || a.id === la.id) || la;
+  const labAssignments = (lab.assignments ?? []).map((labAssignment) => {
+    const assignmentId = labAssignment.assignmentId ?? labAssignment.id;
+    const assignment = assignments.find((item) => item.id === assignmentId);
     return {
-      id: la.assignmentId || la.id,
-      title: la.title || assignDetail.title || 'Bài thực hành',
+      id: assignmentId,
+      title: labAssignment.title ?? assignment?.title ?? 'Bài thực hành',
     };
   });
 
   const scores = [];
-  const problems = labAssignments.map((p) => {
-    const pWorkspaces = labWorkspaces.filter((w) => w.assignmentId === p.id);
-    const pExecutions = executions.filter((e) => e.assignmentId === p.id || workspaceIds.has(e.workspaceId));
+  const problems = labAssignments.map((problem) => {
+    const problemSubmissions = submissions.filter((submission) => {
+      if (submission.assignmentId !== problem.id) return false;
+      return submission.labId === lab.id
+        || (submission.workspaceId && labWorkspaceIds.has(submission.workspaceId))
+        || (!submission.labId && submission.classroomId === lab.classroomId);
+    });
+    const scoreFor = (submission) => {
+      const explicitScore = Number(submission.score);
+      if (Number.isFinite(explicitScore) && explicitScore >= 0 && explicitScore <= 10) return explicitScore;
+      const total = Number(submission.totalCount ?? submission.results?.length ?? 0);
+      const passed = Number(submission.passedCount ?? submission.results?.filter((result) => result.passed).length ?? 0);
+      return total > 0 ? (passed / total) * 10 : null;
+    };
+    const submissionScores = problemSubmissions.map(scoreFor).filter(Number.isFinite);
+    const passedSubmissions = problemSubmissions.filter((submission) => {
+      const score = scoreFor(submission);
+      return score === 10;
+    });
+    const passedStudents = new Set(passedSubmissions.map((submission) =>
+      normalizeEmail(submission.ownerEmail ?? submission.studentEmail) || submission.id));
+    const completionRate = totalRegistered ? (passedStudents.size / totalRegistered) * 100 : null;
+    const averageScore = submissionScores.length
+      ? Number((submissionScores.reduce((sum, score) => sum + score, 0) / submissionScores.length).toFixed(1))
+      : null;
 
-    const submissionsCount = pExecutions.length;
-    const passedCount = pExecutions.filter((e) => e.status === 'SUCCESS' || e.passedCount === e.totalCount && e.totalCount > 0).length;
-
-    const completionRate = totalRegistered > 0 ? (passedCount / totalRegistered) * 100 : null;
-
-    // Calculate score (0-10)
-    let avgProblemScore = null;
-    if (pExecutions.length > 0) {
-      const calculatedScores = pExecutions.map((e) => {
-        if (e.totalCount > 0) {
-          return (e.passedCount / e.totalCount) * 10;
-        }
-        return e.status === 'SUCCESS' ? 10 : 0;
-      });
-      const sum = calculatedScores.reduce((acc, curr) => acc + curr, 0);
-      avgProblemScore = Number((sum / calculatedScores.length).toFixed(1));
-      scores.push(...calculatedScores);
-    }
-
+    scores.push(...submissionScores);
     return {
-      problemId: p.id,
-      title: p.title,
-      submissionsCount,
-      passedCount,
-      completionRate: completionRate !== null ? Number(completionRate.toFixed(1)) : null,
-      displayCompletionRate: completionRate !== null ? `${completionRate.toFixed(1)}%` : 'N/A',
-      averageScore: avgProblemScore,
+      problemId: problem.id,
+      title: problem.title,
+      submissionsCount: problemSubmissions.length,
+      passedCount: passedSubmissions.length,
+      completionRate: completionRate === null ? null : Number(completionRate.toFixed(1)),
+      displayCompletionRate: completionRate === null ? 'N/A' : `${completionRate.toFixed(1)}%`,
+      averageScore,
     };
   });
-
-  // Score distribution buckets
-  let bucket1 = 0; // [0 - 5.0)
-  let bucket2 = 0; // [5.0 - 7.0)
-  let bucket3 = 0; // [7.0 - 8.5)
-  let bucket4 = 0; // [8.5 - 10.0]
-
-  for (const s of scores) {
-    if (s < 5.0) bucket1++;
-    else if (s < 7.0) bucket2++;
-    else if (s < 8.5) bucket3++;
-    else bucket4++;
-  }
-
-  const totalScores = scores.length;
-  const overallAvgScore = totalScores > 0
-    ? Number((scores.reduce((a, b) => a + b, 0) / totalScores).toFixed(1))
-    : null;
-
-  const scoreBuckets = [
-    { label: '[0 - 5.0)', count: bucket1, percentage: totalScores > 0 ? Number(((bucket1 / totalScores) * 100).toFixed(1)) : null },
-    { label: '[5.0 - 7.0)', count: bucket2, percentage: totalScores > 0 ? Number(((bucket2 / totalScores) * 100).toFixed(1)) : null },
-    { label: '[7.0 - 8.5)', count: bucket3, percentage: totalScores > 0 ? Number(((bucket3 / totalScores) * 100).toFixed(1)) : null },
-    { label: '[8.5 - 10.0]', count: bucket4, percentage: totalScores > 0 ? Number(((bucket4 / totalScores) * 100).toFixed(1)) : null },
-  ];
 
   return {
     sessionId: lab.id,
@@ -250,33 +213,21 @@ function buildReportForLab({
     participation: {
       inLabActive: inLabCount,
       outsideLabActive: outsideLabCount,
-      rate: participationRate !== null ? Number(participationRate.toFixed(1)) : null,
+      rate: participationRate === null ? null : Number(participationRate.toFixed(1)),
       displayRate,
     },
     problems,
-    scoreDistribution: {
-      buckets: scoreBuckets,
-      averageScore: overallAvgScore,
-      displayAverageScore: overallAvgScore !== null ? `${overallAvgScore}/10` : 'N/A',
-    },
+    scoreDistribution: buildScoreDistribution(scores),
     denominatorWarning: totalRegistered === 0,
     generatedAt: new Date().toISOString(),
   };
 }
 
-function buildReportForSession({
-  session,
-  classrooms,
-  memberships,
-  assignments,
-  executions,
-  activities,
-  workspaces,
-}) {
-  const totalRegistered = session.members?.length || session.studentNames?.length || 0;
-  const inLabCount = Math.min(totalRegistered, Math.round(totalRegistered * 0.85));
-  const outsideLabCount = totalRegistered > 0 ? 1 : 0;
-  const participationRate = totalRegistered > 0 ? (inLabCount / totalRegistered) * 100 : null;
+function buildReportForSession(session) {
+  const members = Array.isArray(session.members) ? session.members : [];
+  const totalRegistered = members.length || session.studentNames?.length || 0;
+  const inLabCount = members.filter((member) => member.present === true).length;
+  const participationRate = totalRegistered ? (inLabCount / totalRegistered) * 100 : null;
 
   return {
     sessionId: session.id,
@@ -285,31 +236,12 @@ function buildReportForSession({
     totalRegistered,
     participation: {
       inLabActive: inLabCount,
-      outsideLabActive: outsideLabCount,
-      rate: participationRate !== null ? Number(participationRate.toFixed(1)) : null,
-      displayRate: participationRate !== null ? `${participationRate.toFixed(1)}%` : 'N/A',
+      outsideLabActive: 0,
+      rate: participationRate === null ? null : Number(participationRate.toFixed(1)),
+      displayRate: participationRate === null ? 'N/A' : `${participationRate.toFixed(1)}%`,
     },
-    problems: [
-      {
-        problemId: 'p-1',
-        title: 'Cài đặt thuật toán cơ bản',
-        submissionsCount: totalRegistered * 2,
-        passedCount: inLabCount,
-        completionRate: participationRate !== null ? Number(participationRate.toFixed(1)) : null,
-        displayCompletionRate: participationRate !== null ? `${participationRate.toFixed(1)}%` : 'N/A',
-        averageScore: 7.8,
-      },
-    ],
-    scoreDistribution: {
-      buckets: [
-        { label: '[0 - 5.0)', count: 0, percentage: 0 },
-        { label: '[5.0 - 7.0)', count: 1, percentage: 50 },
-        { label: '[7.0 - 8.5)', count: 1, percentage: 50 },
-        { label: '[8.5 - 10.0]', count: 0, percentage: 0 },
-      ],
-      averageScore: 7.8,
-      displayAverageScore: '7.8/10',
-    },
+    problems: [],
+    scoreDistribution: buildScoreDistribution([]),
     denominatorWarning: totalRegistered === 0,
     generatedAt: new Date().toISOString(),
   };

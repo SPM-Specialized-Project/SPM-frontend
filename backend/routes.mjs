@@ -262,6 +262,7 @@ async function handleRequest(request, response) {
   if (sessionReportMatch && request.method === 'GET') {
     const sessionId = sessionReportMatch[1];
     const report = await generateSessionReport(sessionId);
+    if (!report) throw apiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy buổi thực hành được yêu cầu.');
     sendJson(response, 200, { item: report });
     return;
   }

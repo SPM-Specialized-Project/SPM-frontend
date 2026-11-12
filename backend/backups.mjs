@@ -27,27 +27,7 @@ async function readJsonSafe(filePath, defaultValue = []) {
 }
 
 export async function getBackups() {
-  const backups = await readJsonSafe(BACKUPS_FILE, []);
-  if (backups.length === 0) {
-    // Generate an initial valid backup so the table has historical data
-    const initialBackup = {
-      id: 'backup-term-2025-2',
-      filename: 'codepulse-backup-2025-term2.json',
-      termId: 'term-2025-2',
-      createdAt: '2026-06-30T10:00:00.000Z',
-      sizeBytes: 1048576,
-      sha256Hash: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      status: 'VERIFIED',
-      recordCounts: {
-        classrooms: 4,
-        assignments: 18,
-        workspaces: 120,
-        submissions: 340,
-      },
-    };
-    return [initialBackup];
-  }
-  return backups;
+  return readJsonSafe(BACKUPS_FILE, []);
 }
 
 export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' } = {}) {
@@ -62,6 +42,26 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     readJsonSafe(ALERTS_FILE, []),
   ]);
 
+  if (!terms.some((term) => term.id === termId)) {
+    throw Object.assign(new Error('TERM_NOT_FOUND'), { status: 404, code: 'TERM_NOT_FOUND' });
+  }
+
+  const termClassrooms = classrooms.filter((classroom) => classroom.termId === termId);
+  const classroomIds = new Set(termClassrooms.map((classroom) => classroom.id));
+  const termAssignments = assignments.filter((assignment) =>
+    assignment.termId ? assignment.termId === termId : classroomIds.has(assignment.classroomId));
+  const assignmentIds = new Set(termAssignments.map((assignment) => assignment.id));
+  const termWorkspaces = workspaces.filter((workspace) =>
+    workspace.termId ? workspace.termId === termId : classroomIds.has(workspace.classroomId));
+  const workspaceIds = new Set(termWorkspaces.map((workspace) => workspace.id));
+  const belongsToTerm = (record) => record.termId
+    ? record.termId === termId
+    : classroomIds.has(record.classroomId)
+      || assignmentIds.has(record.assignmentId)
+      || workspaceIds.has(record.workspaceId);
+  const termSubmissions = submissions.filter(belongsToTerm);
+  const termAlerts = alerts.filter(belongsToTerm);
+
   const backupData = {
     metadata: {
       version: '1.0.0',
@@ -70,12 +70,12 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
       creator: actorEmail || 'admin@gmail.com',
     },
     tables: {
-      terms,
-      classrooms,
-      assignments,
-      workspaces,
-      submissions,
-      alerts,
+      terms: terms.filter((term) => term.id === termId),
+      classrooms: termClassrooms,
+      assignments: termAssignments,
+      workspaces: termWorkspaces,
+      submissions: termSubmissions,
+      alerts: termAlerts,
     },
   };
 
@@ -97,11 +97,11 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     sha256Hash: hash,
     status: 'VERIFIED',
     recordCounts: {
-      classrooms: classrooms.length,
-      assignments: assignments.length,
-      workspaces: workspaces.length,
-      submissions: submissions.length,
-      alerts: alerts.length,
+      classrooms: termClassrooms.length,
+      assignments: termAssignments.length,
+      workspaces: termWorkspaces.length,
+      submissions: termSubmissions.length,
+      alerts: termAlerts.length,
     },
   };
 
@@ -137,50 +137,73 @@ export async function verifyBackupDisasterRecovery(backupId, actorEmail = 'admin
   const startTime = Date.now();
   const filePath = path.join(BACKUPS_DIRECTORY, backup.filename);
 
-  let verifiedChecksum = true;
-  let recomputedHash = backup.sha256Hash;
-  let referentialIntegrity = true;
-  let checks = [];
-
+  let verifiedChecksum = false;
+  let recomputedHash = '';
+  let jsonValid = false;
+  let referentialIntegrity = false;
+  const checks = [];
+  let raw;
   try {
-    const raw = await readFile(filePath, 'utf8');
+    raw = await readFile(filePath, 'utf8');
     recomputedHash = createHash('sha256').update(raw, 'utf8').digest('hex');
     verifiedChecksum = recomputedHash === backup.sha256Hash;
-    const data = JSON.parse(raw);
-
-    // Verify referential integrity of data
-    const classroomIds = new Set((data.tables?.classrooms || []).map((c) => c.id));
-    const brokenWorkspaces = (data.tables?.workspaces || []).filter(
-      (w) => w.classroomId && !classroomIds.has(w.classroomId),
-    );
-
-    if (brokenWorkspaces.length > 0) {
-      referentialIntegrity = false;
-      checks.push(`Cảnh báo: ${brokenWorkspaces.length} workspace không tìm thấy classroom tương ứng.`);
-    } else {
-      checks.push('Tất cả tham chiếu Foreign Key (Classroom, Workspace, Assignment) đều hợp lệ.');
-    }
   } catch {
-    // If file is not present on disk (e.g. simulated initial seed), simulate successful checksum check
-    verifiedChecksum = true;
-    checks.push('Kiểm tra đối chiếu Checksum SHA-256 khớp tuyệt đối.');
-    checks.push('Kiểm tra toàn vẹn cấu trúc dữ liệu JSON đạt 100%.');
+    checks.push('Không thể đọc tệp backup: tệp không tồn tại hoặc không truy cập được.');
   }
 
-  const durationMs = Date.now() - startTime + 45; // realistic verification time
+  if (raw !== undefined) {
+    checks.push(verifiedChecksum
+      ? 'Mã băm SHA-256 khớp với bản ghi lưu trữ.'
+      : 'Mã băm SHA-256 không khớp với bản ghi lưu trữ.');
+    let data;
+    try {
+      data = JSON.parse(raw);
+      const requiredTables = ['terms', 'classrooms', 'assignments', 'workspaces', 'submissions', 'alerts'];
+      jsonValid = Boolean(data && typeof data === 'object' && data.metadata && data.tables
+        && requiredTables.every((table) => Array.isArray(data.tables[table])));
+      if (!jsonValid) throw new Error('INVALID_BACKUP_SHAPE');
+      checks.push('Cấu trúc JSON của backup hợp lệ.');
+    } catch {
+      checks.push('Tệp backup không phải JSON hợp lệ hoặc thiếu bảng dữ liệu bắt buộc.');
+    }
+
+    if (jsonValid) {
+      const { classrooms, assignments, workspaces } = data.tables;
+      const classroomIds = new Set(classrooms.map((classroom) => classroom.id));
+      const assignmentMap = new Map(assignments.map((assignment) => [assignment.id, assignment]));
+      const brokenAssignments = assignments.filter((assignment) =>
+        assignment.classroomId && !classroomIds.has(assignment.classroomId));
+      const brokenWorkspaces = workspaces.filter((workspace) =>
+        (workspace.classroomId && !classroomIds.has(workspace.classroomId))
+        || (workspace.assignmentId && !assignmentMap.has(workspace.assignmentId))
+        || (workspace.assignmentId && workspace.classroomId
+          && assignmentMap.has(workspace.assignmentId)
+          && assignmentMap.get(workspace.assignmentId).classroomId
+          && assignmentMap.get(workspace.assignmentId).classroomId !== workspace.classroomId));
+      referentialIntegrity = brokenAssignments.length === 0 && brokenWorkspaces.length === 0;
+      if (referentialIntegrity) {
+        checks.push('Tham chiếu classroom và assignment của assignments/workspaces hợp lệ.');
+      } else {
+        checks.push(`Tham chiếu không hợp lệ: ${brokenAssignments.length} assignment và ${brokenWorkspaces.length} workspace.`);
+      }
+    }
+  }
+
+  const durationMs = Date.now() - startTime;
 
   const result = {
     backupId,
     filename: backup.filename,
-    verified: verifiedChecksum && referentialIntegrity,
+    verified: verifiedChecksum && jsonValid && referentialIntegrity,
     checksumMatch: verifiedChecksum,
+    jsonValid,
     sha256Hash: backup.sha256Hash,
     recomputedHash,
     referentialIntegrity,
     checkedAt: new Date().toISOString(),
     durationMs,
     checks,
-    message: verifiedChecksum && referentialIntegrity
+    message: verifiedChecksum && jsonValid && referentialIntegrity
       ? 'Diễn tập phục hồi thảm họa (Disaster Recovery Drill) thành công! Bản backup an toàn và sẵn sàng phục hồi.'
       : 'Cảnh báo: Bản backup có sai lệch hoặc vi phạm toàn vẹn dữ liệu.',
   };
