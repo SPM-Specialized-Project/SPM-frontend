@@ -8,9 +8,15 @@ import {
   CLASSROOMS_FILE,
   TERMS_FILE,
   ASSIGNMENTS_FILE,
+  ASSIGNMENT_VERSIONS_FILE,
+  LABS_FILE,
   WORKSPACES_FILE,
+  SUBMISSIONS_FILE,
   CODEPULSE_SUBMISSIONS_FILE,
+  SNAPSHOTS_FILE,
+  JUDGMENTS_FILE,
   ALERTS_FILE,
+  CODEPULSE_ACTIVITIES_FILE,
 } from './config.mjs';
 import { recordAuditLog } from './admin-operations.mjs';
 
@@ -33,34 +39,80 @@ export async function getBackups() {
 export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' } = {}) {
   await mkdir(BACKUPS_DIRECTORY, { recursive: true });
 
-  const [classrooms, terms, assignments, workspaces, submissions, alerts] = await Promise.all([
+  const [
+    classrooms,
+    terms,
+    assignments,
+    assignmentVersions,
+    labs,
+    workspaces,
+    rawSubmissions,
+    rawCodepulseSubmissions,
+    snapshots,
+    judgments,
+    alerts,
+    activities,
+  ] = await Promise.all([
     readJsonSafe(CLASSROOMS_FILE, []),
     readJsonSafe(TERMS_FILE, []),
     readJsonSafe(ASSIGNMENTS_FILE, []),
+    readJsonSafe(ASSIGNMENT_VERSIONS_FILE, []),
+    readJsonSafe(LABS_FILE, []),
     readJsonSafe(WORKSPACES_FILE, []),
+    readJsonSafe(SUBMISSIONS_FILE, []),
     readJsonSafe(CODEPULSE_SUBMISSIONS_FILE, []),
+    readJsonSafe(SNAPSHOTS_FILE, []),
+    readJsonSafe(JUDGMENTS_FILE, []),
     readJsonSafe(ALERTS_FILE, []),
+    readJsonSafe(CODEPULSE_ACTIVITIES_FILE, []),
   ]);
 
   if (!terms.some((term) => term.id === termId)) {
     throw Object.assign(new Error('TERM_NOT_FOUND'), { status: 404, code: 'TERM_NOT_FOUND' });
   }
 
+  // D-01: Combine primary submissions with codepulse submissions
+  const submissionMap = new Map();
+  for (const s of [...rawSubmissions, ...rawCodepulseSubmissions]) {
+    if (s && s.id) submissionMap.set(s.id, s);
+  }
+  const submissions = [...submissionMap.values()];
+
   const termClassrooms = classrooms.filter((classroom) => classroom.termId === termId);
   const classroomIds = new Set(termClassrooms.map((classroom) => classroom.id));
+
   const termAssignments = assignments.filter((assignment) =>
     assignment.termId ? assignment.termId === termId : classroomIds.has(assignment.classroomId));
   const assignmentIds = new Set(termAssignments.map((assignment) => assignment.id));
+
+  const termAssignmentVersions = assignmentVersions.filter((v) =>
+    v.termId === termId || assignmentIds.has(v.assignmentId));
+
+  const termLabs = labs.filter((l) =>
+    l.termId === termId || classroomIds.has(l.classroomId));
+
   const termWorkspaces = workspaces.filter((workspace) =>
-    workspace.termId ? workspace.termId === termId : classroomIds.has(workspace.classroomId));
+    workspace.termId ? workspace.termId === termId : classroomIds.has(workspace.classroomId) || assignmentIds.has(workspace.assignmentId));
   const workspaceIds = new Set(termWorkspaces.map((workspace) => workspace.id));
+
   const belongsToTerm = (record) => record.termId
     ? record.termId === termId
     : classroomIds.has(record.classroomId)
       || assignmentIds.has(record.assignmentId)
       || workspaceIds.has(record.workspaceId);
+
   const termSubmissions = submissions.filter(belongsToTerm);
+  const submissionIds = new Set(termSubmissions.map((s) => s.id));
+
+  const termSnapshots = snapshots.filter((s) =>
+    s.termId === termId || workspaceIds.has(s.workspaceId));
+
+  const termJudgments = judgments.filter((j) =>
+    j.termId === termId || submissionIds.has(j.submissionId) || workspaceIds.has(j.workspaceId));
+
   const termAlerts = alerts.filter(belongsToTerm);
+
+  const termActivities = activities.filter(belongsToTerm);
 
   const backupData = {
     metadata: {
@@ -73,9 +125,14 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
       terms: terms.filter((term) => term.id === termId),
       classrooms: termClassrooms,
       assignments: termAssignments,
+      assignmentVersions: termAssignmentVersions,
+      labs: termLabs,
       workspaces: termWorkspaces,
       submissions: termSubmissions,
+      snapshots: termSnapshots,
+      judgments: termJudgments,
       alerts: termAlerts,
+      activities: termActivities,
     },
   };
 
@@ -99,8 +156,12 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     recordCounts: {
       classrooms: termClassrooms.length,
       assignments: termAssignments.length,
+      assignmentVersions: termAssignmentVersions.length,
+      labs: termLabs.length,
       workspaces: termWorkspaces.length,
       submissions: termSubmissions.length,
+      snapshots: termSnapshots.length,
+      judgments: termJudgments.length,
       alerts: termAlerts.length,
     },
   };
@@ -131,7 +192,7 @@ export async function verifyBackupDisasterRecovery(backupId, actorEmail = 'admin
   const backups = await getBackups();
   const backup = backups.find((b) => b.id === backupId);
   if (!backup) {
-    throw new Error('BACKUP_NOT_FOUND');
+    throw Object.assign(new Error('BACKUP_NOT_FOUND'), { status: 404, code: 'BACKUP_NOT_FOUND' });
   }
 
   const startTime = Date.now();
@@ -190,11 +251,12 @@ export async function verifyBackupDisasterRecovery(backupId, actorEmail = 'admin
   }
 
   const durationMs = Date.now() - startTime;
+  const isVerified = Boolean(raw !== undefined && verifiedChecksum && jsonValid && referentialIntegrity);
 
   const result = {
     backupId,
     filename: backup.filename,
-    verified: verifiedChecksum && jsonValid && referentialIntegrity,
+    verified: isVerified,
     checksumMatch: verifiedChecksum,
     jsonValid,
     sha256Hash: backup.sha256Hash,
@@ -203,10 +265,23 @@ export async function verifyBackupDisasterRecovery(backupId, actorEmail = 'admin
     checkedAt: new Date().toISOString(),
     durationMs,
     checks,
-    message: verifiedChecksum && jsonValid && referentialIntegrity
+    message: isVerified
       ? 'Diễn tập phục hồi thảm họa (Disaster Recovery Drill) thành công! Bản backup an toàn và sẵn sàng phục hồi.'
-      : 'Cảnh báo: Bản backup có sai lệch hoặc vi phạm toàn vẹn dữ liệu.',
+      : 'Diễn tập phục hồi thảm họa thất bại: tệp backup không tồn tại, sai mã băm SHA-256 hoặc vi phạm ràng buộc dữ liệu.',
   };
+
+  // D-03: Persist updated verification status in codepulse-backups.json
+  const updatePromise = backupsQueue.then(async () => {
+    const list = await readJsonSafe(BACKUPS_FILE, []);
+    const target = list.find((item) => item.id === backupId);
+    if (target) {
+      target.status = isVerified ? 'VERIFIED' : 'FAILED';
+      target.lastVerifiedAt = result.checkedAt;
+      await writeFile(BACKUPS_FILE, JSON.stringify(list, null, 2), 'utf8');
+    }
+  });
+  backupsQueue = updatePromise.catch(() => {});
+  await updatePromise;
 
   await recordAuditLog({
     actor: actorEmail,
@@ -214,8 +289,97 @@ export async function verifyBackupDisasterRecovery(backupId, actorEmail = 'admin
     target: `Backup:${backupId}`,
     requestId: `req-drill-${Date.now()}`,
     result: result.verified ? 'SUCCESS' : 'FAILED',
-    details: `Kiểm thử DR hoàn tất: checksumMatch=${verifiedChecksum}, referentialIntegrity=${referentialIntegrity}`,
+    details: `Kiểm thử DR hoàn tất: verified=${isVerified}, checksumMatch=${verifiedChecksum}, referentialIntegrity=${referentialIntegrity}`,
   });
 
   return result;
+}
+
+// D-04 (AC-16c): Restore semester backup
+export async function restoreSemesterBackup(backupId, actorEmail = 'admin@gmail.com') {
+  const backups = await getBackups();
+  const backup = backups.find((b) => b.id === backupId);
+  if (!backup) {
+    throw Object.assign(new Error('BACKUP_NOT_FOUND'), { status: 404, code: 'BACKUP_NOT_FOUND' });
+  }
+
+  // Fails closed if verification fails
+  const drillResult = await verifyBackupDisasterRecovery(backupId, actorEmail);
+  if (!drillResult.verified) {
+    throw Object.assign(new Error('BACKUP_INTEGRITY_COMPROMISED'), {
+      status: 422,
+      code: 'BACKUP_INTEGRITY_COMPROMISED',
+      message: 'Không thể khôi phục bản sao lưu vì kiểm tra toàn vẹn thất bại.',
+      drillResult,
+    });
+  }
+
+  const filePath = path.join(BACKUPS_DIRECTORY, backup.filename);
+  const raw = await readFile(filePath, 'utf8');
+  const data = JSON.parse(raw);
+  const {
+    terms = [],
+    classrooms = [],
+    assignments = [],
+    assignmentVersions = [],
+    labs = [],
+    workspaces = [],
+    submissions = [],
+    snapshots = [],
+    judgments = [],
+    alerts = [],
+    activities = [],
+  } = data.tables || {};
+
+  const upsertFile = async (filePath, newRecords) => {
+    if (!newRecords || newRecords.length === 0) return;
+    const existing = await readJsonSafe(filePath, []);
+    const idMap = new Map(existing.map((item) => [item.id, item]));
+    for (const rec of newRecords) {
+      if (rec && rec.id) idMap.set(rec.id, rec);
+    }
+    await writeFile(filePath, JSON.stringify([...idMap.values()], null, 2), 'utf8');
+  };
+
+  await Promise.all([
+    upsertFile(TERMS_FILE, terms),
+    upsertFile(CLASSROOMS_FILE, classrooms),
+    upsertFile(ASSIGNMENTS_FILE, assignments),
+    upsertFile(ASSIGNMENT_VERSIONS_FILE, assignmentVersions),
+    upsertFile(LABS_FILE, labs),
+    upsertFile(WORKSPACES_FILE, workspaces),
+    upsertFile(SUBMISSIONS_FILE, submissions),
+    upsertFile(SNAPSHOTS_FILE, snapshots),
+    upsertFile(JUDGMENTS_FILE, judgments),
+    upsertFile(ALERTS_FILE, alerts),
+    upsertFile(CODEPULSE_ACTIVITIES_FILE, activities),
+  ]);
+
+  await recordAuditLog({
+    actor: actorEmail,
+    action: 'RESTORE_SEMESTER_BACKUP',
+    target: `Backup:${backupId}`,
+    requestId: `req-restore-${Date.now()}`,
+    result: 'SUCCESS',
+    details: `Khôi phục thành công học kỳ ${backup.termId}: ${submissions.length} submissions, ${workspaces.length} workspaces, ${classrooms.length} classrooms.`,
+  });
+
+  return {
+    success: true,
+    backupId,
+    termId: backup.termId,
+    restoredAt: new Date().toISOString(),
+    restoredCounts: {
+      terms: terms.length,
+      classrooms: classrooms.length,
+      assignments: assignments.length,
+      assignmentVersions: assignmentVersions.length,
+      labs: labs.length,
+      workspaces: workspaces.length,
+      submissions: submissions.length,
+      snapshots: snapshots.length,
+      judgments: judgments.length,
+      alerts: alerts.length,
+    },
+  };
 }

@@ -202,6 +202,13 @@ export const adminOperationsApi = {
     return res.data.item;
   },
 
+  async restoreBackup(backupId: string): Promise<{ success: boolean; termId: string; restoredCounts: Record<string, number> }> {
+    const res = await apiClient.post<{ item: { success: boolean; termId: string; restoredCounts: Record<string, number> } }>(
+      `/admin/backups/${encodeURIComponent(backupId)}/restore`,
+    );
+    return res.data.item;
+  },
+
   async getSessionReport(sessionId: string): Promise<SessionReport> {
     const res = await apiClient.get<{ item: SessionReport }>(`/codepulse/sessions/${encodeURIComponent(sessionId)}/report`);
     return res.data.item;

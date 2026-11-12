@@ -38,6 +38,7 @@ import {
   getCodePulseClassrooms,
   getCodePulseSubmissionContext,
   getCodePulseExecutionQueueStats,
+  getCodePulseAiQueueStats,
   handleCodePulse,
 } from './codepulse.mjs';
 import { getAlerts, updateAlertStatus, getAlertStats } from './alerts.mjs';
@@ -51,6 +52,7 @@ import {
   getBackups,
   createSemesterBackup,
   verifyBackupDisasterRecovery,
+  restoreSemesterBackup,
 } from './backups.mjs';
 import { generateSessionReport } from './session-reports.mjs';
 
@@ -268,21 +270,31 @@ async function handleRequest(request, response) {
   }
 
   if (parts[0] === 'api' && parts[1] === 'admin') {
-    const isAdminOrOperator = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(viewerRole);
-    if (!isAdminOrOperator) {
+    const isAlertsRoute = parts[2] === 'alerts';
+    const isAdminOrOperator = ['admin', 'coordinator', 'chairman'].includes(viewerRole);
+    const isLecturer = viewerRole === 'lecturer';
+
+    // Access control: Only system administrators have full admin access; lecturers only have access to alerts
+    if (!isAdminOrOperator && !(isLecturer && isAlertsRoute)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập chức năng quản trị hệ thống.');
     }
 
-    // Health
+    // Health (D-07: dynamic AI queue and worker pool)
     if (parts[2] === 'operations' && parts[3] === 'health' && request.method === 'GET') {
-      const health = await getSystemOperationsHealth(getCodePulseExecutionQueueStats());
+      const health = await getSystemOperationsHealth(
+        getCodePulseExecutionQueueStats(),
+        typeof getCodePulseAiQueueStats === 'function' ? getCodePulseAiQueueStats() : null,
+      );
       sendJson(response, 200, { item: health });
       return;
     }
 
-    // Trace
+    // Trace (D-06: returns 404 when trace does not exist)
     if (parts[2] === 'operations' && parts[3] === 'traces' && parts[4] && request.method === 'GET') {
       const trace = await getRequestTrace(parts[4]);
+      if (!trace) {
+        throw apiError(404, 'TRACE_NOT_FOUND', 'Không tìm thấy bản ghi vết cho mã yêu cầu này.');
+      }
       sendJson(response, 200, { item: trace });
       return;
     }
@@ -345,6 +357,13 @@ async function handleRequest(request, response) {
 
     if (parts[2] === 'backups' && parts[3] && parts[4] === 'verify' && request.method === 'POST') {
       const result = await verifyBackupDisasterRecovery(parts[3], viewerEmail);
+      sendJson(response, 200, { item: result });
+      return;
+    }
+
+    // Restore backup (D-04 / AC-16c)
+    if (parts[2] === 'backups' && parts[3] && parts[4] === 'restore' && request.method === 'POST') {
+      const result = await restoreSemesterBackup(parts[3], viewerEmail);
       sendJson(response, 200, { item: result });
       return;
     }

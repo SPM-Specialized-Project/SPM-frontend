@@ -917,6 +917,12 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
       const state = await store.read();
       return state.issueCases.find((item) => item.id === id) ?? null;
     },
+    getQueueStats() {
+      return {
+        pendingCount: queuedIds.size + pendingIds.length,
+        inFlightCount: inFlightIds.size,
+      };
+    },
     subscribe(listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);

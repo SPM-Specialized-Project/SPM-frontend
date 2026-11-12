@@ -22,6 +22,52 @@ async function readJsonSafe(filePath, defaultValue = []) {
 
 // ---------------- AUDIT LOGS ----------------
 
+export function sanitizeAuditData(value, key = '') {
+  if (value == null) return value;
+  if (typeof value === 'string') {
+    let sanitized = value;
+    // Redact passwords
+    sanitized = sanitized.replace(/(password\s*[:=]\s*["']?)([^"',;\s}{]+)(["']?)/gi, '$1[REDACTED_PASSWORD]$3');
+    sanitized = sanitized.replace(/password123/gi, '[REDACTED_PASSWORD]');
+    sanitized = sanitized.replace(/("password"\s*:\s*")([^"]+)(")/gi, '$1[REDACTED_PASSWORD]$3');
+    // Redact tokens / bearer / secret / api keys
+    sanitized = sanitized.replace(/(bearer\s+)([A-Za-z0-9._~+/-]+=*)/gi, '$1[REDACTED_TOKEN]');
+    sanitized = sanitized.replace(/((?:token|secret|api[_-]?key|authorization)\s*[:=]\s*["']?)([^"',;\s}{]+)(["']?)/gi, '$1[REDACTED_TOKEN]$3');
+    sanitized = sanitized.replace(/("(?:token|secret|apiKey|authorization)"\s*:\s*")([^"]+)(")/gi, '$1[REDACTED_TOKEN]$3');
+    // Redact student source code
+    if (/^sourceCode$/i.test(key)) {
+      return '[REDACTED_STUDENT_CODE]';
+    }
+    sanitized = sanitized.replace(/(?:#include\s*<[a-z0-9._]+>|public\s+class\s+\w+|def\s+\w+\s*\(|int\s+main\s*\()[^;{}]+/gi, '[REDACTED_STUDENT_CODE]');
+    // Redact hidden tests
+    if (/hiddenTest|hidden_test/i.test(key) || (/hidden/i.test(key) && /input|output/i.test(key))) {
+      return '[REDACTED_HIDDEN_TEST]';
+    }
+    return sanitized;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeAuditData(item, key));
+  }
+  if (typeof value === 'object') {
+    const cleaned = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (/password/i.test(k)) {
+        cleaned[k] = '[REDACTED_PASSWORD]';
+      } else if (/token|secret|authorization|api[_-]?key/i.test(k)) {
+        cleaned[k] = '[REDACTED_TOKEN]';
+      } else if (/sourceCode|studentCode|code/i.test(k) && typeof v === 'string') {
+        cleaned[k] = '[REDACTED_STUDENT_CODE]';
+      } else if ((value.hidden || /hidden/i.test(k)) && (k === 'input' || k === 'expectedOutput')) {
+        cleaned[k] = k === 'input' ? '[REDACTED_INPUT]' : '[REDACTED_OUTPUT]';
+      } else {
+        cleaned[k] = sanitizeAuditData(v, k);
+      }
+    }
+    return cleaned;
+  }
+  return value;
+}
+
 export async function getAuditLogs() {
   const logs = await readJsonSafe(AUDIT_LOGS_FILE, []);
   if (logs.length === 0) {
@@ -53,24 +99,28 @@ export async function getAuditLogs() {
 }
 
 export function recordAuditLog({ actor, action, target, requestId, result, details }) {
+  const sanitizedDetails = typeof details === 'object' && details !== null
+    ? JSON.stringify(sanitizeAuditData(details))
+    : sanitizeAuditData(details);
+  const sanitizedTarget = sanitizeAuditData(target);
+
   const entry = {
     id: `audit-${Date.now()}-${randomUUID().slice(0, 6)}`,
     actor: actor || 'system',
     action: action || 'UNKNOWN',
-    target: target || 'N/A',
+    target: sanitizedTarget || 'N/A',
     timestamp: new Date().toISOString(),
     requestId: requestId || `req-${randomUUID().slice(0, 8)}`,
     result: result || 'SUCCESS',
-    details: details || '',
+    details: sanitizedDetails || '',
   };
 
   const promise = auditLogsQueue.then(async () => {
     await mkdir(DATA_DIRECTORY, { recursive: true });
     const logs = await readJsonSafe(AUDIT_LOGS_FILE, []);
     logs.unshift(entry);
-    // Keep max 200 logs
-    const trimmed = logs.slice(0, 200);
-    await writeFile(AUDIT_LOGS_FILE, JSON.stringify(trimmed, null, 2), 'utf8');
+    // Truly append-only: do not drop older logs (D-08)
+    await writeFile(AUDIT_LOGS_FILE, JSON.stringify(logs, null, 2), 'utf8');
     return entry;
   });
 
@@ -150,7 +200,7 @@ export async function getRequestTrace(requestId) {
 
 // ---------------- SYSTEM HEALTH & WORKER METRICS ----------------
 
-export async function getSystemOperationsHealth(queueStats = {}) {
+export async function getSystemOperationsHealth(queueStats = {}, aiQueueStats = null) {
   const executions = await readJsonSafe(EXECUTIONS_FILE, []);
 
   // Compute latencies from executions
@@ -174,18 +224,27 @@ export async function getSystemOperationsHealth(queueStats = {}) {
   const totalWorkers = Math.max(0, Number(queueStats.totalWorkers ?? queueStats.concurrency) || 0);
   const runningExecutions = Math.max(0, Number(queueStats.activeCount) || 0);
   const queueLength = Math.max(0, Number(queueStats.pendingCount) || 0);
-  const poolHealth = totalWorkers === 0
-    ? 'UNAVAILABLE'
-    : queueLength > 0 && runningExecutions >= totalWorkers
-      ? 'SATURATED'
-      : errorRate !== null && errorRate >= 20
-        ? 'DEGRADED'
-        : 'HEALTHY';
+
+  // D-07: Determine real pool health based on workers, error rate and saturation
+  let poolHealth = 'HEALTHY';
+  if (totalWorkers === 0) {
+    poolHealth = 'UNAVAILABLE';
+  } else if (errorRate !== null && errorRate >= 50) {
+    poolHealth = 'CRITICAL';
+  } else if (errorRate !== null && errorRate >= 20) {
+    poolHealth = 'DEGRADED';
+  } else if (queueLength > 0 && runningExecutions >= totalWorkers) {
+    poolHealth = 'SATURATED';
+  }
+
+  const resolvedAiQueue = typeof aiQueueStats === 'number'
+    ? aiQueueStats
+    : (aiQueueStats?.pendingCount ?? aiQueueStats?.queueLength ?? null);
 
   return {
     queueLength,
     runningExecutions,
-    aiAssessmentQueue: null,
+    aiAssessmentQueue: resolvedAiQueue,
     workerStatus: {
       totalWorkers,
       activeWorkers: Math.min(runningExecutions, totalWorkers),
