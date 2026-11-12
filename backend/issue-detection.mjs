@@ -156,6 +156,80 @@ const aiMessages = (input) => [
   { role: 'user', content: JSON.stringify(input) },
 ];
 
+const ollamaAssessmentSchema = (input) => {
+  const problemTypeIds = [...new Set((input.problemTypes ?? [])
+    .filter((problemType) => problemType.approved !== false)
+    .map((problemType) => problemType.id)
+    .filter(Boolean))];
+  const evidenceTypes = [{
+    type: 'object',
+    properties: {
+      kind: { const: 'CODE' },
+      snapshotId: { const: input.snapshot.id },
+      lineStart: { type: 'integer', minimum: 1 },
+      lineEnd: { type: 'integer', minimum: 1 },
+      excerpt: { type: 'string', minLength: 1 },
+    },
+    required: ['kind', 'snapshotId', 'lineStart', 'lineEnd', 'excerpt'],
+    additionalProperties: false,
+  }];
+  const execution = input.execution;
+  const testCaseIds = [...new Set((execution?.results ?? [])
+    .filter((result) => failingStatuses.has(result.status) && result.testCaseId)
+    .map((result) => result.testCaseId))];
+
+  if (input.executionContextId && testCaseIds.length) {
+    evidenceTypes.push({
+      type: 'object',
+      properties: {
+        kind: { const: 'TEST' },
+        executionId: { const: input.executionContextId },
+        testCaseId: { type: 'string', enum: testCaseIds },
+        status: { type: 'string', enum: [...failingStatuses] },
+      },
+      required: ['kind', 'executionId', 'testCaseId', 'status'],
+      additionalProperties: false,
+    });
+  }
+
+  if (input.eventId) {
+    evidenceTypes.push({
+      type: 'object',
+      properties: {
+        kind: { const: 'EVENT' },
+        eventId: { const: input.eventId },
+      },
+      required: ['kind', 'eventId'],
+      additionalProperties: false,
+    });
+  }
+
+  return {
+    type: 'object',
+    properties: {
+      findings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            problemTypeId: { type: 'string', enum: problemTypeIds },
+            rationale: { type: 'string', minLength: 12 },
+            evidence: {
+              type: 'array',
+              minItems: 1,
+              items: { anyOf: evidenceTypes },
+            },
+          },
+          required: ['problemTypeId', 'rationale', 'evidence'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['findings'],
+    additionalProperties: false,
+  };
+};
+
 function integerSetting(name, fallback, minimum, maximum) {
   const value = Number(process.env[name]);
   if (!Number.isInteger(value)) return fallback;
@@ -176,7 +250,7 @@ async function evaluateWithProvider(provider, input) {
       model: provider.model,
       messages,
       stream: false,
-      format: 'json',
+      format: ollamaAssessmentSchema(input),
       keep_alive: process.env.CODEPULSE_OLLAMA_KEEP_ALIVE?.trim() || '5m',
       think: false,
       options: { temperature: 0, num_predict: maxTokens },
