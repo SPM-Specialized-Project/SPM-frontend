@@ -660,6 +660,43 @@ export function createGradingQueue({
       if (job.state === 'QUEUED') schedule(job.id);
       return job;
     },
+    async drainSubmissions(submissionIds) {
+      await ready();
+      const targets = new Set(submissionIds);
+      if (targets.size === 0) return;
+      while ((await readJobs()).some((job) => targets.has(job.submissionId)
+        && ['QUEUED', 'RUNNING'].includes(job.state))) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+    },
+    async purgeSubmissions(submissionIds) {
+      await ready();
+      const targets = new Set(submissionIds);
+      const jobs = await mutateJobs((records) => {
+        const removed = records.filter((record) => targets.has(record.submissionId));
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          if (targets.has(records[index].submissionId)) records.splice(index, 1);
+        }
+        return removed.length;
+      });
+      const judgments = await mutateJudgments((records) => {
+        const removed = records.filter((record) => targets.has(record.submissionId));
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          if (targets.has(records[index].submissionId)) records.splice(index, 1);
+        }
+        return removed.length;
+      });
+      return { jobs, judgments };
+    },
+    async inspectSubmissions(submissionIds) {
+      await ready();
+      const targets = new Set(submissionIds);
+      const [jobs, judgments] = await Promise.all([readJobs(), readJudgments()]);
+      return {
+        jobs: jobs.filter((record) => targets.has(record.submissionId)).length,
+        judgments: judgments.filter((record) => targets.has(record.submissionId)).length,
+      };
+    },
     async process(jobId) {
       await ready();
       await execute(jobId);

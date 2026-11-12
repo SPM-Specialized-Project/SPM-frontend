@@ -31,6 +31,8 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
   let admission = Promise.resolve();
   const pending = [];
   const owners = new Map();
+  const blockedTerms = new Set();
+  const termCompletions = new Map();
   const ready = () => initialized ??= mutate((records) => {
     const interrupted = [];
     for (const record of records) {
@@ -100,6 +102,41 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
   };
   return {
     async list() { await ready(); return (await read()).map(executionView); },
+    blockTerm(termId) {
+      blockedTerms.add(termId);
+      return admission;
+    },
+    async unblockTerm(termId) {
+      await admission;
+      blockedTerms.delete(termId);
+    },
+    async drainTerm(termId) {
+      blockedTerms.add(termId);
+      await admission;
+      await Promise.allSettled([...(termCompletions.get(termId) ?? [])]);
+    },
+    runTermTask(termId, task) {
+      let work;
+      const accepted = admission.then(() => {
+        if (blockedTerms.has(termId)) {
+          throw Object.assign(new Error('The academic term is resetting and does not accept new work.'), {
+            status: 409,
+            code: 'TERM_RESET_IN_PROGRESS',
+          });
+        }
+        work = Promise.resolve().then(task);
+        if (!termCompletions.has(termId)) termCompletions.set(termId, new Set());
+        const completions = termCompletions.get(termId);
+        completions.add(work);
+        const removeCompletion = () => {
+          completions.delete(work);
+          if (completions.size === 0) termCompletions.delete(termId);
+        };
+        void work.then(removeCompletion, removeCompletion);
+      });
+      admission = accepted.catch(() => {});
+      return accepted.then(() => work);
+    },
     async enqueue({ assignment, sourceCode, body, ...metadata }) {
       await ready();
       const input = executionInput(body, assignment);
@@ -116,6 +153,12 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
       let resolve;
       const completion = new Promise((done) => { resolve = done; });
       const accepted = admission.then(async () => {
+        if (blockedTerms.has(record.termId)) {
+          throw Object.assign(new Error('The academic term is resetting and does not accept new runs.'), {
+            status: 409,
+            code: 'TERM_RESET_IN_PROGRESS',
+          });
+        }
         if (active + pending.length >= 32 || (owners.get(record.ownerEmail) ?? 0) >= 2) {
           throw Object.assign(new Error('Execution queue is full. Retry after current runs finish.'), { status: 429, code: 'EXECUTION_QUEUE_FULL' });
         }
@@ -128,6 +171,15 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
           await mutate((records) => { records[records.findIndex((item) => item.id === record.id)] = structuredClone(record); });
           owners.set(record.ownerEmail, owners.get(record.ownerEmail) - 1);
           throw error;
+        }
+        if (record.termId) {
+          if (!termCompletions.has(record.termId)) termCompletions.set(record.termId, new Set());
+          termCompletions.get(record.termId).add(completion);
+          void completion.then(() => {
+            const completions = termCompletions.get(record.termId);
+            completions?.delete(completion);
+            if (completions?.size === 0) termCompletions.delete(record.termId);
+          });
         }
         pending.push({ record, resolve });
         return executionView(structuredClone(record));

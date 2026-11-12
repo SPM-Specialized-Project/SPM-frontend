@@ -28,6 +28,7 @@ import {
   type CodePulseRunSummary,
   type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseResetRecord,
   type CodePulseWorkspaceSubmission,
   type CodePulseWorkspace,
 } from '@/services/codepulse-api';
@@ -960,6 +961,10 @@ export function DsaLabManagement({
 }: DsaLabManagementProps) {
   const [classrooms, setClassrooms] = useState<CodePulseClassroom[]>([]);
   const [terms, setTerms] = useState<CodePulseTerm[]>([]);
+  const [resetRecords, setResetRecords] = useState<CodePulseResetRecord[]>([]);
+  const [resetRecordsLoading, setResetRecordsLoading] = useState(false);
+  const [resetRecordsError, setResetRecordsError] = useState('');
+  const [resetRecordsVersion, setResetRecordsVersion] = useState(0);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [lecturerEmail, setLecturerEmail] = useState('');
@@ -967,6 +972,7 @@ export function DsaLabManagement({
   const [role, setRole] = useState<string>(
     () => getCurrentViewerContext().viewerRole,
   );
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
   const [termName, setTermName] = useState('');
   const [termStart, setTermStart] = useState('');
   const [termEnd, setTermEnd] = useState('');
@@ -974,8 +980,10 @@ export function DsaLabManagement({
   const [termStatus, setTermStatus] =
     useState<CodePulseTerm['status']>('DRAFT');
   const [editingTermId, setEditingTermId] = useState<string>();
+  const [resetReviewTermId, setResetReviewTermId] = useState('');
   const [termFilter, setTermFilter] = useState('current');
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>();
+  const [resetAction, setResetAction] = useState<'start' | 'execute' | 'acknowledge'>();
   const isStudent = role === 'student';
   const currentTerm = useMemo(() => {
     const now = Date.now();
@@ -1015,6 +1023,21 @@ export function DsaLabManagement({
     editMode && ['admin', 'lecturer'].includes(role ?? '');
   const canManageAssignments = editMode && role === 'lecturer';
   const showClassroomDirectory = role !== undefined && role !== 'student';
+  const selectedResetTermId = role === 'admin'
+    ? editingTermId
+    : resetReviewTermId;
+  const selectedResetRecord = resetRecords
+    .filter((record) => record.termId === selectedResetTermId)
+    .reduce<CodePulseResetRecord | undefined>((latest, record) => {
+      if (!latest) return record;
+      return Date.parse(record.completedAt ?? record.executedAt)
+        > Date.parse(latest.completedAt ?? latest.executedAt) ? record : latest;
+    }, undefined);
+  const termEndHasPassed = Boolean(termEnd && new Date(termEnd).getTime() <= Date.now());
+  const resetStateLocked = termStatus === 'RESETTING' || termStatus === 'RESETDONE';
+  const resetAcknowledged = selectedResetRecord?.acknowledgements?.some(
+    (acknowledgement) => acknowledgement.acknowledgedBy.toLowerCase() === currentUserEmail.toLowerCase(),
+  ) ?? false;
 
   const load = useCallback(async () => {
     const [sessionResult, classroomResult, termResult] = await Promise.all([
@@ -1023,8 +1046,15 @@ export function DsaLabManagement({
       codePulseApi.listTerms(courseId),
     ]);
     setRole(sessionResult.data.role);
+    setCurrentUserEmail(sessionResult.data.user.email);
     setClassrooms(classroomResult.data.items);
     setTerms(termResult.data.items);
+    setResetReviewTermId((current) => current || termResult.data.items.find((term) =>
+      term.status === 'RESETDONE' || term.status === 'RESETTING')?.id || '');
+    if (editingTermId) {
+      const selectedTerm = termResult.data.items.find((term) => term.id === editingTermId);
+      if (selectedTerm) setTermStatus(selectedTerm.status);
+    }
     setTermId(
       (current) =>
         current ||
@@ -1032,7 +1062,35 @@ export function DsaLabManagement({
         termResult.data.items[0]?.id ||
         '',
     );
-  }, [courseId]);
+  }, [courseId, editingTermId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedResetTermId) {
+      setResetRecords([]);
+      setResetRecordsError('');
+      setResetRecordsLoading(false);
+      return () => { active = false; };
+    }
+
+    setResetRecords([]);
+    setResetRecordsError('');
+    setResetRecordsLoading(true);
+    codePulseApi.listResetRecords(selectedResetTermId)
+      .then((result) => {
+        if (active) setResetRecords(result.data.items);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setResetRecords([]);
+        setResetRecordsError(error instanceof Error ? error.message : 'Unable to load reset records.');
+      })
+      .finally(() => {
+        if (active) setResetRecordsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [resetRecordsVersion, selectedResetTermId]);
 
   useEffect(() => {
     void load();
@@ -1107,6 +1165,7 @@ export function DsaLabManagement({
 
   const createTerm = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (resetStateLocked) return;
     try {
       if (editingTermId) {
         await codePulseApi.updateTerm(editingTermId, {
@@ -1143,11 +1202,57 @@ export function DsaLabManagement({
 
   const editTerm = (term: CodePulseTerm) => {
     setEditingTermId(term.id);
+    setResetReviewTermId(term.id);
     setTermName(term.name);
     setTermStart(term.startDate);
     setTermEnd(term.endDate);
     setTermReset(term.resetDate);
     setTermStatus(term.status);
+  };
+
+  const startTermReset = async () => {
+    if (!editingTermId || !window.confirm('Start reset for this ended term? New student writes will be blocked.')) return;
+    setResetAction('start');
+    try {
+      await codePulseApi.startTermReset(editingTermId);
+      toast.success('Term reset is now in progress.');
+      await load();
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to start term reset.');
+    } finally {
+      setResetAction(undefined);
+    }
+  };
+
+  const executeTermReset = async () => {
+    if (!editingTermId || !window.confirm('Permanently purge student data for this term? Problem-bank definitions will be retained.')) return;
+    setResetAction('execute');
+    try {
+      const result = await codePulseApi.executeTermReset(editingTermId);
+      toast.success(`Term reset complete. ${Object.values(result.data.resetRecord.affectedRowCounts).reduce((total, count) => total + count, 0)} records purged.`);
+      await load();
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to complete term reset.');
+    } finally {
+      setResetAction(undefined);
+    }
+  };
+
+  const acknowledgeReset = async () => {
+    const record = selectedResetRecord;
+    if (!record || !selectedResetTermId || record.status !== 'COMPLETE' || resetAcknowledged) return;
+    setResetAction('acknowledge');
+    try {
+      await codePulseApi.acknowledgeReset(selectedResetTermId, record.id);
+      toast.success('Reset completion acknowledged.');
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to acknowledge reset.');
+    } finally {
+      setResetAction(undefined);
+    }
   };
 
   const deleteTerm = async () => {
@@ -1407,6 +1512,7 @@ export function DsaLabManagement({
                           required
                           value={termName}
                           onChange={(event) => setTermName(event.target.value)}
+                          disabled={resetStateLocked}
                           className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
                         />
                       </label>
@@ -1417,6 +1523,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termStart}
+                            disabled={resetStateLocked}
                             onChange={(event) =>
                               setTermStart(event.target.value)
                             }
@@ -1429,6 +1536,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termEnd}
+                            disabled={resetStateLocked}
                             onChange={(event) => setTermEnd(event.target.value)}
                             className="mt-1 w-full rounded border border-gray-300 p-2"
                           />
@@ -1439,6 +1547,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termReset}
+                            disabled={resetStateLocked}
                             onChange={(event) =>
                               setTermReset(event.target.value)
                             }
@@ -1446,7 +1555,7 @@ export function DsaLabManagement({
                           />
                         </label>
                       </div>
-                      {editingTermId && (
+                      {editingTermId && !resetStateLocked && (
                         <label className="mt-3 block text-sm text-gray-700">
                           Status
                           <select
@@ -1460,17 +1569,28 @@ export function DsaLabManagement({
                           >
                             <option>DRAFT</option>
                             <option>ACTIVE</option>
+                            <option value="ENDED" disabled={!termEndHasPassed}>
+                              ENDED{termEndHasPassed ? '' : ' (end date not reached)'}
+                            </option>
                             <option>ARCHIVED</option>
                           </select>
                         </label>
                       )}
-                      <button
-                        type="submit"
-                        className="mt-4 rounded bg-slate-900 px-4 py-2 font-semibold text-white"
-                      >
-                        {editingTermId ? 'Save term' : 'Create term'}
-                      </button>
-                      {editingTermId && (
+                      {editingTermId && resetStateLocked && (
+                        <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Reset workflow status: <strong>{termStatus}</strong>. This state can only be changed by the reset workflow.
+                        </div>
+                      )}
+                      {!resetStateLocked && (
+                        <button
+                          type="submit"
+                          disabled={Boolean(resetAction)}
+                          className="mt-4 rounded bg-slate-900 px-4 py-2 font-semibold text-white"
+                        >
+                          {editingTermId ? 'Save term' : 'Create term'}
+                        </button>
+                      )}
+                      {editingTermId && !resetStateLocked && (
                         <button
                           type="button"
                           onClick={() => void deleteTerm()}
@@ -1479,12 +1599,168 @@ export function DsaLabManagement({
                           Delete term
                         </button>
                       )}
+                      {editingTermId && role === 'admin' && termStatus === 'ENDED' && (
+                        <button type="button" disabled={Boolean(resetAction)} onClick={() => void startTermReset()} className="ml-2 mt-4 rounded bg-amber-700 px-4 py-2 font-semibold text-white disabled:cursor-wait disabled:opacity-60">
+                          {resetAction === 'start' ? 'Starting reset...' : 'Start reset'}
+                        </button>
+                      )}
+                      {editingTermId && role === 'admin' && termStatus === 'RESETTING' && (
+                        <button type="button" disabled={Boolean(resetAction)} onClick={() => void executeTermReset()} className="ml-2 mt-4 rounded bg-red-700 px-4 py-2 font-semibold text-white disabled:cursor-wait disabled:opacity-60">
+                          {resetAction === 'execute' ? 'Waiting for in-flight work, then purging...' : 'Purge term data'}
+                        </button>
+                      )}
+                      {resetRecordsLoading && (
+                        <p role="status" className="mt-3 w-full text-sm text-gray-600">Loading reset audit...</p>
+                      )}
+                      {resetRecordsError && (
+                        <p role="alert" className="mt-3 w-full text-sm text-red-700">
+                          Unable to load reset audit: {resetRecordsError}
+                          <button type="button" className="ml-2 underline" onClick={() => setResetRecordsVersion((version) => version + 1)}>
+                            Retry
+                          </button>
+                        </p>
+                      )}
+                      {!resetRecordsLoading && !resetRecordsError && editingTermId && !selectedResetRecord && (
+                        <p className="mt-3 w-full text-sm text-gray-600">No reset record exists for this term.</p>
+                      )}
+                      {selectedResetRecord && (
+                        <section className="mt-5 w-full rounded-lg border border-slate-200 bg-slate-50 p-4" aria-label="Term reset audit">
+                          <h4 className="font-semibold text-gray-900">Reset audit</h4>
+                          <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                            <div><dt className="font-medium text-gray-600">Result</dt><dd>{selectedResetRecord.status}</dd></div>
+                            <div><dt className="font-medium text-gray-600">Executed by</dt><dd>{selectedResetRecord.executedBy}</dd></div>
+                            <div><dt className="font-medium text-gray-600">Started</dt><dd>{new Date(selectedResetRecord.executedAt).toLocaleString()}</dd></div>
+                            {selectedResetRecord.completedAt && (
+                              <div><dt className="font-medium text-gray-600">Completed</dt><dd>{new Date(selectedResetRecord.completedAt).toLocaleString()}</dd></div>
+                            )}
+                          </dl>
+                          <h5 className="mt-3 text-sm font-semibold">Affected row counts</h5>
+                          <ul className="mt-1 grid gap-x-4 text-sm sm:grid-cols-2">
+                            {Object.entries(selectedResetRecord.affectedRowCounts).map(([scope, count]) => (
+                              <li key={scope}>{scope}: {count}</li>
+                            ))}
+                          </ul>
+                          <h5 className="mt-3 text-sm font-semibold">Reconciliation</h5>
+                          <ul className="mt-1 grid gap-x-4 text-sm sm:grid-cols-2">
+                            {Object.entries(selectedResetRecord.reconciliation).map(([scope, passed]) => (
+                              <li key={scope}>{passed ? 'PASS' : 'INCOMPLETE'}: {scope}</li>
+                            ))}
+                          </ul>
+                          {selectedResetRecord.errors.length > 0 && (
+                            <div role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-800">
+                              <strong>Reset incomplete:</strong>
+                              <ul className="list-inside list-disc">
+                                {selectedResetRecord.errors.map((error) => <li key={error}>{error}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {(selectedResetRecord.acknowledgements?.length ?? 0) > 0 && (
+                            <div className="mt-3 text-sm">
+                              <strong>Lecturer acknowledgements</strong>
+                              <ul>
+                                {selectedResetRecord.acknowledgements?.map((acknowledgement) => (
+                                  <li key={`${acknowledgement.acknowledgedBy}-${acknowledgement.acknowledgedAt}`}>
+                                    {acknowledgement.acknowledgedBy} — {new Date(acknowledgement.acknowledgedAt).toLocaleString()}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </section>
+                      )}
+                      {resetAction === 'execute' && (
+                        <p role="status" className="mt-3 w-full text-sm text-amber-800">
+                          Existing runner jobs and admitted submissions are being allowed to finish before deletion begins. Please keep this page open.
+                        </p>
+                      )}
                     </form>
                   )}
                 </div>
               )}
             </div>
           </>
+        )}
+        {role === 'lecturer' && (
+          <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5" aria-label="Term reset sign-off">
+            <h3 className="text-lg font-semibold text-gray-900">Term reset review</h3>
+            <label className="mt-3 block max-w-xl text-sm font-medium text-gray-700">
+              Academic term
+              <select
+                aria-label="Select term reset to review"
+                value={resetReviewTermId}
+                onChange={(event) => setResetReviewTermId(event.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
+              >
+                <option value="">Select a term</option>
+                {terms.map((term) => (
+                  <option key={term.id} value={term.id}>{term.name} ({term.status})</option>
+                ))}
+              </select>
+            </label>
+            {resetRecordsLoading ? (
+              <p role="status" className="mt-3 text-sm text-gray-600">Loading reset audit...</p>
+            ) : resetRecordsError ? (
+              <div role="alert" className="mt-3 text-sm text-red-700">
+                Unable to load reset audit: {resetRecordsError}
+                <button type="button" className="ml-2 underline" onClick={() => setResetRecordsVersion((version) => version + 1)}>
+                  Retry
+                </button>
+              </div>
+            ) : selectedResetRecord ? (
+              <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
+                <p><strong>Reset status:</strong> {selectedResetRecord.status}</p>
+                <p><strong>Executed by:</strong> {selectedResetRecord.executedBy}</p>
+                <p><strong>Executed at:</strong> {new Date(selectedResetRecord.executedAt).toLocaleString()}</p>
+                {selectedResetRecord.completedAt && (
+                  <p><strong>Completed at:</strong> {new Date(selectedResetRecord.completedAt).toLocaleString()}</p>
+                )}
+                <h4 className="mt-3 font-semibold">Affected row counts</h4>
+                <ul className="grid gap-x-4 text-sm sm:grid-cols-2">
+                  {Object.entries(selectedResetRecord.affectedRowCounts).map(([scope, count]) => (
+                    <li key={scope}>{scope}: {count}</li>
+                  ))}
+                </ul>
+                <h4 className="mt-3 font-semibold">Reconciliation</h4>
+                <ul className="grid gap-x-4 text-sm sm:grid-cols-2">
+                  {Object.entries(selectedResetRecord.reconciliation).map(([scope, passed]) => (
+                    <li key={scope}>{passed ? 'PASS' : 'INCOMPLETE'}: {scope}</li>
+                  ))}
+                </ul>
+                {selectedResetRecord.errors.length > 0 && (
+                  <div role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-800">
+                    <strong>Reset incomplete:</strong>
+                    <ul className="list-inside list-disc">
+                      {selectedResetRecord.errors.map((error) => <li key={error}>{error}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {(selectedResetRecord.acknowledgements?.length ?? 0) > 0 && (
+                  <div className="mt-3 text-sm">
+                    <strong>Lecturer acknowledgements</strong>
+                    <ul>
+                      {selectedResetRecord.acknowledgements?.map((acknowledgement) => (
+                        <li key={`${acknowledgement.acknowledgedBy}-${acknowledgement.acknowledgedAt}`}>
+                          {acknowledgement.acknowledgedBy} — {new Date(acknowledgement.acknowledgedAt).toLocaleString()}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {selectedResetRecord.status === 'COMPLETE' && !resetAcknowledged && (
+                  <button type="button" disabled={Boolean(resetAction)} onClick={() => void acknowledgeReset()} className="mt-4 rounded bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                    {resetAction === 'acknowledge' ? 'Saving acknowledgement...' : 'Acknowledge reset'}
+                  </button>
+                )}
+                {resetAcknowledged && (
+                  <p className="mt-3 text-sm font-medium text-emerald-800">You have acknowledged this reset.</p>
+                )}
+              </div>
+            ) : resetReviewTermId ? (
+              <p className="mt-3 text-sm text-gray-600">No reset record is available for this term.</p>
+            ) : (
+              <p className="mt-3 text-sm text-gray-600">Select a term to review its reset status and audit.</p>
+            )}
+          </section>
         )}
         {role === 'lecturer' && assignmentClassroomId && (
           <IssueCasesPanel classroomId={assignmentClassroomId} />

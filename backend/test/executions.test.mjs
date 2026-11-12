@@ -45,6 +45,56 @@ test('FIFO snapshots code/tests/limits and rejects concurrent per-owner flooding
   assert.equal((await service.list()).length, 2);
 });
 
+test('term reset blocks new runs and drains active and queued runs before resolving', async () => {
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const service = queue(async () => {
+    await blocker;
+    return success;
+  }, [], { concurrency: 1 });
+  const first = await service.enqueue({ ...input, termId: 'term-a' });
+  const second = await service.enqueue({ ...input, termId: 'term-a' });
+
+  const drain = service.drainTerm('term-a');
+  await assert.rejects(service.enqueue({ ...input, termId: 'term-a' }), { status: 409, code: 'TERM_RESET_IN_PROGRESS' });
+  let drained = false;
+  void drain.then(() => { drained = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, false);
+
+  release();
+  await Promise.all([first.completion, second.completion, drain]);
+  assert.equal(drained, true);
+  assert.equal((await service.list()).every((execution) => execution.state === 'FINISHED'), true);
+});
+
+test('term reset drains in-flight submission assessment work and rejects new work', async () => {
+  let release;
+  let markStarted;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const started = new Promise((resolve) => { markStarted = resolve; });
+  const service = queue(async () => success);
+  const work = service.runTermTask('term-a', async () => {
+    markStarted();
+    await blocker;
+    return 'finished';
+  });
+  await started;
+  const drain = service.drainTerm('term-a');
+  await assert.rejects(service.runTermTask('term-a', async () => 'should not run'), {
+    status: 409,
+    code: 'TERM_RESET_IN_PROGRESS',
+  });
+  let drained = false;
+  void drain.then(() => { drained = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(drained, false);
+  release();
+  assert.equal(await work, 'finished');
+  await drain;
+  assert.equal(drained, true);
+});
+
 test('worker crashes and restarts are Internal Error and cannot count passed tests', async () => {
   const records = [{ id: 'interrupted', state: 'RUNNING' }];
   const service = queue(async () => { throw new Error('infrastructure crashed'); }, records);

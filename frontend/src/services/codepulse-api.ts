@@ -19,7 +19,21 @@ export type CodePulseTerm = {
   startDate: string;
   endDate: string;
   resetDate: string;
-  status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+  status: 'DRAFT' | 'ACTIVE' | 'ENDED' | 'RESETTING' | 'RESETDONE' | 'ARCHIVED';
+};
+
+export type CodePulseResetRecord = {
+  id: string;
+  termId: string;
+  status: 'COMPLETE' | 'INCOMPLETE';
+  executedAt: string;
+  completedAt?: string;
+  executedBy: string;
+  affectedRowCounts: Record<string, number>;
+  reconciliation: Record<string, boolean>;
+  errors: string[];
+  immutable: true;
+  acknowledgements?: Array<{ acknowledgedAt: string; acknowledgedBy: string }>;
 };
 
 export type CodePulseWorkspace = {
@@ -563,6 +577,30 @@ export const codePulseApi = {
     request(() =>
       apiClient.delete<{ deleted: boolean }>(
         `/codepulse/terms/${encodeURIComponent(id)}`,
+      ),
+    ),
+  startTermReset: (id: string) =>
+    request(() =>
+      apiClient.post<{ item: CodePulseTerm }>(
+        `/codepulse/terms/${encodeURIComponent(id)}/reset/start`,
+      ),
+    ),
+  executeTermReset: (id: string) =>
+    request(() =>
+      apiClient.post<{ item: CodePulseTerm; resetRecord: CodePulseResetRecord }>(
+        `/codepulse/terms/${encodeURIComponent(id)}/reset/execute`,
+      ),
+    ),
+  listResetRecords: (id: string) =>
+    request(() =>
+      apiClient.get<{ items: CodePulseResetRecord[] }>(
+        `/codepulse/terms/${encodeURIComponent(id)}/reset-records`,
+      ),
+    ),
+  acknowledgeReset: (termId: string, resetRecordId: string) =>
+    request(() =>
+      apiClient.post<{ item: CodePulseResetRecord }>(
+        `/codepulse/terms/${encodeURIComponent(termId)}/reset-records/${encodeURIComponent(resetRecordId)}/acknowledge`,
       ),
     ),
   listClassrooms: (courseId = '13') =>

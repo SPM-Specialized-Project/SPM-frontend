@@ -629,4 +629,3 @@ Các phần state machine, data model chi tiết, API contract, Definition of Do
 traceability matrix, rủi ro và “Expected implementation” của subtasks là định
 hướng kỹ thuật được suy ra từ spec để hỗ trợ chốt implementation. Chúng cần được
 đội dự án xác nhận nếu được dùng như contract chính thức.
-
