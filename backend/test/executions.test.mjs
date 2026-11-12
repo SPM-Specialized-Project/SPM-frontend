@@ -45,6 +45,22 @@ test('FIFO snapshots code/tests/limits and rejects concurrent per-owner flooding
   assert.equal((await service.list()).length, 2);
 });
 
+test('execution queue exposes its live worker and pending counts', async () => {
+  let release;
+  const blocker = new Promise((resolve) => { release = resolve; });
+  const service = queue(async () => {
+    await blocker;
+    return success;
+  }, [], { concurrency: 1 });
+  const first = await service.enqueue(input);
+  const second = await service.enqueue(input);
+
+  assert.deepEqual(service.getStats(), { pendingCount: 1, activeCount: 1, totalWorkers: 1 });
+  release();
+  await Promise.all([first.completion, second.completion]);
+  assert.deepEqual(service.getStats(), { pendingCount: 0, activeCount: 0, totalWorkers: 1 });
+});
+
 test('term reset blocks new runs and drains active and queued runs before resolving', async () => {
   let release;
   const blocker = new Promise((resolve) => { release = resolve; });

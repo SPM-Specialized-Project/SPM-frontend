@@ -34,7 +34,19 @@ import {
 } from './data/storage.mjs';
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
-import { getCodePulseClassrooms, getCodePulseSubmissionContext, handleCodePulse } from './codepulse.mjs';
+import {
+  getCodePulseClassrooms,
+  getCodePulseSubmissionContext,
+  getCodePulseExecutionQueueStats,
+  handleCodePulse,
+} from './codepulse.mjs';
+import { getAlerts, updateAlertStatus, getAlertStats } from './alerts.mjs';
+import {
+  getSystemOperationsHealth,
+  getRequestTrace,
+  getAuditLogs,
+  recordAuditLog,
+} from './admin-operations.mjs';
 
 const isMembershipRoute = (parts) =>
   parts[0] === 'api' &&
@@ -239,6 +251,69 @@ async function handleRequest(request, response) {
   const viewerRole = normalizeRole(currentUser.role);
   const effectiveUser = { ...currentUser, role: viewerRole };
   const viewerEmail = currentUser.email;
+
+  if (parts[0] === 'api' && parts[1] === 'admin') {
+    const isAdminOrOperator = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(viewerRole);
+    if (!isAdminOrOperator) {
+      throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập chức năng quản trị hệ thống.');
+    }
+
+    // Health
+    if (parts[2] === 'operations' && parts[3] === 'health' && request.method === 'GET') {
+      const health = await getSystemOperationsHealth(getCodePulseExecutionQueueStats());
+      sendJson(response, 200, { item: health });
+      return;
+    }
+
+    // Trace
+    if (parts[2] === 'operations' && parts[3] === 'traces' && parts[4] && request.method === 'GET') {
+      const trace = await getRequestTrace(parts[4]);
+      sendJson(response, 200, { item: trace });
+      return;
+    }
+
+    // Audit logs
+    if (parts[2] === 'operations' && parts[3] === 'audit-logs' && request.method === 'GET') {
+      const logs = await getAuditLogs();
+      sendJson(response, 200, { items: logs, total: logs.length });
+      return;
+    }
+
+    // Smart Alerts
+    if (parts[2] === 'alerts' && parts[3] === 'stats' && request.method === 'GET') {
+      const stats = await getAlertStats({ classroomId: requestUrl.searchParams.get('classroomId') });
+      sendJson(response, 200, { item: stats });
+      return;
+    }
+
+    if (parts[2] === 'alerts' && !parts[3] && request.method === 'GET') {
+      const alerts = await getAlerts({
+        classroomId: requestUrl.searchParams.get('classroomId'),
+        status: requestUrl.searchParams.get('status'),
+      });
+      sendJson(response, 200, { items: alerts, total: alerts.length });
+      return;
+    }
+
+    if (parts[2] === 'alerts' && parts[3] && parts[4] === 'status' && request.method === 'PATCH') {
+      const body = await readRequestBody(request);
+      if (!body.status) throw apiError(400, 'INVALID_INPUT', 'Trạng thái mới không hợp lệ.');
+      const updated = await updateAlertStatus(parts[3], body.status, viewerEmail);
+      await recordAuditLog({
+        actor: viewerEmail,
+        action: 'UPDATE_ALERT_STATUS',
+        target: `Alert:${parts[3]}`,
+        requestId: `req-alert-${Date.now()}`,
+        result: 'SUCCESS',
+        details: `Cập nhật trạng thái alert sang: ${body.status}`,
+      });
+      sendJson(response, 200, { item: updated });
+      return;
+    }
+
+    throw apiError(404, 'NOT_FOUND', 'Không tìm thấy API admin endpoint.');
+  }
+
   if (requestUrl.pathname.startsWith('/api/codepulse/')) {
     await handleCodePulse({ request, response, requestUrl, user: effectiveUser, sendJson, readRequestBody, apiError });
     return;

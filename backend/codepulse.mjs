@@ -1,6 +1,8 @@
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
+import { evaluateExecutionAlert } from './alerts.mjs';
+import { recordTraceEvent } from './admin-operations.mjs';
 import {
   createGradingQueue,
   lecturerJudgmentView,
@@ -232,16 +234,66 @@ const executions = createExecutionQueue({
   read: () => readRecords(EXECUTIONS_FILE, []),
   mutate: (callback) => mutate(EXECUTIONS_FILE, [], callback),
   onUpdate: async (execution) => {
-    if (!execution.workspaceId) return;
-    await mutate(workspaceFile, initialWorkspaces, (records) => {
-      const workspace = records.find((item) => item.id === execution.workspaceId);
-      if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
-        || execution.state === 'QUEUED')) {
-        workspace.executionResult = execution;
+    const writeTrace = async (stage, description, payload) => {
+      try {
+        await recordTraceEvent(execution.id, { stage, description, payload });
+      } catch (error) {
+        console.error('Failed to persist execution trace:', error.message);
       }
-    });
+    };
+
+    if (execution.state === 'QUEUED') {
+      await writeTrace('RECEIVED', 'Execution request validated and accepted.', {
+        sourceCode: execution.sourceCode,
+        mode: execution.mode,
+      });
+      await writeTrace('DISPATCHED', 'Execution admitted to the worker queue.', {
+        queueState: execution.state,
+      });
+    }
+
+    let targetWorkspace = null;
+    if (execution.workspaceId) {
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const workspace = records.find((item) => item.id === execution.workspaceId);
+        if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
+          || execution.state === 'QUEUED')) {
+          workspace.executionResult = execution;
+          targetWorkspace = structuredClone(workspace);
+        }
+      });
+    }
+
+    if (execution.state === 'FINISHED') {
+      try {
+        if (targetWorkspace) {
+          await evaluateExecutionAlert({
+            workspace: targetWorkspace,
+            executionResult: execution,
+            classroomId: targetWorkspace.classroomId,
+            studentEmail: targetWorkspace.ownerEmail,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to evaluate execution alert:', err);
+      }
+
+      await writeTrace('EXECUTED', 'Execution worker completed the sandbox run.', {
+        status: execution.status,
+        runtime: execution.runtime,
+        durationMs: execution.runtimeMs,
+        exitCode: execution.exitCode,
+      });
+      await writeTrace('RECORDED', 'Execution result was persisted and alert evaluation completed.', {
+        state: execution.state,
+        passedCount: execution.passedCount,
+        totalCount: execution.totalCount,
+      });
+    }
   },
 });
+
+export const getCodePulseExecutionQueueStats = () => executions.getStats();
 
 export const initializeCodePulseExecutions = async () => {
   await executions.list();
