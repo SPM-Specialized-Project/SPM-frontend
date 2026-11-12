@@ -3,7 +3,7 @@ import test from 'node:test';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { randomUUID } from 'node:crypto';
-import { dockerArguments, runSandbox } from '../sandbox.mjs';
+import { dockerArguments, runSandbox, runSandboxBatch } from '../sandbox.mjs';
 
 const run = (sourceCode, options = {}) => runSandbox({ runtime: 'PYTHON', sourceCode, input: '',
   cpuTimeLimitMs: 1000, wallTimeLimitMs: 2250, memoryLimitMb: 128, ...options });
@@ -46,6 +46,20 @@ test('real Docker C++ compilation and execution', async () => {
   assert.equal(result.status, 'SUCCESS', JSON.stringify(result));
   assert.equal(result.stdout, 'ok');
   assert.equal((await run('int main( {', { runtime: 'CPP' })).status, 'COMPILE_ERROR');
+});
+
+test('official grading batch compiles once and executes every test independently', async () => {
+  const result = await runSandboxBatch({
+    executionId: `grading-${randomUUID()}`,
+    runtime: 'CPP',
+    sourceCode: '#include <iostream>\nint main(){int n; std::cin >> n; std::cout << n * 2;}',
+    tests: [{ input: '2' }, { input: '7' }],
+    cpuTimeLimitMs: 1000,
+    wallTimeLimitMs: 2250,
+    memoryLimitMb: 128,
+  });
+  assert.equal(result.status, 'SUCCESS', JSON.stringify(result));
+  assert.deepEqual(result.results.map((item) => item.stdout), ['4', '14']);
 });
 
 test('missing worker image reports infrastructure failure', async () => {

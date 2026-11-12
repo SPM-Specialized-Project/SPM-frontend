@@ -72,8 +72,8 @@ function appendOutput(name, value) {
 }
 
 async function verifyLocal() {
-  for (const route of ['/api/health', '/', '/git/']) {
-    await requestOk(baseUrl + route, 10);
+  for (const route of ['/api/health', '/', '/git/', '/observation/grafana/api/health']) {
+    await requestOk(baseUrl + route, route === '/observation/grafana/api/health' ? 30 : 10);
   }
   console.log(`Local ${deployment} services passed health checks at ${baseUrl}.`);
 }
@@ -103,7 +103,8 @@ async function startTunnel() {
 async function verifyPublic() {
   const origin = new URL(process.env.SPM_DEPLOY_PUBLIC_URL || '').origin;
   publicRootUrl(origin);
-  for (const route of ['/', '/api/health', '/git', '/git/', '/git/api/v1/version']) {
+  for (const route of ['/', '/api/health', '/git', '/git/', '/git/api/v1/version',
+    '/observation/grafana/api/health']) {
     await requestOk(origin + route, 30);
   }
   console.log(`Public ${deployment} application and Gitea passed HTTPS checks at ${origin}.`);

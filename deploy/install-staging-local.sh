@@ -47,6 +47,9 @@ sudo install -d -o spm -g spm -m 0750 \
   "$app_root/shared" \
   "$app_root/shared/data"
 sudo install -d -m 0755 /etc/spm-frontend
+sudo install -d -m 0755 /etc/nginx/conf.d
+sudo install -m 0644 deploy/nginx/spm-observability-redirects.conf \
+  /etc/nginx/conf.d/spm-observability-redirects.conf
 
 sudo install -m 0644 deploy/systemd/spm-staging-backend.service \
   /etc/systemd/system/spm-staging-backend.service
@@ -87,6 +90,7 @@ sudo visudo -cf /etc/sudoers.d/spm-staging-quick-tunnel
 
 sudo systemctl daemon-reload
 sudo systemctl enable nginx spm-staging-backend spm-staging-quick-tunnel.service
+sudo bash deploy/observability/install-host.sh
 sudo nginx -t
 sudo systemctl reload-or-restart nginx
 
