@@ -35,6 +35,7 @@ import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
 import { ExecutionPanel } from './execution-panel';
+import { IssueCasesPanel } from './issue-cases-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
 import { SandboxRunControls } from './sandbox-run-controls';
@@ -1471,6 +1472,9 @@ export function DsaLabManagement({
               )}
             </div>
           </>
+        )}
+        {role === 'lecturer' && assignmentClassroomId && (
+          <IssueCasesPanel classroomId={assignmentClassroomId} />
         )}
         {role &&
           assignmentClassroomId &&
