@@ -109,6 +109,7 @@ export interface DrillResult {
   filename: string;
   verified: boolean;
   checksumMatch: boolean;
+  jsonValid: boolean;
   sha256Hash: string;
   recomputedHash: string;
   referentialIntegrity: boolean;

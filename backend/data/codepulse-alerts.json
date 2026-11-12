@@ -1,5 +1,52 @@
 [
   {
+    "id": "alert-1794368939956-b6f2f5",
+    "classroomId": "class-test-alerts",
+    "labId": null,
+    "assignmentId": "assign-test-2",
+    "workspaceId": "ws-timeout-1794368939955",
+    "studentEmail": "timeout-student@gmail.com",
+    "ruleType": "TIMEOUT_LOOP",
+    "severity": "CRITICAL",
+    "message": "Sinh viên gặp lỗi vòng lặp/timeout 2 lần liên tiếp.",
+    "details": {
+      "lastExecutionId": "to-2",
+      "lastStatus": "TIMEOUT",
+      "stderr": "timed out 2",
+      "consecutiveCount": 2
+    },
+    "status": "ACTIVE",
+    "occurrenceCount": 1,
+    "createdAt": "2026-11-11T03:48:59.956Z",
+    "updatedAt": "2026-11-11T03:48:59.956Z",
+    "lastOccurredAt": "2026-11-11T03:48:59.956Z"
+  },
+  {
+    "id": "alert-1794368939944-1c575e",
+    "classroomId": "class-test-alerts",
+    "labId": null,
+    "assignmentId": "assign-test-1",
+    "workspaceId": "ws-test-1794368939939",
+    "studentEmail": "test-student@gmail.com",
+    "ruleType": "CONSECUTIVE_FAILURES",
+    "severity": "CRITICAL",
+    "message": "Sinh viên chạy thử thất bại 5 lần liên tiếp (RUNTIME_ERROR).",
+    "details": {
+      "lastExecutionId": "exec-5",
+      "lastStatus": "RUNTIME_ERROR",
+      "stderr": "Error 5",
+      "consecutiveCount": 5
+    },
+    "status": "RESOLVED",
+    "occurrenceCount": 3,
+    "createdAt": "2026-11-11T03:48:59.943Z",
+    "updatedAt": "2026-11-11T03:48:59.954Z",
+    "lastOccurredAt": "2026-11-11T03:48:59.949Z",
+    "acknowledgedBy": "tutor@gmail.com",
+    "acknowledgedAt": "2026-11-11T03:48:59.951Z",
+    "resolvedAt": "2026-11-11T03:48:59.954Z"
+  },
+  {
     "id": "alert-1794368790593-c61458",
     "classroomId": "class-test-alerts",
     "labId": null,
