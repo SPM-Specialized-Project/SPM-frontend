@@ -34,7 +34,12 @@ import {
 } from './data/storage.mjs';
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
-import { getCodePulseClassrooms, getCodePulseSubmissionContext, handleCodePulse } from './codepulse.mjs';
+import {
+  getCodePulseClassrooms,
+  getCodePulseSubmissionContext,
+  getCodePulseExecutionQueueStats,
+  handleCodePulse,
+} from './codepulse.mjs';
 import { getAlerts, updateAlertStatus, getAlertStats } from './alerts.mjs';
 import {
   getSystemOperationsHealth,
@@ -255,7 +260,7 @@ async function handleRequest(request, response) {
 
     // Health
     if (parts[2] === 'operations' && parts[3] === 'health' && request.method === 'GET') {
-      const health = await getSystemOperationsHealth();
+      const health = await getSystemOperationsHealth(getCodePulseExecutionQueueStats());
       sendJson(response, 200, { item: health });
       return;
     }

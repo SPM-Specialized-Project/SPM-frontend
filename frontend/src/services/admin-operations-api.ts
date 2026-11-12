@@ -3,7 +3,7 @@ import { apiClient } from './api-client';
 export interface OperationsHealth {
   queueLength: number;
   runningExecutions: number;
-  aiAssessmentQueue: number;
+  aiAssessmentQueue: number | null;
   workerStatus: {
     totalWorkers: number;
     activeWorkers: number;
@@ -11,12 +11,12 @@ export interface OperationsHealth {
     poolHealth: string;
   };
   latency: {
-    p50Ms: number;
-    p95Ms: number;
+    p50Ms: number | null;
+    p95Ms: number | null;
     unit: string;
   };
   errorRate: {
-    percentage: number;
+    percentage: number | null;
     recentSamples: number;
     status: string;
   };
@@ -157,8 +157,8 @@ export const adminOperationsApi = {
     return res.data.item;
   },
 
-  async getTrace(requestId: string): Promise<RequestTrace> {
-    const res = await apiClient.get<{ item: RequestTrace }>(`/admin/operations/traces/${encodeURIComponent(requestId)}`);
+  async getTrace(requestId: string): Promise<RequestTrace | null> {
+    const res = await apiClient.get<{ item: RequestTrace | null }>(`/admin/operations/traces/${encodeURIComponent(requestId)}`);
     return res.data.item;
   },
 

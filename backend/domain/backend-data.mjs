@@ -268,17 +268,22 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
   };
 };
 
-const toSubmissionView = (record, assignment, viewerRole, context = { term: null, classroom: null }) => ({
-  ...record,
-  assignment: {
-    id: assignment.id,
-    title: assignment.title,
-    dueDate: assignment.data.dueDate,
-  },
-  term: context.term,
-  classroom: context.classroom,
-  permissions: getPermissions(viewerRole, record.status),
-});
+const toSubmissionView = (record, assignment, viewerRole, context = { term: null, classroom: null }) => {
+  // CodePulse stores the pinned hidden test suite on the immutable submission.
+  // Generic course submission endpoints must never spread that server-only data.
+  const { gradingSnapshot: _gradingSnapshot, ...visibleRecord } = record;
+  return {
+    ...visibleRecord,
+    assignment: {
+      id: assignment.id,
+      title: assignment.title,
+      dueDate: assignment.data.dueDate,
+    },
+    term: context.term,
+    classroom: context.classroom,
+    permissions: getPermissions(viewerRole, record.status),
+  };
+};
 
 const createCourseSubmissionRecords = (course, assignmentId, students = course.students) =>
   students.map((student, index) => {

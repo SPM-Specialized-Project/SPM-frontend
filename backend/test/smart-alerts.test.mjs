@@ -1,11 +1,21 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import {
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+
+const testDataDirectory = await mkdtemp(path.join(os.tmpdir(), 'spm-smart-alerts-'));
+process.env.BACKEND_DATA_DIRECTORY = testDataDirectory;
+const {
   evaluateExecutionAlert,
   getAlerts,
   updateAlertStatus,
   getAlertStats,
-} from '../alerts.mjs';
+} = await import('../alerts.mjs');
+
+test.after(async () => {
+  await rm(testDataDirectory, { recursive: true, force: true });
+});
 
 test('Smart Alert system - rule evaluation, deduplication, auto-resolve and lifecycle', async () => {
   const testWorkspace = {

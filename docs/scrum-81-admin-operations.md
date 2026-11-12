@@ -65,3 +65,7 @@ npm --prefix frontend run check-types
 # Biên dịch gói sản phẩm Frontend
 npm --prefix frontend run build
 ```
+
+## 4. Kiểm thử giao diện thủ công
+
+Xem [preconditions và checklist manual test SCRUM-81](./scrum-81-admin-operations-manual-test.md). Chỉ chạy trên thư mục dữ liệu local dùng riêng cho kiểm thử.

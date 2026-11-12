@@ -97,10 +97,10 @@ export function recordTraceEvent(requestId, event) {
       };
       traces.unshift(trace);
     }
-    trace.events.push({
+    trace.events.push(redactTraceEvent({
       ...event,
-      timestamp: new Date().toISOString(),
-    });
+      timestamp: event.timestamp ?? new Date().toISOString(),
+    }));
     // Keep max 100 traces
     const trimmed = traces.slice(0, 100);
     await writeFile(TRACES_FILE, JSON.stringify(trimmed, null, 2), 'utf8');
@@ -111,99 +111,41 @@ export function recordTraceEvent(requestId, event) {
   return promise;
 }
 
+const redactValue = (value, key = '') => {
+  if (/^sourceCode$/i.test(key) && typeof value === 'string') return '[REDACTED_STUDENT_CODE]';
+  if (/password|token|authorization|secret|api[_-]?key/i.test(key) && value != null) return '[REDACTED]';
+  if (Array.isArray(value)) return value.map((item) => redactValue(item));
+  if (!value || typeof value !== 'object') return value;
+
+  const cloned = {};
+  for (const [childKey, childValue] of Object.entries(value)) {
+    if (value.hidden === true && (childKey === 'input' || childKey === 'expectedOutput')) {
+      cloned[childKey] = childKey === 'input' ? '[REDACTED_INPUT]' : '[REDACTED_OUTPUT]';
+      continue;
+    }
+    cloned[childKey] = redactValue(childValue, childKey);
+  }
+  return cloned;
+};
+
+function redactTraceEvent(event) {
+  const cloned = structuredClone(event);
+  if (cloned.payload) cloned.payload = redactValue(cloned.payload);
+  return cloned;
+}
+
 export function redactSensitiveData(trace) {
   if (!trace) return null;
-  const cloned = structuredClone(trace);
-
-  for (const event of cloned.events || []) {
-    if (event.payload) {
-      // Redact student source code
-      if (typeof event.payload.sourceCode === 'string') {
-        event.payload.sourceCode = '[REDACTED_STUDENT_CODE]';
-      }
-      // Redact passwords or tokens
-      if (event.payload.password) event.payload.password = '[REDACTED]';
-      if (event.payload.token) event.payload.token = '[REDACTED]';
-      // Redact hidden test cases
-      if (Array.isArray(event.payload.testCases)) {
-        event.payload.testCases = event.payload.testCases.map((tc) =>
-          tc.hidden ? { ...tc, input: '[REDACTED_INPUT]', expectedOutput: '[REDACTED_OUTPUT]' } : tc,
-        );
-      }
-    }
-  }
-
-  return cloned;
+  return {
+    ...structuredClone(trace),
+    events: (trace.events ?? []).map(redactTraceEvent),
+  };
 }
 
 export async function getRequestTrace(requestId) {
   const traces = await getTraces();
-  const trace = traces.find((t) => t.requestId === requestId);
-  if (trace) {
-    return redactSensitiveData(trace);
-  }
-
-  // Synthesize realistic trace if searching for execution or arbitrary requestId
-  const executions = await readJsonSafe(EXECUTIONS_FILE, []);
-  const execution = executions.find((e) => e.id === requestId || requestId.includes(e.id));
-
-  const baseTime = execution ? new Date(execution.executedAt).getTime() : Date.now() - 5000;
-  const syntheticTrace = {
-    requestId,
-    target: execution ? `Execution: ${execution.id}` : 'API Request',
-    clientEmail: execution?.ownerEmail ? 'student@gmail.com' : 'client',
-    totalDurationMs: execution?.runtimeMs || 142,
-    events: [
-      {
-        stage: 'RECEIVED',
-        timestamp: new Date(baseTime).toISOString(),
-        description: 'Gateway received request and validated HMAC authorization token.',
-        payload: {
-          clientIp: '10.0.12.44',
-          userAgent: 'CodePulse-WebClient/2.4',
-          sourceCode: '[REDACTED_STUDENT_CODE]',
-          token: '[REDACTED]',
-        },
-      },
-      {
-        stage: 'DISPATCHED',
-        timestamp: new Date(baseTime + 12).toISOString(),
-        description: 'Task admitted to execution queue and dispatched to Worker Pool Node #2.',
-        payload: {
-          workerId: 'worker-node-02',
-          queueWaitMs: 12,
-        },
-      },
-      {
-        stage: 'EXECUTED',
-        timestamp: new Date(baseTime + 85).toISOString(),
-        description: 'Code executed inside isolated Docker sandbox container.',
-        payload: {
-          runtime: execution?.runtime || 'cpp20',
-          exitCode: execution?.exitCode ?? 0,
-          durationMs: execution?.runtimeMs || 73,
-          memoryUsageKb: execution?.memoryUsageKb || 12480,
-          testCases: [
-            { id: 'public-01', input: '5\n1 2 3 4 5', expectedOutput: '15' },
-            { id: 'hidden-02', hidden: true, input: '[REDACTED_INPUT]', expectedOutput: '[REDACTED_OUTPUT]' },
-          ],
-        },
-      },
-      {
-        stage: 'RECORDED',
-        timestamp: new Date(baseTime + 142).toISOString(),
-        description: 'Execution metrics recorded into durable ledger, alerts evaluated.',
-        payload: {
-          status: execution?.status || 'SUCCESS',
-          passedCount: execution?.passedCount ?? 2,
-          totalCount: execution?.totalCount ?? 2,
-          alertTriggered: false,
-        },
-      },
-    ],
-  };
-
-  return syntheticTrace;
+  const trace = traces.find((item) => item.requestId === requestId);
+  return trace ? redactSensitiveData(trace) : null;
 }
 
 // ---------------- SYSTEM HEALTH & WORKER METRICS ----------------
@@ -217,29 +159,38 @@ export async function getSystemOperationsHealth(queueStats = {}) {
     .filter((l) => l > 0)
     .sort((a, b) => a - b);
 
-  let p50 = 45;
-  let p95 = 120;
-  if (latencies.length > 0) {
-    p50 = latencies[Math.floor(latencies.length * 0.5)] || 45;
-    p95 = latencies[Math.floor(latencies.length * 0.95)] || 120;
-  }
+  const percentile = (values, fraction) => values.length
+    ? values[Math.max(0, Math.ceil(values.length * fraction) - 1)]
+    : null;
+  const p50 = percentile(latencies, 0.5);
+  const p95 = percentile(latencies, 0.95);
 
   // Error rate
   const recent = executions.slice(-50);
   const failureCount = recent.filter(
     (e) => ['FAILED', 'RUNTIME_ERROR', 'COMPILE_ERROR', 'TIMEOUT', 'INTERNAL_ERROR'].includes(e.status),
   ).length;
-  const errorRate = recent.length > 0 ? Number(((failureCount / recent.length) * 100).toFixed(1)) : 0.0;
+  const errorRate = recent.length > 0 ? Number(((failureCount / recent.length) * 100).toFixed(1)) : null;
+  const totalWorkers = Math.max(0, Number(queueStats.totalWorkers ?? queueStats.concurrency) || 0);
+  const runningExecutions = Math.max(0, Number(queueStats.activeCount) || 0);
+  const queueLength = Math.max(0, Number(queueStats.pendingCount) || 0);
+  const poolHealth = totalWorkers === 0
+    ? 'UNAVAILABLE'
+    : queueLength > 0 && runningExecutions >= totalWorkers
+      ? 'SATURATED'
+      : errorRate !== null && errorRate >= 20
+        ? 'DEGRADED'
+        : 'HEALTHY';
 
   return {
-    queueLength: queueStats.pendingCount ?? 0,
-    runningExecutions: queueStats.activeCount ?? 0,
-    aiAssessmentQueue: 0,
+    queueLength,
+    runningExecutions,
+    aiAssessmentQueue: null,
     workerStatus: {
-      totalWorkers: 4,
-      activeWorkers: queueStats.activeCount ?? 0,
-      idleWorkers: Math.max(0, 4 - (queueStats.activeCount ?? 0)),
-      poolHealth: 'HEALTHY',
+      totalWorkers,
+      activeWorkers: Math.min(runningExecutions, totalWorkers),
+      idleWorkers: Math.max(0, totalWorkers - runningExecutions),
+      poolHealth,
     },
     latency: {
       p50Ms: p50,
@@ -249,7 +200,7 @@ export async function getSystemOperationsHealth(queueStats = {}) {
     errorRate: {
       percentage: errorRate,
       recentSamples: recent.length,
-      status: errorRate < 5.0 ? 'NORMAL' : 'ELEVATED',
+      status: errorRate === null ? 'NO_DATA' : errorRate < 5.0 ? 'NORMAL' : 'ELEVATED',
     },
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),

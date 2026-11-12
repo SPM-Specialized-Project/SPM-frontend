@@ -31,3 +31,7 @@ export const AUDIT_LOGS_FILE = path.join(DATA_DIRECTORY, 'codepulse-audit-logs.j
 export const BACKUPS_FILE = path.join(DATA_DIRECTORY, 'codepulse-backups.json');
 export const TRACES_FILE = path.join(DATA_DIRECTORY, 'codepulse-traces.json');
 export const BACKUPS_DIRECTORY = path.join(DATA_DIRECTORY, 'backups');
+export const RESET_RECORDS_FILE = path.join(DATA_DIRECTORY, 'codepulse-reset-records.json');
+export const GRADING_JOBS_FILE = path.join(DATA_DIRECTORY, 'codepulse-grading-jobs.json');
+export const JUDGMENTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-judgments.json');
+export const ISSUE_DETECTION_FILE = path.join(DATA_DIRECTORY, 'codepulse-issue-detection.json');

@@ -1,5 +1,7 @@
 import type { ComponentType } from 'react';
 
+import { useUserStore } from '@/stores';
+
 import {
   IconDangKyMonHoc,
   IconGiamSat,
@@ -74,7 +76,12 @@ export function SidebarNavigation({
   current,
   onNavigate,
 }: SidebarNavigationProps) {
-  const items = commonItems;
+  const { user } = useUserStore();
+  const role = String(user?.role ?? '').toLowerCase();
+  const canAccessSystemMonitoring = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(role);
+  const items = commonItems.filter((item) =>
+    item.route !== '/system-monitoring' || canAccessSystemMonitoring,
+  );
 
   return (
     <div className="relative flex shrink-0 flex-col gap-2">

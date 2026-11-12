@@ -117,7 +117,18 @@ def main():
         result['status'] = 'COMPILE_ERROR'
         return result
     command = ['/work/student/main'] if job['runtime'] == 'CPP' else ['python3', '-I', '-B', source]
-    return run(command, job['input'], job['cpuTimeLimitMs'], job['memoryLimitMb'], job['wallTimeLimitMs'])
+    tests = job.get('tests')
+    if tests is None:
+        return run(command, job['input'], job['cpuTimeLimitMs'], job['memoryLimitMb'], job['wallTimeLimitMs'])
+
+    # Official grading sends the complete pinned test suite in one container so
+    # compilation/setup happens exactly once per grading attempt. Each student
+    # execution still receives fresh stdin and an independent resource budget.
+    results = []
+    for test in tests:
+        results.append(run(command, str(test.get('input', '')), job['cpuTimeLimitMs'],
+                           job['memoryLimitMb'], job['wallTimeLimitMs']))
+    return dict(status='SUCCESS', results=results)
 
 
 try:

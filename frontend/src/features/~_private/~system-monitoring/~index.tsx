@@ -22,9 +22,18 @@ import {
 export const Route = createFileRoute('/_private/system-monitoring/')({
   beforeLoad: async () => {
     document.title = 'Giám sát hệ thống - Code Pulse';
-    if (!localStorage.getItem('userStore')) {
+    const storedUser = localStorage.getItem('userStore');
+    if (!storedUser) {
       window.location.assign('/login');
       return;
+    }
+    try {
+      const role = String(JSON.parse(storedUser)?.state?.user?.role ?? '').toLowerCase();
+      if (!['admin', 'coordinator', 'chairman', 'lecturer'].includes(role)) {
+        window.location.assign('/dashboard');
+      }
+    } catch {
+      window.location.assign('/dashboard');
     }
   },
   component: SystemMonitoringPage,
@@ -38,6 +47,7 @@ export function SystemMonitoringPage() {
 
   // Health state
   const [health, setHealth] = useState<OperationsHealth | null>(null);
+  const [healthError, setHealthError] = useState(false);
 
   // Alerts state
   const [alerts, setAlerts] = useState<SmartAlert[]>([]);
@@ -46,7 +56,8 @@ export function SystemMonitoringPage() {
   const [alertActionLoading, setAlertActionLoading] = useState<string | null>(null);
 
   // Trace state
-  const [traceRequestId, setTraceRequestId] = useState('req-sample-01');
+  const [traceRequestId, setTraceRequestId] = useState('');
+  const [searchedTraceId, setSearchedTraceId] = useState('');
   const [trace, setTrace] = useState<RequestTrace | null>(null);
   const [traceLoading, setTraceLoading] = useState(false);
 
@@ -65,17 +76,10 @@ export function SystemMonitoringPage() {
     try {
       const data = await adminOperationsApi.getHealth();
       setHealth(data);
+      setHealthError(false);
     } catch {
-      setHealth({
-        queueLength: 0,
-        runningExecutions: 0,
-        aiAssessmentQueue: 0,
-        workerStatus: { totalWorkers: 4, activeWorkers: 1, idleWorkers: 3, poolHealth: 'HEALTHY' },
-        latency: { p50Ms: 42, p95Ms: 110, unit: 'ms' },
-        errorRate: { percentage: 0.0, recentSamples: 15, status: 'NORMAL' },
-        uptimeSeconds: 14200,
-        timestamp: new Date().toISOString(),
-      });
+      setHealth(null);
+      setHealthError(true);
     }
   };
 
@@ -93,10 +97,19 @@ export function SystemMonitoringPage() {
   };
 
   const loadTrace = async (reqId: string) => {
+    const requestId = reqId.trim();
+    if (!requestId) {
+      setTrace(null);
+      setSearchedTraceId('');
+      return;
+    }
+    setTrace(null);
+    setSearchedTraceId(requestId);
     setTraceLoading(true);
     try {
-      const res = await adminOperationsApi.getTrace(reqId);
+      const res = await adminOperationsApi.getTrace(requestId);
       setTrace(res);
+      if (!res) showNotification('Không tìm thấy trace đã được ghi nhận cho mã này.', 'error');
     } catch {
       showNotification('Không tìm thấy bản ghi vết cho mã yêu cầu này.', 'error');
     } finally {
@@ -117,7 +130,7 @@ export function SystemMonitoringPage() {
     loadHealth();
     loadAlerts();
     loadAuditLogs();
-    loadTrace(traceRequestId);
+    if (traceRequestId) loadTrace(traceRequestId);
 
     const timer = setInterval(() => {
       loadHealth();
@@ -177,9 +190,15 @@ export function SystemMonitoringPage() {
           </div>
 
           <div className="flex items-center gap-3">
-            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-800">
-              <span className="size-2 rounded-full bg-emerald-500"></span>
-              Hạ tầng hoạt động bình thường
+            <span className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium ${
+              health?.workerStatus.poolHealth === 'HEALTHY'
+                ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                : healthError || health?.workerStatus.poolHealth === 'UNAVAILABLE'
+                  ? 'border-red-200 bg-red-50 text-red-800'
+                  : 'border-amber-200 bg-amber-50 text-amber-800'
+            }`}>
+              <span className={`size-2 rounded-full ${health?.workerStatus.poolHealth === 'HEALTHY' ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+              {healthError ? 'Không tải được dữ liệu hệ thống' : health?.workerStatus.poolHealth ?? 'Đang tải trạng thái'}
             </span>
             <button
               onClick={() => {
@@ -249,9 +268,9 @@ export function SystemMonitoringPage() {
                   <span>Hàng đợi thực thi (Queue)</span>
                   <ServerStackIcon className="size-4 text-slate-400" />
                 </div>
-                <div className="mt-2 text-3xl font-bold text-slate-900">{health?.queueLength ?? 0}</div>
+                <div className="mt-2 text-3xl font-bold text-slate-900">{health?.queueLength ?? '—'}</div>
                 <div className="mt-1 text-xs text-slate-500">
-                  Đang chạy: <strong className="text-blue-600">{health?.runningExecutions ?? 0}</strong> tiến trình
+                  Đang chạy: <strong className="text-blue-600">{health?.runningExecutions ?? '—'}</strong> tiến trình
                 </div>
               </div>
 
@@ -260,8 +279,8 @@ export function SystemMonitoringPage() {
                   <span>Hàng đợi chấm AI</span>
                   <ClockIcon className="size-4 text-slate-400" />
                 </div>
-                <div className="mt-2 text-3xl font-bold text-slate-900">{health?.aiAssessmentQueue ?? 0}</div>
-                <div className="mt-1 text-xs text-slate-500">Trạng thái: Sẵn sàng tiếp nhận</div>
+                <div className="mt-2 text-3xl font-bold text-slate-900">{health?.aiAssessmentQueue ?? '—'}</div>
+                <div className="mt-1 text-xs text-slate-500">Trạng thái: {health?.aiAssessmentQueue == null ? 'Chưa có số liệu' : 'Sẵn sàng tiếp nhận'}</div>
               </div>
 
               <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -270,8 +289,8 @@ export function SystemMonitoringPage() {
                   <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">ms</span>
                 </div>
                 <div className="mt-2 flex items-baseline gap-2">
-                  <span className="text-3xl font-bold text-slate-900">{health?.latency.p50Ms ?? 45}</span>
-                  <span className="text-xs text-slate-500">/ p95: {health?.latency.p95Ms ?? 120}ms</span>
+                  <span className="text-3xl font-bold text-slate-900">{health?.latency.p50Ms ?? '—'}</span>
+                  <span className="text-xs text-slate-500">/ p95: {health?.latency.p95Ms ?? '—'}ms</span>
                 </div>
                 <div className="mt-1 text-xs text-slate-500">Thời gian biên dịch và chạy test public</div>
               </div>
@@ -280,11 +299,11 @@ export function SystemMonitoringPage() {
                 <div className="flex items-center justify-between text-xs font-medium text-slate-500">
                   <span>Tỷ lệ lỗi thực thi</span>
                   <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
-                    {health?.errorRate.status ?? 'Bình thường'}
+                    {health?.errorRate.status ?? 'Chưa có số liệu'}
                   </span>
                 </div>
-                <div className="mt-2 text-3xl font-bold text-emerald-600">{health?.errorRate.percentage ?? 0.0}%</div>
-                <div className="mt-1 text-xs text-slate-500">Tính trên các lần chạy mã gần nhất</div>
+                <div className="mt-2 text-3xl font-bold text-emerald-600">{health?.errorRate.percentage == null ? '—' : `${health.errorRate.percentage}%`}</div>
+                <div className="mt-1 text-xs text-slate-500">Tính trên {health?.errorRate.recentSamples ?? '—'} lần chạy mã gần nhất</div>
               </div>
             </div>
 
@@ -296,12 +315,12 @@ export function SystemMonitoringPage() {
                   <p className="text-xs text-slate-500">Các container Docker độc lập xử lý biên dịch C++ và chạy test case.</p>
                 </div>
                 <span className="rounded bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-700">
-                  Tổng số: 4 Nodes
+                  Tổng số: {health?.workerStatus.totalWorkers ?? '—'} workers
                 </span>
               </div>
 
               <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {[1, 2, 3, 4].map((node) => {
+                {Array.from({ length: health?.workerStatus.totalWorkers ?? 0 }, (_, index) => index + 1).map((node) => {
                   const isBusy = node <= (health?.workerStatus.activeWorkers ?? 0);
                   return (
                     <div key={node} className="rounded-lg border border-slate-200 p-3.5">
@@ -316,6 +335,9 @@ export function SystemMonitoringPage() {
                     </div>
                   );
                 })}
+                {health?.workerStatus.totalWorkers === 0 && (
+                  <p className="text-xs text-slate-500">Không có số liệu worker.</p>
+                )}
               </div>
             </div>
 
@@ -476,7 +498,7 @@ export function SystemMonitoringPage() {
                   />
                 </div>
                 <button
-                  disabled={traceLoading}
+                  disabled={traceLoading || !traceRequestId.trim()}
                   onClick={() => loadTrace(traceRequestId)}
                   className="rounded-lg bg-blue-600 px-4 py-2 text-xs font-medium text-white transition hover:bg-blue-700"
                 >
@@ -484,24 +506,16 @@ export function SystemMonitoringPage() {
                 </button>
               </div>
 
-              {/* Sample IDs */}
-              <div className="mt-2.5 flex items-center gap-2 text-xs text-slate-500">
-                <span>Mẫu tra cứu:</span>
-                {['req-sample-01', 'exec-cf-552', 'exec-to-881'].map((sample) => (
-                  <button
-                    key={sample}
-                    onClick={() => {
-                      setTraceRequestId(sample);
-                      loadTrace(sample);
-                    }}
-                    className="rounded bg-slate-100 px-2 py-0.5 font-mono text-[11px] text-blue-700 hover:bg-slate-200"
-                  >
-                    {sample}
-                  </button>
-                ))}
-              </div>
+              <p className="mt-2.5 text-xs text-slate-500">
+                Dùng Execution ID nhận được sau khi chạy bài. Chỉ trace thực đã được ghi nhận mới hiển thị.
+              </p>
 
               {/* Trace Timeline View */}
+              {searchedTraceId && !trace && (
+                <p className="mt-5 border-t border-slate-100 pt-5 text-sm text-slate-500">
+                  Không có trace đã ghi nhận cho mã {searchedTraceId}.
+                </p>
+              )}
               {trace && (
                 <div className="mt-5 border-t border-slate-100 pt-5">
                   <div className="flex flex-wrap items-center justify-between gap-2">
