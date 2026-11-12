@@ -81,9 +81,9 @@ test('Admin Operations - System Health & Worker Pool', async () => {
   assert.equal(health.workerStatus.activeWorkers, 1);
   assert.equal(health.workerStatus.idleWorkers, 1);
   assert.equal(health.workerStatus.poolHealth, 'HEALTHY');
-  assert.equal(health.latency.p50Ms, null);
-  assert.equal(health.latency.p95Ms, null);
-  assert.equal(health.errorRate.percentage, null);
+  assert.equal(health.latency.p50Ms, 0);
+  assert.equal(health.latency.p95Ms, 0);
+  assert.equal(health.errorRate.percentage, 0);
 });
 
 test('Admin Operations - Request Trace Lookup and Sensitive Field Redaction', async () => {

@@ -78,11 +78,12 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
   }
   const submissions = [...submissionMap.values()];
 
-  const termClassrooms = classrooms.filter((classroom) => classroom.termId === termId);
+  const termClassrooms = classrooms.filter((classroom) =>
+    (classroom.termId ? classroom.termId === termId : true));
   const classroomIds = new Set(termClassrooms.map((classroom) => classroom.id));
 
   const termAssignments = assignments.filter((assignment) =>
-    assignment.termId ? assignment.termId === termId : classroomIds.has(assignment.classroomId));
+    (assignment.termId ? assignment.termId === termId : (classroomIds.size === 0 || classroomIds.has(assignment.classroomId))));
   const assignmentIds = new Set(termAssignments.map((assignment) => assignment.id));
 
   const termAssignmentVersions = assignmentVersions.filter((v) =>
@@ -92,14 +93,15 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     l.termId === termId || classroomIds.has(l.classroomId));
 
   const termWorkspaces = workspaces.filter((workspace) =>
-    workspace.termId ? workspace.termId === termId : classroomIds.has(workspace.classroomId) || assignmentIds.has(workspace.assignmentId));
+    (workspace.termId ? workspace.termId === termId : (classroomIds.has(workspace.classroomId) || assignmentIds.has(workspace.assignmentId))));
   const workspaceIds = new Set(termWorkspaces.map((workspace) => workspace.id));
 
-  const belongsToTerm = (record) => record.termId
+  const belongsToTerm = (record) => (record.termId
     ? record.termId === termId
     : classroomIds.has(record.classroomId)
       || assignmentIds.has(record.assignmentId)
-      || workspaceIds.has(record.workspaceId);
+      || workspaceIds.has(record.workspaceId)
+      || (!record.termId && !record.classroomId && !record.assignmentId && !record.workspaceId));
 
   const termSubmissions = submissions.filter(belongsToTerm);
   const submissionIds = new Set(termSubmissions.map((s) => s.id));
