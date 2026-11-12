@@ -30,4 +30,4 @@
 - Test alert ID: `alert-1794368790593-c61458`
 - Test execution ID: `execution-bc9f04de-1088-40e1-9101-a7201b73405a`
 - Checks passed/failed: Manual checks 1–7 passed; backend suite 30 passed, 0 failed; frontend type check, lint, and production build passed.
-- Notes: The test execution completed successfully (Python, 19 ms, exit code 0). Source was redacted from the trace. Failure/timeout thresholds were covered by backend rule tests rather than manually triggered in the browser.
+- Notes: The test execution completed successfully (Python, 19 ms, exit code 0). Source was redacted from the trace. One asynchronous assessment request logged `AI_PROVIDER_TIMEOUT`; assessment availability was not verified in this local run. Failure/timeout thresholds were covered by backend rule tests rather than manually triggered in the browser.
