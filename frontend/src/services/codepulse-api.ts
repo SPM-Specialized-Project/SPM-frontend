@@ -1,3 +1,5 @@
+import { useAuthStore } from '@/stores/auth.store';
+
 import { apiClient, request } from './api-client';
 
 export type CodePulseClassroom = {
@@ -474,6 +476,71 @@ export type CodePulseVersionHistory = {
   executions?: CodePulseExecutionResult[];
 };
 
+export type CodePulseAssessmentState =
+  | 'PENDING'
+  | 'EVALUATING'
+  | 'EVALUATED'
+  | 'INSUFFICIENT_EVIDENCE'
+  | 'FAILED';
+
+export type CodePulseAssessment = {
+  id: string;
+  eventId: string;
+  eventSequence: number;
+  missingEventSequence?: number;
+  classroomId: string;
+  workspaceId: string;
+  studentEmail: string;
+  assignmentId: string;
+  assignmentVersionId: string | null;
+  snapshotId: string | null;
+  executionId: string | null;
+  submissionId: string | null;
+  milestone: 'SAVE' | 'RUN' | 'SUBMIT';
+  provider?: string | null;
+  model?: string | null;
+  state: CodePulseAssessmentState;
+  inputCoverage: { snapshot: boolean; problemVersion: boolean; executionContext: boolean };
+  resultCode?: string | null;
+  findingCount?: number;
+  createdAt: string;
+  updatedAt: string;
+  evaluatedAt?: string;
+};
+
+export type CodePulseCaseEvidence = {
+  id: string;
+  caseId: string;
+  assessmentId: string;
+  snapshotId: string;
+  executionId: string | null;
+  submissionId: string | null;
+  rationale: string;
+  references: Array<
+    | { kind: 'CODE'; snapshotId: string; lineStart: number; lineEnd: number; excerpt: string }
+    | { kind: 'TEST'; executionId: string; testCaseId: string; status: string; traceExcerpt?: string }
+    | { kind: 'EVENT'; eventId: string }
+  >;
+  createdAt: string;
+};
+
+export type CodePulseIssueCase = {
+  id: string;
+  classroomId: string;
+  workspaceId: string;
+  studentEmail: string;
+  assignmentId: string;
+  assignmentVersionId: string | null;
+  problemTypeId: string;
+  problemType: { id: string; name: string; description?: string };
+  episodeNumber: number;
+  status: 'ACTIVE' | 'RESOLVED' | 'DISMISSED';
+  createdAt: string;
+  updatedAt: string;
+  evidence: CodePulseCaseEvidence[];
+  relatedTestCaseIds: string[];
+};
+
 export const codePulseApi = {
   listTerms: (courseId = '13') =>
     request(() =>
@@ -548,6 +615,67 @@ export const codePulseApi = {
     request(() =>
       apiClient.get<{ classroom: CodePulseClassroom; activeMembers: number }>(
         `/codepulse/classrooms/${encodeURIComponent(id)}/dashboard`,
+      ),
+    ),
+  listAssessments: (classroomId: string) =>
+    request(() =>
+      apiClient.get<{ items: CodePulseAssessment[] }>('/codepulse/assessments', {
+        params: { classroomId },
+      }),
+    ),
+  subscribeIssueUpdates(classroomId: string, onUpdate: () => void, signal: AbortSignal) {
+    const url = apiClient.getUri({
+      url: '/codepulse/issue-events',
+      params: { classroomId },
+    });
+    const token = useAuthStore.getState().token;
+    let retryDelay = 1_000;
+
+    void (async () => {
+      while (!signal.aborted) {
+        try {
+          const response = await fetch(url, {
+            credentials: 'include',
+            headers: token ? { Authorization: `Bearer ${token}` } : {},
+            signal,
+          });
+          if (response.status === 401 || response.status === 403) return;
+          if (!response.ok || !response.body) throw new Error('Issue update stream is unavailable.');
+
+          retryDelay = 1_000;
+          onUpdate();
+          const reader = response.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = '';
+          while (!signal.aborted) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const frames = buffer.split(/\r?\n\r?\n/);
+            buffer = frames.pop() ?? '';
+            if (frames.some((frame) => frame.split(/\r?\n/).some((line) => line.startsWith('data:')))) onUpdate();
+          }
+          if (signal.aborted) return;
+          throw new Error('Issue update stream closed.');
+        } catch {
+          if (signal.aborted) return;
+          await new Promise((resolve) => window.setTimeout(resolve, retryDelay));
+          retryDelay = Math.min(retryDelay * 2, 15_000);
+        }
+      }
+    })();
+  },
+  listIssueCases: (classroomId: string) =>
+    request(() =>
+      apiClient.get<{ items: CodePulseIssueCase[] }>('/codepulse/issue-cases', {
+        params: { classroomId },
+      }),
+    ),
+  updateIssueCase: (id: string, status: 'RESOLVED' | 'DISMISSED') =>
+    request(() =>
+      apiClient.patch<{ item: Pick<CodePulseIssueCase, 'id' | 'status' | 'updatedAt'> }>(
+        `/codepulse/issue-cases/${encodeURIComponent(id)}`,
+        { status },
       ),
     ),
   getProblem: (classroomId: string, problemId: string) =>

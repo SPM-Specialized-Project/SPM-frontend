@@ -28,3 +28,4 @@ export const SNAPSHOTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-snapshots.jso
 export const EXECUTIONS_FILE = path.join(DATA_DIRECTORY, 'codepulse-executions.json');
 export const GRADING_JOBS_FILE = path.join(DATA_DIRECTORY, 'codepulse-grading-jobs.json');
 export const JUDGMENTS_FILE = path.join(DATA_DIRECTORY, 'codepulse-judgments.json');
+export const ISSUE_DETECTION_FILE = path.join(DATA_DIRECTORY, 'codepulse-issue-detection.json');
