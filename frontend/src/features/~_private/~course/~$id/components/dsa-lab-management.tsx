@@ -35,6 +35,7 @@ import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
 import { ExecutionPanel } from './execution-panel';
+import { GradingResult } from './grading-result';
 import { IssueCasesPanel } from './issue-cases-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
@@ -146,14 +147,6 @@ function StudentWorkspaceEditor({
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
-        if (response.data.item.problem) {
-          void codePulseApi
-            .listWorkspaceSubmissions(response.data.item.id)
-            .then((history) => {
-              if (active) setWorkspaceSubmission(history.data.items.at(-1));
-            })
-            .catch(() => {});
-        }
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -171,6 +164,30 @@ function StudentWorkspaceEditor({
       active = false;
     };
   }, [assignment.id, classroomId, lab.id, labAssignment.id]);
+
+  useEffect(() => {
+    if (!workspace?.id || !workspace.problem) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const history = await codePulseApi.listWorkspaceSubmissions(workspace.id);
+        if (!active) return;
+        const latest = history.data.items.at(-1);
+        setWorkspaceSubmission(latest);
+        if (latest && ['PENDING', 'JUDGING'].includes(latest.status)) {
+          timer = setTimeout(() => void poll(), 1_000);
+        }
+      } catch {
+        if (active) timer = setTimeout(() => void poll(), 2_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [workspace?.id, workspace?.problem, workspaceSubmission?.id]);
 
   const persistWorkspace = async (showToast = true) => {
     if (!workspace) return undefined;
@@ -384,12 +401,8 @@ function StudentWorkspaceEditor({
       <SandboxRunControls mode={runMode} stdin={stdin} disabled={running || !practiceOpen}
         onMode={setRunMode} onStdin={setStdin} />
       {workspaceSubmission && (
-        <div className="border-b border-slate-200 bg-slate-50 px-4 py-2 text-xs text-slate-600" aria-live="polite">
-          Immutable submission <span className="font-mono">{workspaceSubmission.id}</span>{' '}
-          <span className="font-semibold text-teal-700">
-            {workspaceSubmission.status === 'PENDING' ? 'Pending' : 'Judging'}
-          </span>
-          {' '}· accepted {new Date(workspaceSubmission.acceptedAt).toLocaleString('vi-VN')}
+        <div className="border-b border-slate-200 px-4 pb-4">
+          <GradingResult submission={workspaceSubmission} />
         </div>
       )}
       {loading && (
