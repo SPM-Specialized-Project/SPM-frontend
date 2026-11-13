@@ -1,5 +1,5 @@
 import type { CourseContent } from '@/types/course-content';
-import filePDF from 'public/group07_report 02.pdf';
+const filePDF = '/group07_report 02.pdf';
 
 import type { SectionRendererProps } from './section-renderer-types';
 

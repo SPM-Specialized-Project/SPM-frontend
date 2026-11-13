@@ -117,6 +117,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
 
   const saved = await request(baseUrl, `/api/codepulse/workspaces/${workspaceId}`, student, 'PATCH', {
     sourceCode: 'print(input())',
+    baseRevision: workspace.data.item.revision,
   });
   assert.equal(saved.status, 200);
 
@@ -157,6 +158,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
     { sourceCode: 'print(input())' },
   );
   assert.equal(inactiveTermSubmission.status, 403);
+  assert.equal(inactiveTermSubmission.data.code, 'FORBIDDEN');
   const inactiveTermSave = await request(
     baseUrl,
     `/api/codepulse/workspaces/${workspaceId}`,
@@ -166,6 +168,28 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
   );
   assert.equal(inactiveTermSave.status, 403);
   assert.equal(inactiveTermSave.data.code, 'PRACTICE_TERM_INACTIVE');
+
+  activeTerm.status = 'RESETTING';
+  await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
+  const resetTermSubmission = await request(
+    baseUrl,
+    `/api/codepulse/classrooms/class-1/labs/${labId}/assignments/${labAssignmentId}/submit`,
+    student,
+    'POST',
+    { sourceCode: 'print(input())' },
+  );
+  assert.equal(resetTermSubmission.status, 409);
+  assert.equal(resetTermSubmission.data.code, 'TERM_RESET_IN_PROGRESS');
+  const resetTermSave = await request(
+    baseUrl,
+    `/api/codepulse/workspaces/${workspaceId}`,
+    student,
+    'PATCH',
+    { sourceCode: 'must not save while reset is running' },
+  );
+  assert.equal(resetTermSave.status, 409);
+  assert.equal(resetTermSave.data.code, 'TERM_RESET_IN_PROGRESS');
+
   activeTerm.status = 'ACTIVE';
   await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
 
@@ -313,7 +337,10 @@ test('LIVE LAB with a future practice window reports why it is locked and lectur
   assert.equal(fresh.data.practiceWindow.practiceAccess, 'OPEN');
   assert.equal(fresh.data.practiceWindow.practiceAccessReason, null);
   assert.equal(fresh.data.item.sourceCode, locked.data.item.sourceCode);
-  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', { sourceCode: 'print("queue")' })).status, 200);
+  assert.equal((await request(baseUrl, workspaceRoute, student, 'PATCH', {
+    sourceCode: 'print("queue")',
+    baseRevision: fresh.data.item.revision,
+  })).status, 200);
 
   const closed = await request(baseUrl, practiceRoute, lecturer, 'PATCH', {
     status: 'CLOSED', expectedVersion: opened.data.item.practiceWindowVersion,

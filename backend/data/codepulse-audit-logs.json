@@ -1,0 +1,132 @@
+[
+  {
+    "id": "audit-1794368939954-eb66ee",
+    "actor": "admin@test.com",
+    "action": "DISASTER_RECOVERY_DRILL",
+    "target": "Backup:backup-1794368939946-76ed83",
+    "timestamp": "2026-11-11T03:48:59.954Z",
+    "requestId": "req-drill-1794368939954",
+    "result": "SUCCESS",
+    "details": "Kiểm thử DR hoàn tất: checksumMatch=true, referentialIntegrity=true"
+  },
+  {
+    "id": "audit-1794368939949-ca685f",
+    "actor": "admin@test.com",
+    "action": "CREATE_SEMESTER_BACKUP",
+    "target": "Backup:backup-1794368939946-76ed83",
+    "timestamp": "2026-11-11T03:48:59.949Z",
+    "requestId": "req-backup-1794368939949",
+    "result": "SUCCESS",
+    "details": "Tạo backup thành công: backup-1794368939946-76ed83.json (SHA-256: 84b32e52737b...)"
+  },
+  {
+    "id": "audit-1794368939939-0dfeb5",
+    "actor": "admin@test.com",
+    "action": "TEST_ACTION",
+    "target": "TestTarget",
+    "timestamp": "2026-11-11T03:48:59.939Z",
+    "requestId": "req-audit-test",
+    "result": "SUCCESS",
+    "details": "Audit log unit test verification."
+  },
+  {
+    "id": "audit-1794368790580-4d169a",
+    "actor": "admin@test.com",
+    "action": "TEST_ACTION",
+    "target": "TestTarget",
+    "timestamp": "2026-11-11T03:46:30.580Z",
+    "requestId": "req-audit-test",
+    "result": "SUCCESS",
+    "details": "Audit log unit test verification."
+  },
+  {
+    "id": "audit-1794366700488-641aa7",
+    "actor": "admin@gmail.com",
+    "action": "UPDATE_ALERT_STATUS",
+    "target": "Alert:alert-1793970002-ba43e1",
+    "timestamp": "2026-11-11T03:11:40.488Z",
+    "requestId": "req-alert-1794366700488",
+    "result": "SUCCESS",
+    "details": "Cập nhật trạng thái alert sang: DISMISSED"
+  },
+  {
+    "id": "audit-1794366695732-42ed7a",
+    "actor": "admin@gmail.com",
+    "action": "UPDATE_ALERT_STATUS",
+    "target": "Alert:alert-1794365364700-03e96a",
+    "timestamp": "2026-11-11T03:11:35.732Z",
+    "requestId": "req-alert-1794366695732",
+    "result": "SUCCESS",
+    "details": "Cập nhật trạng thái alert sang: ACKNOWLEDGED"
+  },
+  {
+    "id": "audit-1794366694317-fa427e",
+    "actor": "admin@gmail.com",
+    "action": "UPDATE_ALERT_STATUS",
+    "target": "Alert:alert-1794365369344-658744",
+    "timestamp": "2026-11-11T03:11:34.317Z",
+    "requestId": "req-alert-1794366694317",
+    "result": "SUCCESS",
+    "details": "Cập nhật trạng thái alert sang: RESOLVED"
+  },
+  {
+    "id": "audit-1794365369264-632c5b",
+    "actor": "admin@test.com",
+    "action": "DISASTER_RECOVERY_DRILL",
+    "target": "Backup:backup-1794365369247-65a128",
+    "timestamp": "2026-11-11T02:49:29.264Z",
+    "requestId": "req-drill-1794365369264",
+    "result": "SUCCESS",
+    "details": "Kiểm thử DR hoàn tất: checksumMatch=true, referentialIntegrity=true"
+  },
+  {
+    "id": "audit-1794365369251-1aca2a",
+    "actor": "admin@test.com",
+    "action": "CREATE_SEMESTER_BACKUP",
+    "target": "Backup:backup-1794365369247-65a128",
+    "timestamp": "2026-11-11T02:49:29.251Z",
+    "requestId": "req-backup-1794365369251",
+    "result": "SUCCESS",
+    "details": "Tạo backup thành công: backup-1794365369247-65a128.json (SHA-256: 64d2d401a705...)"
+  },
+  {
+    "id": "audit-1794365369236-8a0764",
+    "actor": "admin@test.com",
+    "action": "TEST_ACTION",
+    "target": "TestTarget",
+    "timestamp": "2026-11-11T02:49:29.236Z",
+    "requestId": "req-audit-test",
+    "result": "SUCCESS",
+    "details": "Audit log unit test verification."
+  },
+  {
+    "id": "audit-1794365364697-c44877",
+    "actor": "admin@test.com",
+    "action": "DISASTER_RECOVERY_DRILL",
+    "target": "Backup:backup-1794365364691-7c1de7",
+    "timestamp": "2026-11-11T02:49:24.697Z",
+    "requestId": "req-drill-1794365364697",
+    "result": "SUCCESS",
+    "details": "Kiểm thử DR hoàn tất: checksumMatch=true, referentialIntegrity=true"
+  },
+  {
+    "id": "audit-1794365364693-a523ce",
+    "actor": "admin@test.com",
+    "action": "CREATE_SEMESTER_BACKUP",
+    "target": "Backup:backup-1794365364691-7c1de7",
+    "timestamp": "2026-11-11T02:49:24.693Z",
+    "requestId": "req-backup-1794365364693",
+    "result": "SUCCESS",
+    "details": "Tạo backup thành công: backup-1794365364691-7c1de7.json (SHA-256: 580364bb52f8...)"
+  },
+  {
+    "id": "audit-1794365364685-959df7",
+    "actor": "admin@test.com",
+    "action": "TEST_ACTION",
+    "target": "TestTarget",
+    "timestamp": "2026-11-11T02:49:24.686Z",
+    "requestId": "req-audit-test",
+    "result": "SUCCESS",
+    "details": "Audit log unit test verification."
+  }
+]
