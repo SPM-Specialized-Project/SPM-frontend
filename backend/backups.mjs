@@ -5,6 +5,7 @@ import {
   BACKUPS_FILE,
   BACKUPS_DIRECTORY,
   DATA_DIRECTORY,
+  MEMBERSHIPS_FILE,
   CLASSROOMS_FILE,
   TERMS_FILE,
   ASSIGNMENTS_FILE,
@@ -14,6 +15,7 @@ import {
   SUBMISSIONS_FILE,
   CODEPULSE_SUBMISSIONS_FILE,
   SNAPSHOTS_FILE,
+  EXECUTIONS_FILE,
   JUDGMENTS_FILE,
   ALERTS_FILE,
   CODEPULSE_ACTIVITIES_FILE,
@@ -42,6 +44,7 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
   const [
     classrooms,
     terms,
+    memberships,
     assignments,
     assignmentVersions,
     labs,
@@ -49,12 +52,14 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     rawSubmissions,
     rawCodepulseSubmissions,
     snapshots,
+    executions,
     judgments,
     alerts,
     activities,
   ] = await Promise.all([
     readJsonSafe(CLASSROOMS_FILE, []),
     readJsonSafe(TERMS_FILE, []),
+    readJsonSafe(MEMBERSHIPS_FILE, []),
     readJsonSafe(ASSIGNMENTS_FILE, []),
     readJsonSafe(ASSIGNMENT_VERSIONS_FILE, []),
     readJsonSafe(LABS_FILE, []),
@@ -62,6 +67,7 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     readJsonSafe(SUBMISSIONS_FILE, []),
     readJsonSafe(CODEPULSE_SUBMISSIONS_FILE, []),
     readJsonSafe(SNAPSHOTS_FILE, []),
+    readJsonSafe(EXECUTIONS_FILE, []),
     readJsonSafe(JUDGMENTS_FILE, []),
     readJsonSafe(ALERTS_FILE, []),
     readJsonSafe(CODEPULSE_ACTIVITIES_FILE, []),
@@ -71,16 +77,17 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     throw Object.assign(new Error('TERM_NOT_FOUND'), { status: 404, code: 'TERM_NOT_FOUND' });
   }
 
-  // D-01: Combine primary submissions with codepulse submissions
   const submissionMap = new Map();
   for (const s of [...rawSubmissions, ...rawCodepulseSubmissions]) {
     if (s && s.id) submissionMap.set(s.id, s);
   }
-  const submissions = [...submissionMap.values()];
+  const allSubmissions = [...submissionMap.values()];
 
   const termClassrooms = classrooms.filter((classroom) =>
     (classroom.termId ? classroom.termId === termId : true));
   const classroomIds = new Set(termClassrooms.map((classroom) => classroom.id));
+  const termMemberships = memberships.filter((membership) =>
+    membership.termId === termId || classroomIds.has(membership.classroomId));
 
   const termAssignments = assignments.filter((assignment) =>
     (assignment.termId ? assignment.termId === termId : (classroomIds.size === 0 || classroomIds.has(assignment.classroomId))));
@@ -103,11 +110,19 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
       || workspaceIds.has(record.workspaceId)
       || (!record.termId && !record.classroomId && !record.assignmentId && !record.workspaceId));
 
-  const termSubmissions = submissions.filter(belongsToTerm);
-  const submissionIds = new Set(termSubmissions.map((s) => s.id));
+  const termSubmissions = rawSubmissions.filter(belongsToTerm);
+  const termCodepulseSubmissions = rawCodepulseSubmissions.filter(belongsToTerm);
+  const submissionIds = new Set(
+    allSubmissions.filter(belongsToTerm).map((submission) => submission.id),
+  );
 
   const termSnapshots = snapshots.filter((s) =>
     s.termId === termId || workspaceIds.has(s.workspaceId));
+
+  const termExecutions = executions.filter((execution) =>
+    execution.termId === termId
+    || workspaceIds.has(execution.workspaceId)
+    || submissionIds.has(execution.submissionId));
 
   const termJudgments = judgments.filter((j) =>
     j.termId === termId || submissionIds.has(j.submissionId) || workspaceIds.has(j.workspaceId));
@@ -126,12 +141,15 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     tables: {
       terms: terms.filter((term) => term.id === termId),
       classrooms: termClassrooms,
+      memberships: termMemberships,
       assignments: termAssignments,
       assignmentVersions: termAssignmentVersions,
       labs: termLabs,
       workspaces: termWorkspaces,
       submissions: termSubmissions,
+      codepulseSubmissions: termCodepulseSubmissions,
       snapshots: termSnapshots,
+      executions: termExecutions,
       judgments: termJudgments,
       alerts: termAlerts,
       activities: termActivities,
@@ -157,12 +175,15 @@ export async function createSemesterBackup({ actorEmail, termId = 'term-2026-1' 
     status: 'VERIFIED',
     recordCounts: {
       classrooms: termClassrooms.length,
+      memberships: termMemberships.length,
       assignments: termAssignments.length,
       assignmentVersions: termAssignmentVersions.length,
       labs: termLabs.length,
       workspaces: termWorkspaces.length,
       submissions: termSubmissions.length,
+      codepulseSubmissions: termCodepulseSubmissions.length,
       snapshots: termSnapshots.length,
+      executions: termExecutions.length,
       judgments: termJudgments.length,
       alerts: termAlerts.length,
     },
@@ -322,12 +343,15 @@ export async function restoreSemesterBackup(backupId, actorEmail = 'admin@gmail.
   const {
     terms = [],
     classrooms = [],
+    memberships = [],
     assignments = [],
     assignmentVersions = [],
     labs = [],
     workspaces = [],
     submissions = [],
+    codepulseSubmissions = [],
     snapshots = [],
+    executions = [],
     judgments = [],
     alerts = [],
     activities = [],
@@ -346,12 +370,15 @@ export async function restoreSemesterBackup(backupId, actorEmail = 'admin@gmail.
   await Promise.all([
     upsertFile(TERMS_FILE, terms),
     upsertFile(CLASSROOMS_FILE, classrooms),
+    upsertFile(MEMBERSHIPS_FILE, memberships),
     upsertFile(ASSIGNMENTS_FILE, assignments),
     upsertFile(ASSIGNMENT_VERSIONS_FILE, assignmentVersions),
     upsertFile(LABS_FILE, labs),
     upsertFile(WORKSPACES_FILE, workspaces),
     upsertFile(SUBMISSIONS_FILE, submissions),
+    upsertFile(CODEPULSE_SUBMISSIONS_FILE, codepulseSubmissions),
     upsertFile(SNAPSHOTS_FILE, snapshots),
+    upsertFile(EXECUTIONS_FILE, executions),
     upsertFile(JUDGMENTS_FILE, judgments),
     upsertFile(ALERTS_FILE, alerts),
     upsertFile(CODEPULSE_ACTIVITIES_FILE, activities),
@@ -374,12 +401,14 @@ export async function restoreSemesterBackup(backupId, actorEmail = 'admin@gmail.
     restoredCounts: {
       terms: terms.length,
       classrooms: classrooms.length,
+      memberships: memberships.length,
       assignments: assignments.length,
       assignmentVersions: assignmentVersions.length,
       labs: labs.length,
       workspaces: workspaces.length,
       submissions: submissions.length,
       snapshots: snapshots.length,
+      executions: executions.length,
       judgments: judgments.length,
       alerts: alerts.length,
     },
