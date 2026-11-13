@@ -72,6 +72,7 @@ export function SystemMonitoringPage() {
   const [backups, setBackups] = useState<SemesterBackup[]>([]);
   const [backupCreating, setBackupCreating] = useState(false);
   const [drillRunning, setDrillRunning] = useState<string | null>(null);
+  const [restoreRunning, setRestoreRunning] = useState<string | null>(null);
   const [drillResult, setDrillResult] = useState<DrillResult | null>(null);
 
   // Session report state
@@ -218,6 +219,24 @@ export function SystemMonitoringPage() {
       showNotification('Lỗi trong quá trình diễn tập phục hồi.', 'error');
     } finally {
       setDrillRunning(null);
+    }
+  };
+
+  const handleRestore = async (backupId: string) => {
+    if (!window.confirm('Bạn có chắc chắn muốn khôi phục dữ liệu học kỳ từ bản sao lưu này? Dữ liệu hiện tại của học kỳ sẽ được cập nhật.')) {
+      return;
+    }
+    setRestoreRunning(backupId);
+    try {
+      const res = await adminOperationsApi.restoreBackup(backupId);
+      showNotification(`Khôi phục dữ liệu học kỳ ${res.termId} thành công!`);
+      await loadBackups();
+      await loadAuditLogs();
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Lỗi khi khôi phục bản sao lưu.';
+      showNotification(msg, 'error');
+    } finally {
+      setRestoreRunning(null);
     }
   };
 
@@ -756,13 +775,22 @@ export function SystemMonitoringPage() {
                           {b.recordCounts.workspaces} workspaces, {b.recordCounts.submissions} bài nộp
                         </td>
                         <td className="p-3 text-right">
-                          <button
-                            disabled={drillRunning === b.id}
-                            onClick={() => handleRunDrill(b.id)}
-                            className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
-                          >
-                            {drillRunning === b.id ? 'Đang kiểm tra...' : 'Diễn tập phục hồi'}
-                          </button>
+                          <div className="flex items-center justify-end gap-2">
+                            <button
+                              disabled={drillRunning === b.id}
+                              onClick={() => handleRunDrill(b.id)}
+                              className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition hover:bg-slate-50"
+                            >
+                              {drillRunning === b.id ? 'Đang kiểm tra...' : 'Diễn tập phục hồi'}
+                            </button>
+                            <button
+                              disabled={restoreRunning === b.id}
+                              onClick={() => handleRestore(b.id)}
+                              className="rounded-md border border-blue-600 bg-blue-600 px-2.5 py-1 text-xs font-medium text-white transition hover:bg-blue-700 disabled:opacity-50"
+                            >
+                              {restoreRunning === b.id ? 'Đang khôi phục...' : 'Khôi phục'}
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}

@@ -294,6 +294,7 @@ const executions = createExecutionQueue({
 });
 
 export const getCodePulseExecutionQueueStats = () => executions.getStats();
+export const getCodePulseAiQueueStats = () => (typeof issueDetection.getQueueStats === 'function' ? issueDetection.getQueueStats().pendingCount : 0);
 
 export const initializeCodePulseExecutions = async () => {
   await executions.list();
@@ -1453,12 +1454,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     const completedAt = new Date().toISOString();
     const updated = { ...current, status: 'RESETDONE', resetCompletedAt: completedAt };
-    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
     const record = {
       id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'COMPLETE',
       executedAt, completedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation, errors: [], immutable: true,
     };
+    // AC-16e (D-02): Persist COMPLETE reset audit record first to guarantee audit durability before marking term RESETDONE
     await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
     sendJson(response, 200, { item: updated, resetRecord: record });
     return;
   }

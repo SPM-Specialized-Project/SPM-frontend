@@ -21,19 +21,30 @@ await Promise.all([
     { id: 'assignment-test', classroomId: 'class-test' },
     { id: 'assignment-other', classroomId: 'class-other' },
   ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-assignment-versions.json'), JSON.stringify([
+    { id: 'version-test', assignmentId: 'assignment-test', version: 1 },
+    { id: 'version-other', assignmentId: 'assignment-other', version: 1 },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-labs.json'), JSON.stringify([
+    { id: 'lab-test', classroomId: 'class-test' },
+  ])),
   writeFile(path.join(testDataDirectory, 'codepulse-workspaces.json'), JSON.stringify([
     { id: 'workspace-test', classroomId: 'class-test', assignmentId: 'assignment-test' },
     { id: 'workspace-other', classroomId: 'class-other', assignmentId: 'assignment-other' },
   ])),
-  writeFile(path.join(testDataDirectory, 'codepulse-submissions.json'), JSON.stringify([
+  writeFile(path.join(testDataDirectory, 'submissions.json'), JSON.stringify([
     { id: 'submission-test', classroomId: 'class-test', assignmentId: 'assignment-test', workspaceId: 'workspace-test' },
     { id: 'submission-other', classroomId: 'class-other', assignmentId: 'assignment-other', workspaceId: 'workspace-other' },
+  ])),
+  writeFile(path.join(testDataDirectory, 'codepulse-snapshots.json'), JSON.stringify([
+    { id: 'snapshot-test', workspaceId: 'workspace-test' },
   ])),
   writeFile(path.join(testDataDirectory, 'codepulse-alerts.json'), JSON.stringify([
     { id: 'alert-test', classroomId: 'class-test' },
     { id: 'alert-other', classroomId: 'class-other' },
   ])),
 ]);
+
 const {
   getSystemOperationsHealth,
   getRequestTrace,
@@ -45,6 +56,7 @@ const {
   getBackups,
   createSemesterBackup,
   verifyBackupDisasterRecovery,
+  restoreSemesterBackup,
 } = await import('../backups.mjs');
 
 test('Backup list contains only persisted records', async () => {
@@ -56,18 +68,22 @@ test.after(async () => {
 });
 
 test('Admin Operations - System Health & Worker Pool', async () => {
-  const health = await getSystemOperationsHealth({ pendingCount: 2, activeCount: 1, totalWorkers: 2 });
+  const health = await getSystemOperationsHealth(
+    { pendingCount: 2, activeCount: 1, totalWorkers: 2 },
+    { pendingCount: 3, inFlightCount: 1 },
+  );
 
   assert.ok(health);
   assert.equal(health.queueLength, 2);
   assert.equal(health.runningExecutions, 1);
+  assert.equal(health.aiAssessmentQueue, 3);
   assert.equal(health.workerStatus.totalWorkers, 2);
   assert.equal(health.workerStatus.activeWorkers, 1);
   assert.equal(health.workerStatus.idleWorkers, 1);
   assert.equal(health.workerStatus.poolHealth, 'HEALTHY');
-  assert.equal(health.latency.p50Ms, null);
-  assert.equal(health.latency.p95Ms, null);
-  assert.equal(health.errorRate.percentage, null);
+  assert.equal(health.latency.p50Ms, 0);
+  assert.equal(health.latency.p95Ms, 0);
+  assert.equal(health.errorRate.percentage, 0);
 });
 
 test('Admin Operations - Request Trace Lookup and Sensitive Field Redaction', async () => {
@@ -108,25 +124,30 @@ test('Admin Operations - Request Trace Lookup and Sensitive Field Redaction', as
   assert.equal(await getRequestTrace('missing-trace-id'), null);
 });
 
-test('Admin Operations - Audit Logs Append-Only Recording', async () => {
+test('Admin Operations - Audit Logs Append-Only Recording & Sensitive Data Redaction (D-05, D-08)', async () => {
   const logged = await recordAuditLog({
     actor: 'admin@test.com',
     action: 'TEST_ACTION',
     target: 'TestTarget',
     requestId: 'req-audit-test',
     result: 'SUCCESS',
-    details: 'Audit log unit test verification.',
+    details: 'User password=mySecret123 with Bearer eyJhbGciOiJIUzI1NiIn and sourceCode: #include <iostream>',
   });
 
   assert.ok(logged.id);
   assert.equal(logged.action, 'TEST_ACTION');
+  // Sensitive redaction verification
+  assert.equal(logged.details.includes('mySecret123'), false, 'Password must be redacted in audit details');
+  assert.equal(logged.details.includes('eyJhbGciOiJIUzI1NiIn'), false, 'Bearer token must be redacted');
+  assert.equal(logged.details.includes('[REDACTED_PASSWORD]'), true);
+  assert.equal(logged.details.includes('[REDACTED_TOKEN]'), true);
 
   const logs = await getAuditLogs();
   const found = logs.find((l) => l.id === logged.id);
   assert.ok(found, 'Recorded log should appear in audit logs list');
 });
 
-test('Semester Data Retention & Backup - Backup Creation & Disaster Recovery Drill', async () => {
+test('Semester Data Retention & Backup - Backup Creation, Verification & Restoration (D-01, D-03, D-04)', async () => {
   const backup = await createSemesterBackup({
     actorEmail: 'admin@test.com',
     termId: 'term-2026-test',
@@ -156,6 +177,22 @@ test('Semester Data Retention & Backup - Backup Creation & Disaster Recovery Dri
   assert.equal(drillResult.checksumMatch, true, 'Checksum must match stored SHA-256');
   assert.equal(drillResult.jsonValid, true, 'Backup JSON structure must be valid');
   assert.equal(drillResult.referentialIntegrity, true, 'Referential integrity must pass');
+
+  // Test Restore Functionality (D-04 / AC-16c)
+  // Simulate deleting the active classroom and workspace
+  await writeFile(path.join(testDataDirectory, 'codepulse-classrooms.json'), JSON.stringify([]));
+  await writeFile(path.join(testDataDirectory, 'codepulse-workspaces.json'), JSON.stringify([]));
+
+  const restoreResult = await restoreSemesterBackup(backup.id, 'admin@test.com');
+  assert.equal(restoreResult.success, true);
+  assert.equal(restoreResult.termId, 'term-2026-test');
+
+  // Verify records were restored back to disk
+  const restoredClassrooms = JSON.parse(await readFile(path.join(testDataDirectory, 'codepulse-classrooms.json'), 'utf8'));
+  assert.ok(restoredClassrooms.some((c) => c.id === 'class-test'), 'Classroom must be restored');
+
+  const restoredWorkspaces = JSON.parse(await readFile(path.join(testDataDirectory, 'codepulse-workspaces.json'), 'utf8'));
+  assert.ok(restoredWorkspaces.some((w) => w.id === 'workspace-test'), 'Workspace must be restored');
 });
 
 test('Disaster recovery drill fails closed for tampered, malformed, missing, and broken-reference backups', async () => {
