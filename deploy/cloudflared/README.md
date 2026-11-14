@@ -12,12 +12,12 @@ The default `main` and `staging` GitHub Actions flows do not require this named
 tunnel. They use two independent Cloudflare Quick Tunnels instead:
 
 - `main` -> Nginx on `127.0.0.1:80`
-- `staging` -> Nginx on `127.0.0.1:8080`
+- `staging` -> Nginx on `127.0.0.1:18080`
 - Gitea -> Nginx `/git/` -> `127.0.0.1:8211`
 
 Quick Tunnel links are random `trycloudflare.com` URLs and can change when a
 tunnel restarts. They are for staging/testing, not stable production hosting.
-The public URL is HTTPS; do not append the origin port (`:80`, `:8080`, or
+The public URL is HTTPS; do not append the origin port (`:80`, `:18080`, or
 `:8211`) to it. The Gitea route is `<public-url>/git/`.
 
 The repository installs Quick Tunnels as persistent systemd services inside WSL2 through
