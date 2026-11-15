@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -Eeuo pipefail
 
 if [[ $# -ne 2 ]]; then
   echo "usage: spm-staging-deploy <github-workspace> <release-id>" >&2
@@ -11,7 +11,18 @@ release_id="$2"
 app_root='/opt/spm-frontend-staging'
 release_root="$app_root/releases"
 release_dir="$release_root/$release_id"
-temporary_dir="$release_root/.${release_id}.tmp.$$"
+temporary_dir=''
+release_stage=''
+redirects_conf='/etc/nginx/conf.d/spm-observability-redirects.conf'
+redirects_source="$source_root/frontend/dist/observability-redirects.conf"
+redirects_tmp="/etc/nginx/conf.d/.spm-observability-redirects.tmp.$$"
+current_link="$app_root/current"
+current_next="$app_root/.current.next.$$"
+previous_current=''
+had_previous_current=0
+had_previous_redirects=0
+redirects_changed=0
+current_switched=0
 
 if [[ ! "$release_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
   echo "Invalid release id" >&2
@@ -23,43 +34,152 @@ if [[ ! -d "$source_root/frontend/dist" || ! -f "$source_root/backend/server.mjs
   exit 66
 fi
 
-if [[ -e "$release_dir" || -e "$temporary_dir" ]]; then
-  echo "Release already exists: $release_dir" >&2
-  exit 73
-fi
-
-install -d -o root -g spm -m 0755 "$temporary_dir/frontend" "$temporary_dir/backend"
-install -d -o spm -g spm -m 0750 "$app_root/shared/data"
-
-rsync -a --delete "$source_root/frontend/dist/" "$temporary_dir/frontend/"
-rsync -a --delete --exclude='data/*.json' "$source_root/backend/" "$temporary_dir/backend/"
-
-redirects_source="$source_root/frontend/dist/observability-redirects.conf"
 if [[ ! -s "$redirects_source" ]]; then
   echo "The built frontend is missing Nginx observability redirects: $redirects_source" >&2
   exit 66
 fi
-install -m 0644 "$redirects_source" /etc/nginx/conf.d/spm-observability-redirects.conf.tmp
-mv -f -- /etc/nginx/conf.d/spm-observability-redirects.conf.tmp \
-  /etc/nginx/conf.d/spm-observability-redirects.conf
 
-chown -R root:spm "$temporary_dir"
-find "$temporary_dir" -type d -exec chmod 0755 {} +
-find "$temporary_dir" -type f -exec chmod 0644 {} +
+install -d -o root -g spm -m 0755 "$release_root" "$app_root/shared/data"
+install -d -m 0755 /run/lock
+exec 9>/run/lock/spm-git-platform-deploy.lock
+flock --exclusive --timeout 600 9
 
-mv -T -- "$temporary_dir" "$release_dir"
-ln -sfn -- "$release_dir" "$app_root/current.next"
-mv -Tf -- "$app_root/current.next" "$app_root/current"
+if [[ -e "$release_dir" ]]; then
+  echo "Release already exists: $release_dir" >&2
+  exit 73
+fi
 
-systemctl restart spm-staging-backend
-nginx -t
-systemctl reload-or-restart nginx
+if [[ -L "$current_link" ]]; then
+  previous_current="$(readlink -- "$current_link")"
+  had_previous_current=1
+elif [[ -e "$current_link" ]]; then
+  echo "Refusing to replace a non-symlink current path: $current_link" >&2
+  exit 73
+fi
 
-curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:18080/api/health >/dev/null
-curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:18080/ >/dev/null
-curl --fail --silent --show-error --retry 10 --retry-delay 1 \
-  http://127.0.0.1:18080/git/ >/dev/null
+temporary_dir="$(mktemp -d "$release_root/.${release_id}.txn.XXXXXX")"
+release_stage="$temporary_dir/release"
+install -d -o root -g spm -m 0755 "$release_stage/frontend" "$release_stage/backend"
 
-echo "SPM staging deployed: $release_id"
+if [[ -e "$redirects_conf" || -L "$redirects_conf" ]]; then
+  cp -a -- "$redirects_conf" "$temporary_dir/previous-observability-redirects.conf"
+  had_previous_redirects=1
+fi
+
+retry_command() {
+  local description="$1"
+  shift
+  local attempt=1
+  local delay=1
+
+  while true; do
+    if "$@"; then return 0; fi
+    if (( attempt >= 4 )); then
+      echo "$description failed after $attempt attempts." >&2
+      return 1
+    fi
+    echo "$description failed; retrying in ${delay}s ($((attempt + 1))/4)." >&2
+    sleep "$delay"
+    delay=$((delay * 2))
+    if (( delay > 8 )); then delay=8; fi
+    attempt=$((attempt + 1))
+  done
+}
+
+check_url() {
+  local url="$1"
+  local attempt=1
+  local delay=1
+
+  while (( attempt <= 10 )); do
+    if curl --fail --silent --max-time 8 "$url" >/dev/null; then return 0; fi
+    if (( attempt < 10 )); then
+      echo "Readiness check failed for $url; retrying in ${delay}s ($((attempt + 1))/10)." >&2
+      sleep "$delay"
+      delay=$((delay * 2))
+      if (( delay > 8 )); then delay=8; fi
+    fi
+    attempt=$((attempt + 1))
+  done
+
+  echo "Readiness check failed after 10 attempts: $url" >&2
+  return 1
+}
+
+on_exit() {
+  local status="$1"
+  trap - EXIT
+
+  if (( status != 0 )) && (( current_switched || redirects_changed )); then
+    set +e
+    echo "Deployment failed; restoring the previous staging release." >&2
+
+    if (( current_switched )); then
+      if (( had_previous_current )); then
+        ln -s -- "$previous_current" "$current_next" && mv -Tf -- "$current_next" "$current_link"
+      else
+        rm -f -- "$current_link"
+      fi
+    fi
+
+    if (( redirects_changed )); then
+      if (( had_previous_redirects )); then
+        local restore_tmp="/etc/nginx/conf.d/.spm-observability-redirects.rollback.$$"
+        cp -a -- "$temporary_dir/previous-observability-redirects.conf" "$restore_tmp" \
+          && mv -f -- "$restore_tmp" "$redirects_conf"
+      else
+        rm -f -- "$redirects_conf"
+      fi
+    fi
+
+    if (( current_switched )); then
+      retry_command 'Restarting the previous staging backend' systemctl restart spm-staging-backend \
+        || echo 'Could not restart the previous staging backend automatically.' >&2
+      check_url 'http://127.0.0.1:18080/api/health' \
+        || echo 'The previous staging backend did not pass its health check after rollback.' >&2
+    fi
+
+    if (( current_switched || redirects_changed )); then
+      if nginx -t; then
+        retry_command 'Reloading Nginx after rollback' systemctl reload-or-restart nginx \
+          || echo 'Could not reload Nginx automatically after rollback.' >&2
+      else
+        echo 'Nginx configuration is invalid after rollback; inspect the Nginx error log.' >&2
+      fi
+    fi
+  fi
+
+  rm -f -- "$current_next" "$redirects_tmp"
+  if [[ -n "$temporary_dir" ]]; then rm -rf -- "$temporary_dir"; fi
+  exit "$status"
+}
+trap 'on_exit "$?"' EXIT
+
+rsync -a --delete "$source_root/frontend/dist/" "$release_stage/frontend/"
+rsync -a --delete --exclude='data/*.json' "$source_root/backend/" "$release_stage/backend/"
+
+chown -R root:spm "$release_stage"
+find "$release_stage" -type d -exec chmod 0755 {} +
+find "$release_stage" -type f -exec chmod 0644 {} +
+mv -T -- "$release_stage" "$release_dir"
+
+ln -s -- "$release_dir" "$current_next"
+current_switched=1
+mv -Tf -- "$current_next" "$current_link"
+
+install -m 0644 "$redirects_source" "$redirects_tmp"
+redirects_changed=1
+mv -f -- "$redirects_tmp" "$redirects_conf"
+
+retry_command 'Restarting the staging backend' systemctl restart spm-staging-backend
+if ! nginx -t; then
+  echo 'Nginx configuration test failed.' >&2
+  exit 78
+fi
+retry_command 'Reloading Nginx' systemctl reload-or-restart nginx
+
+check_url 'http://127.0.0.1:18080/api/health'
+check_url 'http://127.0.0.1:18080/'
+check_url 'http://127.0.0.1:18080/git/'
+
+echo "SPM staging deployed and healthy: $release_id"
