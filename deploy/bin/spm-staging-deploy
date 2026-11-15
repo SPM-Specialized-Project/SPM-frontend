@@ -39,7 +39,8 @@ if [[ ! -s "$redirects_source" ]]; then
   exit 66
 fi
 
-install -d -o root -g spm -m 0755 "$release_root" "$app_root/shared/data"
+install -d -o root -g spm -m 0755 "$release_root"
+install -d -o spm -g spm -m 0750 "$app_root/shared/data"
 install -d -m 0755 /run/lock
 exec 9>/run/lock/spm-git-platform-deploy.lock
 flock --exclusive --timeout 600 9
