@@ -30,14 +30,14 @@ test('Gitea redirects preserve the public HTTPS URL behind the tunnel', { timeou
   let started = false;
   try {
     docker('run', '--detach', '--rm', '--name', name,
-      '--publish', '127.0.0.1::80', '--publish', '127.0.0.1::8080',
+      '--publish', '127.0.0.1::80', '--publish', '127.0.0.1::18080',
       '--mount', 'type=bind,source=' + nginxDirectory + ',target=/etc/nginx/conf.d,readonly',
       'nginx:stable-alpine');
     started = true;
     docker('exec', name, 'nginx', '-t');
     const ports = JSON.parse(docker('inspect', name))[0].NetworkSettings.Ports;
 
-    for (const [environment, containerPort] of [['main', '80'], ['staging', '8080']]) {
+    for (const [environment, containerPort] of [['main', '80'], ['staging', '18080']]) {
       await t.test(environment + ' /git redirects without exposing the origin scheme or port', async () => {
         const publicUrl = new URL('https://example.trycloudflare.com/git');
         const originUrl = 'http://127.0.0.1:' + ports[containerPort + '/tcp'][0].HostPort + '/git';

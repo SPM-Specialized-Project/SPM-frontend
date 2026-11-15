@@ -196,5 +196,5 @@ jobs:
           - Repository owner for main: configured GITEA_MAIN_OWNER, or codepulse-bot-main.
           - Gitea uses the same PostgreSQL database and volumes as staging.
 
-          > The public URL is HTTPS. Do not append the WSL origin port (for example `:8080`).
+          > The public URL is HTTPS. Do not append the WSL origin port (for example `:18080`).
           "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

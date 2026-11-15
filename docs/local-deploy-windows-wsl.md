@@ -39,7 +39,7 @@ Staging and main share the GitHub Actions deployment concurrency group. They can
 
 | Component | Main in WSL | Staging in WSL |
 | --- | --- | --- |
-| Nginx/backend | `80 / 4000` | `8080 / 4011` |
+| Nginx/backend | `80 / 4000` | `18080 / 4011` |
 | Backend environment | `/etc/spm-frontend/backend.env` | `/etc/spm-frontend/staging.env` |
 | Application data | `/opt/spm-frontend/shared/data` | `/opt/spm-frontend-staging/shared/data` |
 | Backend service | `spm-backend.service` | `spm-staging-backend.service` |

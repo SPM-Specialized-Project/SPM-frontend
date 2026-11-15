@@ -175,6 +175,6 @@ jobs:
           - Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.
           - Backend Gitea token: verified by private repository/branch/file writes and saved in WSL.
           - Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.
-          - The public URL is HTTPS; do not append the WSL origin port (for example `:8080`).
+          - The public URL is HTTPS; do not append the WSL origin port (for example `:18080`).
           - Backend service: spm-staging-backend.service
           "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY

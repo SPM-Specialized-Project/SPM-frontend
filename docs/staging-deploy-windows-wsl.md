@@ -90,6 +90,6 @@ The availability precheck uses `RUNNER_STATUS_TOKEN` and the repository runner A
 
 The existing deployment setup preserves the Compose project and storage identities, initializes Gitea if needed, keeps a separate repository owner for main and staging, and writes integration settings to environment files inside Ubuntu. It installs the Linux Nginx, rsync and curl packages and enables the backend, Gitea and tunnel systemd services.
 
-The staging app uses Nginx/backend ports `8080/4011`; main uses `80/4000`. Gitea uses `127.0.0.1:8211` and SSH port `2222`. Both environments use the same Gitea/PostgreSQL/Redis Compose stack inside WSL. Staging application data is under `/opt/spm-frontend-staging/shared/data`; main data is under `/opt/spm-frontend/shared/data`.
+The staging app uses Nginx/backend ports `18080/4011`; main uses `80/4000`. Gitea uses `127.0.0.1:8211` and SSH port `2222`. Both environments use the same Gitea/PostgreSQL/Redis Compose stack inside WSL. Staging application data is under `/opt/spm-frontend-staging/shared/data`; main data is under `/opt/spm-frontend/shared/data`.
 
 The setup can keep existing volumes on repeat runs inside the same WSL distro. It cannot preserve data that remains only on the unavailable Debian machine.

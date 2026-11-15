@@ -33,7 +33,7 @@ POSTGRES_PASSWORD=replace-with-a-long-random-password
 `PUBLIC_HOST` must be the stable public hostname used in Gitea's canonical
 URL. A random Quick Tunnel URL changes after restart, so it is suitable for a
 temporary alias but not for a durable clone URL. Do not append the local
-origin port `:8080` or `:8211` to a `trycloudflare.com` URL.
+origin port `:18080` or `:8211` to a `trycloudflare.com` URL.
 
 The host Nginx configuration in `deploy/nginx/spm.conf` and
 `deploy/nginx/spm-staging.conf` proxies `/git/` to `127.0.0.1:8211`.
