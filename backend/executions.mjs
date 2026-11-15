@@ -102,6 +102,13 @@ export function createExecutionQueue({ read, mutate, onUpdate = async () => {}, 
   };
   return {
     async list() { await ready(); return (await read()).map(executionView); },
+    getStats() {
+      return {
+        pendingCount: pending.length,
+        activeCount: active,
+        totalWorkers: concurrency,
+      };
+    },
     blockTerm(termId) {
       blockedTerms.add(termId);
       return admission;

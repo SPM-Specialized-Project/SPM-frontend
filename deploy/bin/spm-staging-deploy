@@ -34,6 +34,15 @@ install -d -o spm -g spm -m 0750 "$app_root/shared/data"
 rsync -a --delete "$source_root/frontend/dist/" "$temporary_dir/frontend/"
 rsync -a --delete --exclude='data/*.json' "$source_root/backend/" "$temporary_dir/backend/"
 
+redirects_source="$source_root/frontend/dist/observability-redirects.conf"
+if [[ ! -s "$redirects_source" ]]; then
+  echo "The built frontend is missing Nginx observability redirects: $redirects_source" >&2
+  exit 66
+fi
+install -m 0644 "$redirects_source" /etc/nginx/conf.d/spm-observability-redirects.conf.tmp
+mv -f -- /etc/nginx/conf.d/spm-observability-redirects.conf.tmp \
+  /etc/nginx/conf.d/spm-observability-redirects.conf
+
 chown -R root:spm "$temporary_dir"
 find "$temporary_dir" -type d -exec chmod 0755 {} +
 find "$temporary_dir" -type f -exec chmod 0644 {} +

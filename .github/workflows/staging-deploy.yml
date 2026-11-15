@@ -76,6 +76,19 @@ jobs:
       - name: Build staging frontend
         env:
           VITE_BACKEND_URL: /api
+          VITE_OBSERVABILITY_ENV: staging
+          VITE_OBSERVABILITY_RELEASE: ${{ github.sha }}
+          VITE_DATADOG_APPLICATION_ID: ${{ vars.DATADOG_APPLICATION_ID }}
+          VITE_DATADOG_CLIENT_TOKEN: ${{ vars.DATADOG_CLIENT_TOKEN }}
+          VITE_DATADOG_SITE: ${{ vars.DATADOG_SITE }}
+          VITE_DATADOG_SESSION_SAMPLE_RATE: ${{ vars.DATADOG_SESSION_SAMPLE_RATE }}
+          VITE_DATADOG_SESSION_REPLAY_SAMPLE_RATE: ${{ vars.DATADOG_SESSION_REPLAY_SAMPLE_RATE }}
+          VITE_DATADOG_DASHBOARD_URL: ${{ vars.DATADOG_DASHBOARD_URL }}
+          VITE_SENTRY_DSN: ${{ vars.SENTRY_DSN }}
+          VITE_SENTRY_DASHBOARD_URL: ${{ vars.SENTRY_DASHBOARD_URL }}
+          VITE_GRAFANA_FARO_URL: ${{ vars.GRAFANA_FARO_URL }}
+          VITE_GRAFANA_APP_NAME: ${{ vars.GRAFANA_APP_NAME }}
+          VITE_GRAFANA_SESSION_SAMPLING_RATE: ${{ vars.GRAFANA_SESSION_SAMPLING_RATE }}
         working-directory: frontend
         run: |
           npm ci
@@ -156,6 +169,8 @@ jobs:
           ```
 
           - Backend health: [$env:STAGING_URL/api/health]($env:STAGING_URL/api/health)
+          - Local Grafana with Loki: [$env:STAGING_URL/observation/grafana/]($env:STAGING_URL/observation/grafana/)
+          - Datadog/Sentry: configure DATADOG_DASHBOARD_URL and SENTRY_DASHBOARD_URL to your account URLs.
           - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
           - Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.
           - Backend Gitea token: verified by private repository/branch/file writes and saved in WSL.
