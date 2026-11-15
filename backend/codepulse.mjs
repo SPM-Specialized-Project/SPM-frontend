@@ -1228,13 +1228,41 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       throw apiError(409, 'TERM_RESET_RECONCILIATION_FAILED', 'Không thể xác nhận reset vì chưa đối soát đủ dữ liệu.');
     }
     const completedAt = new Date().toISOString();
-    const updated = { ...current, status: 'RESETDONE', resetCompletedAt: completedAt };
-    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
-    const record = {
+    const completionRecord = {
       id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'COMPLETE',
       executedAt, completedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation, errors: [], immutable: true,
     };
-    await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+    let record;
+    try {
+      const existingResetRecords = await readRecords(resetRecordFile, initialResetRecords);
+      record = existingResetRecords
+        .filter((item) => item.termId === current.id && item.status === 'COMPLETE')
+        .sort((left, right) => Date.parse(right.completedAt ?? right.executedAt) - Date.parse(left.completedAt ?? left.executedAt))[0];
+      if (!record) {
+        record = completionRecord;
+        await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const incompleteRecord = {
+        ...completionRecord,
+        status: 'INCOMPLETE',
+        completedAt: undefined,
+        errors: [`Unable to persist reset completion audit: ${message}`],
+      };
+      try {
+        await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(incompleteRecord); return incompleteRecord; }, { durable: true });
+      } catch (auditError) {
+        console.error('Unable to persist incomplete term reset audit:', auditError);
+      }
+      throw apiError(500, 'TERM_RESET_INCOMPLETE', 'Data purge completed, but its audit could not be saved. Retry to complete audit.', {
+        resetRecordId: completionRecord.id,
+        auditError: message,
+      });
+    }
+
+    const updated = { ...current, status: 'RESETDONE', resetCompletedAt: record.completedAt };
+    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
     sendJson(response, 200, { item: updated, resetRecord: record });
     return;
   }
