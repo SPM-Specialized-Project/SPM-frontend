@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { defaultOllamaEndpoint, parseDefaultGateway } from '../ollama-endpoint.mjs';
+import { defaultOllamaEndpoint, isWslRuntime, parseDefaultGateway } from '../ollama-endpoint.mjs';
 
 const routeTable = [
   'Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT',
@@ -24,11 +24,17 @@ test('ignores down routes and non-default routes', () => {
 
 test('uses the WSL host route for Ollama only under WSL', () => {
   assert.equal(
-    defaultOllamaEndpoint({ platform: 'linux', isWsl: true, routeTable }),
+    defaultOllamaEndpoint({
+      platform: 'linux',
+      distroName: '',
+      kernelRelease: '6.18.33.1-microsoft-standard-WSL2',
+      routeTable,
+    }),
     'http://172.17.0.1:11434/api/chat',
   );
   assert.equal(
-    defaultOllamaEndpoint({ platform: 'linux', isWsl: false, routeTable }),
+    defaultOllamaEndpoint({ platform: 'linux', distroName: '', kernelRelease: '6.8.0-generic', routeTable }),
     'http://127.0.0.1:11434/api/chat',
   );
+  assert.equal(isWslRuntime({ platform: 'win32', distroName: 'Ubuntu-24.04' }), false);
 });

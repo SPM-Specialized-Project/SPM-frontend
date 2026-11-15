@@ -2,6 +2,20 @@ import { readFileSync } from 'node:fs';
 
 const LOCAL_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434/api/chat';
 
+export function isWslRuntime({
+  platform = process.platform,
+  distroName = process.env.WSL_DISTRO_NAME,
+  kernelRelease,
+} = {}) {
+  if (platform !== 'linux') return false;
+  if (distroName) return true;
+  try {
+    return /microsoft|wsl/i.test(kernelRelease ?? readFileSync('/proc/sys/kernel/osrelease', 'utf8'));
+  } catch {
+    return false;
+  }
+}
+
 export function parseDefaultGateway(routeTable) {
   if (typeof routeTable !== 'string') return null;
   const rows = routeTable.split(/\r?\n/).slice(1);
@@ -20,10 +34,11 @@ export function parseDefaultGateway(routeTable) {
 
 export function defaultOllamaEndpoint({
   platform = process.platform,
-  isWsl = Boolean(process.env.WSL_DISTRO_NAME),
+  distroName = process.env.WSL_DISTRO_NAME,
+  kernelRelease,
   routeTable,
 } = {}) {
-  if (platform !== 'linux' || !isWsl) return LOCAL_OLLAMA_ENDPOINT;
+  if (!isWslRuntime({ platform, distroName, kernelRelease })) return LOCAL_OLLAMA_ENDPOINT;
   try {
     const routes = routeTable ?? readFileSync('/proc/net/route', 'utf8');
     const gateway = parseDefaultGateway(routes);
