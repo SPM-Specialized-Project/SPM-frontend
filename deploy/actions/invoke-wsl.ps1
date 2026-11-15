@@ -32,7 +32,29 @@ if ([string]::IsNullOrWhiteSpace($env:GITHUB_WORKSPACE)) {
 $wsl = Get-Command 'wsl.exe' -ErrorAction SilentlyContinue
 if (-not $wsl) { throw 'WSL is unavailable. Install WSL 2 and an Ubuntu distribution on this Windows runner.' }
 
-& $wsl.Source --distribution $distribution --cd $env:GITHUB_WORKSPACE --exec node deploy/actions/wsl-deployment.mjs $env:SPM_WSL_PHASE $env:SPM_WSL_RELEASE_ID
-if ($LASTEXITCODE -ne 0) {
-  exit $LASTEXITCODE
+$wslArguments = @('--distribution', $distribution, '--cd', $env:GITHUB_WORKSPACE,
+  '--exec', 'node', 'deploy/actions/wsl-deployment.mjs', $env:SPM_WSL_PHASE)
+if (-not [string]::IsNullOrWhiteSpace($env:SPM_WSL_RELEASE_ID)) {
+  $wslArguments += $env:SPM_WSL_RELEASE_ID
+}
+
+$maxAttempts = if ($Phase -eq 'host-check') { 3 } else { 1 }
+for ($attempt = 1; $attempt -le $maxAttempts; $attempt += 1) {
+  $output = & $wsl.Source @wslArguments 2>&1
+  $exitCode = $LASTEXITCODE
+  $diagnostic = ($output | Out-String) -replace "`0", ''
+
+  if ($exitCode -eq 0) {
+    if ($output) { $output | Write-Output }
+    exit 0
+  }
+
+  if ($Phase -eq 'host-check' -and $diagnostic -match 'Wsl/Service/0x8007274c' -and $attempt -lt $maxAttempts) {
+    Write-Warning "WSL service timed out while starting the distro; retrying host-check ($($attempt + 1)/$maxAttempts)."
+    Start-Sleep -Seconds $attempt
+    continue
+  }
+
+  if ($diagnostic) { Write-Output $diagnostic.TrimEnd() }
+  exit $exitCode
 }

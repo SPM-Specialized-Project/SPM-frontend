@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
+import { defaultOllamaEndpoint } from './ollama-endpoint.mjs';
+
 export const APPROVED_PROBLEM_TYPES = [
   {
     id: 'INFINITE_RECURSION',
@@ -83,7 +85,7 @@ function createStateStore(file) {
   return { read, mutate };
 }
 const DEFAULT_OLLAMA_MODEL = 'qwen3:4b';
-const DEFAULT_OLLAMA_ENDPOINT = 'http://127.0.0.1:11434/api/chat';
+const DEFAULT_OLLAMA_ENDPOINT = defaultOllamaEndpoint();
 const DEFAULT_COLIBRI_ENDPOINT = 'http://127.0.0.1:8000/v1/chat/completions';
 const normalizedProviderName = (name) => {
   const value = name?.trim().toLowerCase();

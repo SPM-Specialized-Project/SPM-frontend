@@ -6,12 +6,12 @@ Immutable submissions queue a sandbox execution against their pinned assignment 
 
 ## Local AI providers
 
-The default provider is Ollama at `http://127.0.0.1:11434/api/chat`, using `qwen3:4b`. Both settings are overridable:
+The default provider is Ollama using `qwen3:4b`. It uses `http://127.0.0.1:11434/api/chat` on other platforms and discovers the Windows host address from the default route when the backend runs inside WSL2. Set `CODEPULSE_OLLAMA_ENDPOINT` to override the endpoint:
 
 The backend does not download models or start either inference server. The selected model must already be installed and its local server running; missing providers are recorded as failed assessments without affecting student requests.
 
 - `CODEPULSE_AI_PROVIDER`: `ollama` (default), `colibri`, or `openai`.
-- `CODEPULSE_OLLAMA_ENDPOINT`: Ollama chat endpoint; defaults to the local API above.
+- `CODEPULSE_OLLAMA_ENDPOINT`: Ollama chat endpoint; defaults to the local API above or the WSL host gateway when running under WSL2.
 - `CODEPULSE_OLLAMA_MODEL`: Ollama model name; defaults to `qwen3:4b`.
 - `CODEPULSE_OLLAMA_KEEP_ALIVE`: how long Ollama keeps the model in memory; defaults to `5m` to avoid reloading between nearby assessments.
 - `CODEPULSE_AI_TIMEOUT_MS`: per-provider timeout; defaults to 60 seconds and is capped at 180 seconds.

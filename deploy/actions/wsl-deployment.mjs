@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publicRootUrl } from './deployment-lib.mjs';
+import { retry } from './retry.mjs';
 
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
 const repository = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
@@ -21,9 +22,36 @@ function run(command, args, { cwd = workspace, env = process.env, timeout = 300_
   const printOutput = !quiet || result.error || result.status !== 0;
   if (result.stdout && printOutput) process.stdout.write(result.stdout);
   if (result.stderr && printOutput) process.stderr.write(result.stderr);
-  if (result.error) throw new Error(`${command} could not run: ${result.error.message}`);
-  if (result.status !== 0) throw new Error(`${command} failed with exit code ${result.status ?? 'unknown'}.`);
+  if (result.error) {
+    const error = new Error(`${command} could not run: ${result.error.message}`);
+    error.spawnCode = result.error.code;
+    throw error;
+  }
+  if (result.status !== 0) {
+    const error = new Error(`${command} failed with exit code ${result.status ?? 'unknown'}.`);
+    error.exitCode = result.status;
+    throw error;
+  }
   return result.stdout || '';
+}
+
+function runWithRetry(command, args, options = {}) {
+  const {
+    retryAttempts = 3,
+    retryDelayMs = 1_000,
+    maxRetryDelayMs = 8_000,
+    shouldRetry = (error) => error.spawnCode !== 'ETIMEDOUT',
+    ...runOptions
+  } = options;
+  return retry(() => run(command, args, runOptions), {
+    attempts: retryAttempts,
+    initialDelayMs: retryDelayMs,
+    maxDelayMs: maxRetryDelayMs,
+    shouldRetry,
+    onRetry: (error, attempt, delayMs) => {
+      console.warn(`${command} failed (${error.message}); retrying in ${delayMs} ms (${attempt}/${retryAttempts}).`);
+    },
+  });
 }
 
 function assertWslHost() {
@@ -36,9 +64,9 @@ function assertWslHost() {
   if (Number(process.versions.node.split('.')[0]) < 22) {
     throw new Error(`Node.js 22 or newer is required inside WSL2; found ${process.versions.node}.`);
   }
-  run('docker', ['info'], { quiet: true });
-  run('docker', ['compose', 'version'], { quiet: true });
-  run('cloudflared', ['--version'], { quiet: true });
+  runWithRetry('docker', ['info'], { quiet: true, timeout: 45_000 });
+  runWithRetry('docker', ['compose', 'version'], { quiet: true, timeout: 45_000 });
+  runWithRetry('cloudflared', ['--version'], { quiet: true, timeout: 45_000 });
 }
 
 function runSetup(step) {
@@ -47,22 +75,28 @@ function runSetup(step) {
   });
 }
 
-async function requestOk(url, attempts = 1) {
-  let lastError;
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15_000) });
-      if (!response.ok) throw new Error(`HTTP ${response.status} at ${url}`);
-      if (new URL(response.url).protocol !== 'https:' && url.startsWith('https://')) {
-        throw new Error(`Unexpected non-HTTPS redirect for ${url}`);
-      }
-      return;
-    } catch (error) {
-      lastError = error;
-      if (attempt + 1 < attempts) await new Promise((resolve) => setTimeout(resolve, 1_000));
+async function requestOk(url, attempts = 8) {
+  return retry(async () => {
+    const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(10_000) });
+    if (!response.ok) {
+      const error = new Error(`HTTP ${response.status} at ${url}`);
+      error.retryable = [408, 429].includes(response.status) || response.status >= 500;
+      throw error;
     }
-  }
-  throw lastError;
+    if (new URL(response.url).protocol !== 'https:' && url.startsWith('https://')) {
+      const error = new Error(`Unexpected non-HTTPS redirect for ${url}`);
+      error.retryable = false;
+      throw error;
+    }
+  }, {
+    attempts,
+    initialDelayMs: 500,
+    maxDelayMs: 4_000,
+    shouldRetry: (error) => error.retryable !== false,
+    onRetry: (error, attempt, delayMs) => {
+      console.warn(`Health check failed (${error.message}); retrying in ${delayMs} ms (${attempt}/${attempts}).`);
+    },
+  });
 }
 
 function appendOutput(name, value) {
@@ -73,17 +107,20 @@ function appendOutput(name, value) {
 
 async function verifyLocal() {
   for (const route of ['/api/health', '/', '/git/', '/observation/grafana/api/health']) {
-    await requestOk(baseUrl + route, route === '/observation/grafana/api/health' ? 30 : 10);
+    await requestOk(baseUrl + route, route === '/observation/grafana/api/health' ? 12 : 8);
   }
   console.log(`Local ${deployment} services passed health checks at ${baseUrl}.`);
 }
 
 async function startTunnel() {
   const startedAt = new Date().toISOString();
-  run('sudo', ['-n', 'systemctl', 'restart', tunnelUnit]);
+  runWithRetry('sudo', ['-n', 'systemctl', 'restart', tunnelUnit], {
+    retryDelayMs: 2_000,
+    maxRetryDelayMs: 8_000,
+  });
   let publicUrl = '';
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const log = run('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--since', startedAt,
+    const log = runWithRetry('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--since', startedAt,
       '--no-pager', '-n', '100'], { quiet: true });
     publicUrl = (log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g) || [])
       .filter((url) => url !== 'https://api.trycloudflare.com').at(-1) || '';
@@ -91,7 +128,7 @@ async function startTunnel() {
     await new Promise((resolve) => setTimeout(resolve, 2_000));
   }
   if (!publicUrl) {
-    const log = run('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--no-pager', '-n', '100'], { quiet: true });
+    const log = runWithRetry('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--no-pager', '-n', '100'], { quiet: true });
     process.stderr.write(log);
     throw new Error(`${tunnelUnit} did not return a Cloudflare Quick Tunnel URL.`);
   }
@@ -105,7 +142,7 @@ async function verifyPublic() {
   publicRootUrl(origin);
   for (const route of ['/', '/api/health', '/git', '/git/', '/git/api/v1/version',
     '/observation/grafana/api/health']) {
-    await requestOk(origin + route, 30);
+    await requestOk(origin + route, 10);
   }
   console.log(`Public ${deployment} application and Gitea passed HTTPS checks at ${origin}.`);
 }
@@ -123,10 +160,16 @@ try {
     runSetup('check');
   } else if (phase === 'build-sandbox') {
     assertWslHost();
-    run('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox']);
+    runWithRetry('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+      timeout: 1_800_000,
+      retryDelayMs: 2_000,
+    });
   } else if (phase === 'tests') {
     assertWslHost();
-    run('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox']);
+    runWithRetry('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+      timeout: 1_800_000,
+      retryDelayMs: 2_000,
+    });
     run('npm', ['run', 'backend:test'], { timeout: 1_800_000 });
   } else if (phase === 'setup') {
     assertWslHost();
@@ -135,7 +178,19 @@ try {
     assertWslHost();
     const releaseId = process.env.SPM_WSL_RELEASE_ID || '';
     if (!/^[A-Za-z0-9._-]+$/.test(releaseId)) throw new Error('Invalid release ID.');
-    run('sudo', ['-n', deployCommand, workspace, releaseId], { timeout: 1_500_000 });
+    await retry((attempt) => {
+      const attemptReleaseId = attempt === 1 ? releaseId : `${releaseId}-retry-${attempt}`;
+      return run('sudo', ['-n', deployCommand, workspace, attemptReleaseId], { timeout: 1_500_000 });
+    }, {
+      attempts: 3,
+      initialDelayMs: 2_000,
+      maxDelayMs: 8_000,
+      shouldRetry: (error) => error.spawnCode !== 'ETIMEDOUT'
+        && ![64, 66, 69, 78].includes(error.exitCode),
+      onRetry: (error, attempt, delayMs) => {
+        console.warn(`Deployment attempt ${attempt} failed (${error.message}); retrying with a fresh release ID in ${delayMs} ms.`);
+      },
+    });
   } else if (phase === 'verify-local') {
     assertWslHost();
     await verifyLocal();

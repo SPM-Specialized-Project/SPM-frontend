@@ -37,7 +37,7 @@ jobs:
     name: Deploy staging on Windows (WSL2)
     if: inputs.runner_ready && (inputs.app_ref != '' || github.ref == 'refs/heads/staging')
     runs-on: [self-hosted, windows, x64, local-deploy]
-    timeout-minutes: 30
+    timeout-minutes: 45
     concurrency:
       group: spm-git-platform-deploy
       cancel-in-progress: false
