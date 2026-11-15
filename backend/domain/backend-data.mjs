@@ -268,17 +268,22 @@ const toListResponse = (items, viewerRole, viewerEmail, resourceType = 'generic'
   };
 };
 
-const toSubmissionView = (record, assignment, viewerRole, context = { term: null, classroom: null }) => ({
-  ...record,
-  assignment: {
-    id: assignment.id,
-    title: assignment.title,
-    dueDate: assignment.data.dueDate,
-  },
-  term: context.term,
-  classroom: context.classroom,
-  permissions: getPermissions(viewerRole, record.status),
-});
+const toSubmissionView = (record, assignment, viewerRole, context = { term: null, classroom: null }) => {
+  // CodePulse stores the pinned hidden test suite on the immutable submission.
+  // Generic course submission endpoints must never spread that server-only data.
+  const { gradingSnapshot: _gradingSnapshot, ...visibleRecord } = record;
+  return {
+    ...visibleRecord,
+    assignment: {
+      id: assignment.id,
+      title: assignment.title,
+      dueDate: assignment.data.dueDate,
+    },
+    term: context.term,
+    classroom: context.classroom,
+    permissions: getPermissions(viewerRole, record.status),
+  };
+};
 
 const createCourseSubmissionRecords = (course, assignmentId, students = course.students) =>
   students.map((student, index) => {
@@ -317,11 +322,12 @@ const createUser = (seedUser) => {
   picture: null,
   dateOfBirth: null,
   phone: null,
-  isManager: ['lecturer', 'coordinator', 'chairman'].includes(role),
+  isAdmin: role === 'admin',
+  isManager: ['admin', 'lecturer', 'coordinator', 'chairman'].includes(role),
   isStudent: role === 'student',
   isLecturer: role === 'lecturer',
-  isCoordinator: role === 'coordinator',
-  statisticalPermission: ['coordinator', 'chairman'].includes(role),
+  isCoordinator: ['admin', 'coordinator'].includes(role),
+  statisticalPermission: ['admin', 'coordinator', 'chairman', 'lecturer'].includes(role),
   isChairman: role === 'chairman',
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),

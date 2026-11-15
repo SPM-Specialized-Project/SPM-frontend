@@ -6,10 +6,7 @@
     "name": "CodePulse Demo",
     "description": "DSA practice classroom.",
     "status": "ACTIVE",
-    "lecturerEmail": "lecturer@gmail.com",
-    "managerEmails": [
-      "tutor@gmail.com"
-    ]
+    "lecturerEmail": "lecturer@gmail.com"
   },
   {
     "id": "class-2",
@@ -18,9 +15,6 @@
     "name": "CodePulse Other Term",
     "description": "Second demonstration classroom.",
     "status": "ACTIVE",
-    "lecturerEmail": "lecturer2@gmail.com",
-    "managerEmails": [
-      "tutor@gmail.com"
-    ]
+    "lecturerEmail": "lecturer2@gmail.com"
   }
 ]

@@ -54,6 +54,14 @@ test('SCRUM-91: lecturer assignment CRUD, verification, publish validation and v
   const tutor = await login('tutor@gmail.com', 'tutor123');
   const admin = await login('admin@gmail.com', 'admin123');
 
+  for (const status of ['ENDED', 'RESETTING', 'RESETDONE']) {
+    const invalidClassroomStatus = await api('/api/codepulse/classrooms/class-1', admin, 'PATCH', {
+      patch: { status },
+    });
+    assert.equal(invalidClassroomStatus.status, 400, `${status} must not be a classroom status`);
+    assert.equal(invalidClassroomStatus.data.code, 'INVALID_STATUS');
+  }
+
   const initialTerms = await api('/api/codepulse/terms?courseId=13', admin);
   assert.equal(initialTerms.status, 200);
   assert.equal(initialTerms.data.items.length, 2);

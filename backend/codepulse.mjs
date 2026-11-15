@@ -1,6 +1,13 @@
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
+import { evaluateExecutionAlert } from './alerts.mjs';
+import { recordTraceEvent } from './admin-operations.mjs';
+import {
+  createGradingQueue,
+  lecturerJudgmentView,
+  studentJudgmentView,
+} from './grading.mjs';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -19,6 +26,9 @@ import {
   WORKSPACES_FILE,
 SNAPSHOTS_FILE,
   EXECUTIONS_FILE,
+  RESET_RECORDS_FILE,
+  GRADING_JOBS_FILE,
+  JUDGMENTS_FILE,
   ISSUE_DETECTION_FILE,
   CORS_ORIGIN,
 } from './config.mjs';
@@ -56,6 +66,9 @@ const studentSubmissionsDirectory = STUDENT_SUBMISSIONS_DIRECTORY;
 const submissionFile = CODEPULSE_SUBMISSIONS_FILE;
 const activityFile = CODEPULSE_ACTIVITIES_FILE;
 const practiceWindowAuditFile = PRACTICE_WINDOW_AUDIT_FILE;
+const resetRecordFile = RESET_RECORDS_FILE;
+const gradingJobFile = GRADING_JOBS_FILE;
+const judgmentFile = JUDGMENTS_FILE;
 
 const ALLOWED_RUNTIMES = new Set(['PYTHON', 'CPP']);
 const MAX_CPU_TIME_LIMIT_MS = 10_000;
@@ -159,6 +172,9 @@ const initialLabs = [];
 const initialCodePulseSubmissions = [];
 const initialCodePulseActivities = [];
 const initialPracticeWindowAudit = [];
+const initialResetRecords = [];
+const initialGradingJobs = [];
+const initialJudgments = [];
 const initialWorkspaces = [
   { id: 'workspace-1', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student@gmail.com', sourceCode: 'print("Hello World")', revision: 0 },
   { id: 'workspace-2', classroomId: 'class-1', assignmentId: 'problem-1', termId: 'term-2026-1', ownerEmail: 'student2@gmail.com', sourceCode: 'print("Private")', revision: 0 },
@@ -218,18 +234,77 @@ const executions = createExecutionQueue({
   read: () => readRecords(EXECUTIONS_FILE, []),
   mutate: (callback) => mutate(EXECUTIONS_FILE, [], callback),
   onUpdate: async (execution) => {
-    if (!execution.workspaceId) return;
-    await mutate(workspaceFile, initialWorkspaces, (records) => {
-      const workspace = records.find((item) => item.id === execution.workspaceId);
-      if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
-        || execution.state === 'QUEUED')) {
-        workspace.executionResult = execution;
+    const writeTrace = async (stage, description, payload) => {
+      try {
+        await recordTraceEvent(execution.id, { stage, description, payload });
+      } catch (error) {
+        console.error('Failed to persist execution trace:', error.message);
       }
-    });
+    };
+
+    if (execution.state === 'QUEUED') {
+      await writeTrace('RECEIVED', 'Execution request validated and accepted.', {
+        sourceCode: execution.sourceCode,
+        mode: execution.mode,
+      });
+      await writeTrace('DISPATCHED', 'Execution admitted to the worker queue.', {
+        queueState: execution.state,
+      });
+    }
+
+    let targetWorkspace = null;
+    if (execution.workspaceId) {
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const workspace = records.find((item) => item.id === execution.workspaceId);
+        if (workspace && (!workspace.executionResult || workspace.executionResult.id === execution.id
+          || execution.state === 'QUEUED')) {
+          workspace.executionResult = execution;
+          targetWorkspace = structuredClone(workspace);
+        }
+      });
+    }
+
+    if (execution.state === 'FINISHED') {
+      try {
+        if (targetWorkspace) {
+          await evaluateExecutionAlert({
+            workspace: targetWorkspace,
+            executionResult: execution,
+            classroomId: targetWorkspace.classroomId,
+            studentEmail: targetWorkspace.ownerEmail,
+          });
+        }
+      } catch (err) {
+        console.error('Failed to evaluate execution alert:', err);
+      }
+
+      await writeTrace('EXECUTED', 'Execution worker completed the sandbox run.', {
+        status: execution.status,
+        runtime: execution.runtime,
+        durationMs: execution.runtimeMs,
+        exitCode: execution.exitCode,
+      });
+      await writeTrace('RECORDED', 'Execution result was persisted and alert evaluation completed.', {
+        state: execution.state,
+        passedCount: execution.passedCount,
+        totalCount: execution.totalCount,
+      });
+    }
   },
 });
 
-export const initializeCodePulseExecutions = () => executions.list();
+export const getCodePulseExecutionQueueStats = () => executions.getStats();
+export const getCodePulseAiQueueStats = () => (typeof issueDetection.getQueueStats === 'function' ? issueDetection.getQueueStats().pendingCount : 0);
+
+export const initializeCodePulseExecutions = async () => {
+  await executions.list();
+  const terms = await readRecords(termFile, initialTerms);
+  for (const item of terms) {
+    if (['RESETTING', 'RESETDONE'].includes(String(item.status).toUpperCase())) {
+      executions.blockTerm(item.id);
+    }
+  }
+};
 
 const issueDetection = createIssueDetectionService({
   file: ISSUE_DETECTION_FILE,
@@ -255,13 +330,19 @@ const assignmentSnapshot = (assignment, version, id, publication = {}) => ({
 });
 
 
-async function recordWorkspaceSnapshot({ workspace, trigger = 'SAVE', sourceCode = workspace.sourceCode, assignmentVersionId = workspace.assignmentVersionId }) {
+async function recordWorkspaceSnapshot({
+  workspace,
+  trigger = 'SAVE',
+  sourceCode = workspace.sourceCode,
+  assignmentId = workspace.assignmentId,
+  assignmentVersionId = workspace.assignmentVersionId,
+}) {
   const hash = createHash('sha256').update(sourceCode || '').digest('hex');
   const snapshot = {
     id: `snapshot-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
     workspaceId: workspace.id,
     classroomId: workspace.classroomId,
-    assignmentId: workspace.assignmentId,
+    assignmentId,
     assignmentVersionId: assignmentVersionId ?? null,
     studentEmail: workspace.ownerEmail,
     sourceCode: sourceCode || '',
@@ -513,6 +594,43 @@ const runAssignmentTestCases = async ({ assignment, sourceCode, testCases }) => 
   return results;
 };
 
+const grading = createGradingQueue({
+  readJobs: () => readRecords(gradingJobFile, initialGradingJobs),
+  mutateJobs: (callback) => mutate(gradingJobFile, initialGradingJobs, callback, { durable: true }),
+  readJudgments: () => readRecords(judgmentFile, initialJudgments),
+  mutateJudgments: (callback) => mutate(judgmentFile, initialJudgments, callback, { durable: true }),
+  readSubmissions,
+  mutateSubmissions,
+  loadAssignmentVersion: async (submission) => {
+    if (submission.gradingSnapshot?.id === submission.assignmentVersionId
+      && submission.gradingSnapshot.assignmentId === submission.assignmentId) {
+      return structuredClone(submission.gradingSnapshot);
+    }
+    const [versions, storedAssignments] = await Promise.all([
+      readRecords(assignmentVersionFile, initialAssignmentVersions),
+      readRecords(assignmentFile, initialAssignments),
+    ]);
+    const version = versions.find((item) => item.id === submission.assignmentVersionId
+      && item.assignmentId === submission.assignmentId);
+    if (!version) return null;
+    const assignment = storedAssignments.find((item) => item.id === submission.assignmentId);
+    if (!assignment && !version.testCases) return null;
+    return {
+      ...(assignment ?? {}),
+      ...structuredClone(version),
+      id: version.id,
+      assignmentId: version.assignmentId,
+      runtime: version.runtime ?? version.language ?? assignment?.runtime,
+      cpuTimeLimitMs: version.cpuTimeLimitMs ?? assignment?.cpuTimeLimitMs,
+      memoryLimitMb: version.memoryLimitMb ?? assignment?.memoryLimitMb,
+      testCases: normalizeTestCases(version.testCases ?? assignment?.testCases),
+      comparator: normalizeComparator(version.comparator ?? assignment?.comparator),
+    };
+  },
+});
+
+export const initializeCodePulseGrading = () => grading.initialize();
+
 export async function getCodePulseClassrooms() {
   return readRecords(classroomFile, initialClassrooms);
 }
@@ -691,6 +809,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       && new Date(item.startDate).getTime() <= Date.now()
       && new Date(item.endDate).getTime() > Date.now(),
   );
+  const rejectResetBlockedTerm = (termId) => {
+    const current = terms.find((item) => item.id === termId);
+    if (current && ['RESETTING', 'RESETDONE'].includes(String(current.status).toUpperCase())) {
+      throw apiError(409, 'TERM_RESET_IN_PROGRESS', 'Học kỳ không còn tiếp nhận bài nộp, run hoặc đánh giá AI.');
+    }
+  };
   const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
   const normalizeLabAssignment = (assignment) => {
     const { openAt, closeAt } = practiceWindowValues(assignment);
@@ -839,21 +963,26 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       : null;
     return { classroomItem, lab, labAssignment };
   };
-  const assessmentWorkspace = ({ workspace, classroomId, assignmentId, assignmentVersionId, ownerEmail, labId = null, labAssignmentId = null }) => workspace ?? ({
-    id: `workspace-${createHash('sha256').update([
-      classroomId, labId ?? '', labAssignmentId ?? '', assignmentId, normalizeEmail(ownerEmail),
-    ].join('|')).digest('hex').slice(0, 24)}`,
-    classroomId,
-    assignmentId,
-    assignmentVersionId,
-    termId: classroom(classroomId).termId,
-    labId,
-    labAssignmentId,
-    ownerEmail,
-  });
+  const assessmentWorkspace = ({ workspace, classroomId, assignmentId, assignmentVersionId, ownerEmail, labId = null, labAssignmentId = null }) => {
+    const existing = workspace ?? {};
+    return {
+      ...existing,
+      id: existing.id ?? `workspace-${createHash('sha256').update([
+        classroomId, labId ?? '', labAssignmentId ?? '', assignmentId, normalizeEmail(ownerEmail),
+      ].join('|')).digest('hex').slice(0, 24)}`,
+      classroomId: existing.classroomId ?? classroomId,
+      assignmentId: assignmentId ?? existing.assignmentId,
+      assignmentVersionId: assignmentVersionId ?? existing.assignmentVersionId,
+      termId: existing.termId ?? classroom(classroomId).termId,
+      labId: existing.labId ?? labId,
+      labAssignmentId: existing.labAssignmentId ?? labAssignmentId,
+      ownerEmail: existing.ownerEmail ?? ownerEmail,
+    };
+  };
   const resolveWorkspaceAssessmentVersion = (workspace, context) => {
+    const assignmentId = context.labAssignment?.assignmentId ?? workspace.assignmentId;
     const linkedAssignment = assignments.find((item) =>
-      item.id === workspace.assignmentId && item.classroomId === workspace.classroomId && item.status === 'PUBLISHED');
+      item.id === assignmentId && item.classroomId === workspace.classroomId && item.status === 'PUBLISHED');
     const versionId = context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId;
     if (linkedAssignment) {
       return versionId
@@ -861,7 +990,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         : latestPublishedAssignmentVersion(linkedAssignment);
     }
     const version = assignmentVersions.find((item) => item.id === versionId
-      && item.assignmentId === workspace.assignmentId
+      && item.assignmentId === assignmentId
       && item.classroomId === workspace.classroomId
       && item.status === 'PUBLISHED');
     return version ? {
@@ -871,13 +1000,24 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   };
   const enqueueAssessment = async (input) => {
     try {
-      return await issueDetection.trigger(input);
+      const sourceWorkspace = input.workspace;
+      const workspace = assessmentWorkspace({
+        workspace: sourceWorkspace,
+        classroomId: sourceWorkspace.classroomId,
+        assignmentId: input.assignmentVersion?.assignmentId ?? sourceWorkspace.assignmentId,
+        assignmentVersionId: input.assignmentVersion?.id ?? sourceWorkspace.assignmentVersionId,
+        ownerEmail: sourceWorkspace.ownerEmail,
+        labId: sourceWorkspace.labId ?? null,
+        labAssignmentId: sourceWorkspace.labAssignmentId ?? null,
+      });
+      return await issueDetection.trigger({ ...input, workspace });
     } catch (error) {
       console.error(`CodePulse assessment could not be queued (${error?.code ?? 'ASSESSMENT_QUEUE_ERROR'}).`);
       return null;
     }
   };
   const assertWorkspaceWritable = (workspace, context) => {
+    rejectResetBlockedTerm(context.classroomItem.termId);
     if (context.classroomItem.status === 'ARCHIVED') {
       throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
     }
@@ -910,7 +1050,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom is archived and read-only.');
       }
       if (currentAccess.practiceAccessReason === 'TERM_INACTIVE') {
-        throw apiError(409, 'PRACTICE_TERM_INACTIVE', 'The academic term is not active for submissions.');
+        throw apiError(403, 'PRACTICE_TERM_INACTIVE', 'The academic term is not active for submissions.');
       }
       if (currentAccess.practiceAccessReason === 'NOT_OPEN_YET') {
         throw apiError(409, 'PRACTICE_WINDOW_NOT_OPEN', 'The practice window has not opened yet.');
@@ -936,7 +1076,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     return value;
   };
-  const codeSubmissionView = (submission) => ({
+  const codeSubmissionView = (submission, judgment = null, viewerRole = user.role) => ({
     id: submission.id,
     workspaceId: submission.workspaceId,
     classroomId: submission.classroomId,
@@ -950,6 +1090,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     acceptedAt: submission.acceptedAt,
     status: submission.status,
     gradingAttempts: structuredClone(submission.gradingAttempts ?? []),
+    judgment: judgment
+      ? (viewerRole === 'student' ? studentJudgmentView(judgment) : lecturerJudgmentView(judgment))
+      : null,
   });
   const workspaceView = (workspace, context) => {
     const visibleWorkspace = { ...workspace };
@@ -965,6 +1108,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const revealedHintIds = new Set(workspace.hintProgress?.map((item) => item.hintId) ?? []);
     return {
       ...visibleWorkspace,
+      ...(visibleWorkspace.assignmentId
+        ? {}
+        : { assignmentId: context.labAssignment.assignmentId }),
       revision,
       executionResult: workspace.executionResult ?? null,
       problem: {
@@ -1154,12 +1300,220 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return pending;
   };
 
-  if (parts[2] === 'terms' && request.method === 'GET') {
+  if (parts[2] === 'terms' && !parts[3] && request.method === 'GET') {
     const canViewAllCourseTerms = ['admin', 'lecturer'].includes(user.role);
     const items = terms.filter((item) => item.courseId === requestedCourseId && (canViewAllCourseTerms
       || (isCurrentStudentTerm(item)
         && classrooms.some((classroomItem) => classroomItem.termId === item.id && canAccessClass(classroomItem)))));
     sendJson(response, 200, { items });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset' && parts[5] === 'start' && request.method === 'POST') {
+    if (user.role !== 'admin') deny();
+    const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
+    if (String(current.status).toUpperCase() !== 'ENDED') {
+      throw apiError(409, 'TERM_NOT_ENDED', 'Chỉ có thể bắt đầu reset từ trạng thái ENDED.');
+    }
+    if (!current.resetDate || new Date(current.resetDate).getTime() > Date.now()) {
+      throw apiError(409, 'RESET_BOUNDARY_NOT_REACHED', 'Reset chỉ được thực hiện tại ranh giới chuyển tiếp đã xác nhận.');
+    }
+    await executions.blockTerm(current.id);
+    const updated = { ...current, status: 'RESETTING', resetStartedAt: new Date().toISOString(), resetStartedBy: user.email };
+    try {
+      await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated));
+    } catch (error) {
+      await executions.unblockTerm(current.id);
+      throw error;
+    }
+    sendJson(response, 200, { item: updated });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset' && parts[5] === 'execute' && request.method === 'POST') {
+    if (user.role !== 'admin') deny();
+    const current = term(parts[3]);
+    if (current.courseId !== requestedCourseId) notFound();
+    if (String(current.status).toUpperCase() !== 'RESETTING') {
+      throw apiError(409, 'TERM_NOT_RESETTING', 'Term phải ở trạng thái RESETTING trước khi thực hiện purge.');
+    }
+
+    await executions.drainTerm(current.id);
+    const classroomIds = new Set(classrooms.filter((item) => item.termId === current.id).map((item) => item.id));
+    const workspaceIds = new Set();
+    const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
+    currentWorkspaces.filter((item) => item.termId === current.id || classroomIds.has(item.classroomId))
+      .forEach((item) => workspaceIds.add(item.id));
+    const currentSubmissions = await readSubmissions();
+    const currentCodePulseSubmissions = await readRecords(submissionFile, initialCodePulseSubmissions);
+    const submissionIds = new Set([
+      ...currentSubmissions,
+      ...currentCodePulseSubmissions,
+    ].filter((item) => item.termId === current.id || classroomIds.has(item.classroomId))
+      .map((item) => item.id));
+    await grading.drainSubmissions([...submissionIds]);
+    await issueDetection.drainClassrooms([...classroomIds]);
+    const executedAt = new Date().toISOString();
+    let affected = {};
+    const reconciliation = {};
+    try {
+      await mutate(workspaceFile, initialWorkspaces, (records) => {
+        const purged = records.filter((item) => item.termId === current.id || classroomIds.has(item.classroomId));
+        purged.forEach((item) => workspaceIds.add(item.id));
+        affected.workspaces = purged.length;
+        for (let index = records.length - 1; index >= 0; index -= 1) {
+          if (records[index].termId === current.id || classroomIds.has(records[index].classroomId)) records.splice(index, 1);
+        }
+      }, { durable: true });
+
+      await mutate(snapshotFile, initialSnapshots, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id
+          && !classroomIds.has(item.classroomId)
+          && !workspaceIds.has(item.workspaceId));
+        affected.snapshots = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutate(submissionFile, initialCodePulseSubmissions, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.submissions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutateSubmissions((records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.legacySubmissions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      });
+      await mutate(activityFile, initialCodePulseActivities, (records) => {
+        const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+        affected.activities = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+      await mutate(EXECUTIONS_FILE, [], (records) => {
+        const retained = records.filter((item) => item.termId !== current.id
+          && !classroomIds.has(item.classroomId)
+          && !workspaceIds.has(item.workspaceId));
+        affected.executions = records.length - retained.length;
+        records.splice(0, records.length, ...retained);
+      }, { durable: true });
+
+      const gradingCounts = await grading.purgeSubmissions([...submissionIds]);
+      affected.gradingJobs = gradingCounts.jobs;
+      affected.judgments = gradingCounts.judgments;
+      const issueDetectionCounts = await issueDetection.purgeClassrooms([...classroomIds], [...workspaceIds]);
+      affected.issueAssessments = issueDetectionCounts.assessments;
+      affected.issueCases = issueDetectionCounts.issueCases;
+      affected.issueEvidence = issueDetectionCounts.evidence;
+      affected.issueCaseTests = issueDetectionCounts.caseTests;
+
+      affected.studentSubmissionFiles = 0;
+      try {
+        const studentFiles = await readdir(studentSubmissionsDirectory, { withFileTypes: true });
+        for (const entry of studentFiles.filter((item) => item.isFile() && item.name.endsWith('.json'))) {
+          const file = path.join(studentSubmissionsDirectory, entry.name);
+          const records = JSON.parse(await readFile(file, 'utf8'));
+          if (!Array.isArray(records)) continue;
+          const retained = records.filter((item) => item.termId !== current.id && !classroomIds.has(item.classroomId));
+          affected.studentSubmissionFiles += records.length - retained.length;
+          if (retained.length === 0 && records.length > 0) await rm(file, { force: true });
+          else if (retained.length !== records.length) await writeFile(file, `${JSON.stringify(retained, null, 2)}\n`, 'utf8');
+        }
+      } catch (error) {
+        if (error?.code !== 'ENOENT') throw error;
+      }
+
+      reconciliation.workspaces = (await readRecords(workspaceFile, initialWorkspaces)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.snapshots = (await readRecords(snapshotFile, initialSnapshots)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId) && !workspaceIds.has(item.workspaceId));
+      reconciliation.submissions = (await readRecords(submissionFile, initialCodePulseSubmissions)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.legacySubmissions = (await readSubmissions()).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.activities = (await readRecords(activityFile, initialCodePulseActivities)).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId));
+      reconciliation.executions = (await readRecords(EXECUTIONS_FILE, [])).every((item) =>
+        item.termId !== current.id && !classroomIds.has(item.classroomId) && !workspaceIds.has(item.workspaceId));
+      const remainingGradingData = await grading.inspectSubmissions([...submissionIds]);
+      reconciliation.grading = remainingGradingData.jobs === 0 && remainingGradingData.judgments === 0;
+      const remainingIssueData = await issueDetection.inspectClassrooms([...classroomIds], [...workspaceIds]);
+      reconciliation.issueDetection = Object.values(remainingIssueData).every((count) => count === 0);
+      reconciliation.problemBank = true;
+    } catch (error) {
+      const record = {
+        id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'INCOMPLETE',
+        executedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation,
+        errors: [error instanceof Error ? error.message : String(error)], immutable: true,
+      };
+      await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+      throw apiError(500, 'TERM_RESET_INCOMPLETE', 'Reset đã ghi nhận lỗi và được đánh dấu chưa hoàn tất.', { resetRecordId: record.id });
+    }
+
+    if (!Object.values(reconciliation).every(Boolean)) {
+      throw apiError(409, 'TERM_RESET_RECONCILIATION_FAILED', 'Không thể xác nhận reset vì chưa đối soát đủ dữ liệu.');
+    }
+    const completedAt = new Date().toISOString();
+    const completionRecord = {
+      id: `reset-${randomUUID()}`, termId: current.id, courseId: current.courseId, status: 'COMPLETE',
+      executedAt, completedAt, executedBy: user.email, affectedRowCounts: affected, reconciliation, errors: [], immutable: true,
+    };
+    let record;
+    try {
+      const existingResetRecords = await readRecords(resetRecordFile, initialResetRecords);
+      record = existingResetRecords
+        .filter((item) => item.termId === current.id && item.status === 'COMPLETE')
+        .sort((left, right) => Date.parse(right.completedAt ?? right.executedAt) - Date.parse(left.completedAt ?? left.executedAt))[0];
+      if (!record) {
+        record = completionRecord;
+        await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(record); return record; }, { durable: true });
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const incompleteRecord = {
+        ...completionRecord,
+        status: 'INCOMPLETE',
+        completedAt: undefined,
+        errors: [`Unable to persist reset completion audit: ${message}`],
+      };
+      try {
+        await mutate(resetRecordFile, initialResetRecords, (records) => { records.push(incompleteRecord); return incompleteRecord; }, { durable: true });
+      } catch (auditError) {
+        console.error('Unable to persist incomplete term reset audit:', auditError);
+      }
+      throw apiError(500, 'TERM_RESET_INCOMPLETE', 'Data purge completed, but its audit could not be saved. Retry to complete audit.', {
+        resetRecordId: completionRecord.id,
+        auditError: message,
+      });
+    }
+
+    const updated = { ...current, status: 'RESETDONE', resetCompletedAt: record.completedAt };
+    await mutate(termFile, initialTerms, (records) => Object.assign(records.find((record) => record.id === current.id), updated), { durable: true });
+    sendJson(response, 200, { item: updated, resetRecord: record });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset-records' && request.method === 'GET') {
+    if (!['admin', 'lecturer'].includes(user.role)) deny();
+    const current = term(parts[3]);
+    const records = await readRecords(resetRecordFile, initialResetRecords);
+    sendJson(response, 200, { items: records.filter((item) => item.termId === current.id) });
+    return;
+  }
+
+  if (parts[2] === 'terms' && parts[3] && parts[4] === 'reset-records' && parts[5] && parts[6] === 'acknowledge' && request.method === 'POST') {
+    if (user.role !== 'lecturer') deny();
+    const records = await readRecords(resetRecordFile, initialResetRecords);
+    const record = records.find((item) => item.termId === parts[3] && item.id === parts[5]);
+    if (!record) notFound();
+    const acknowledgement = {
+      acknowledgedAt: new Date().toISOString(), acknowledgedBy: user.email,
+    };
+    const updated = await mutate(resetRecordFile, initialResetRecords, (items) => {
+      const currentRecord = items.find((item) => item.id === record.id);
+      currentRecord.acknowledgements = [...(currentRecord.acknowledgements ?? []), acknowledgement];
+      return currentRecord;
+    }, { durable: true });
+    sendJson(response, 200, { item: updated });
     return;
   }
 
@@ -1251,12 +1605,24 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const body = await readRequestBody(request);
     const current = term(parts[3]);
     if (current.courseId !== requestedCourseId) notFound();
+    if (['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'TERM_RESET_LOCKED', 'A term in reset or completed reset state is read-only.');
+    }
     const updated = { ...current, ...body.patch, courseId: current.courseId };
     if (!updated.name?.trim() || new Date(updated.endDate) <= new Date(updated.startDate)) {
       throw apiError(400, 'INVALID_TERM_DATES', 'Term có ngày không hợp lệ.');
     }
-    if (!['DRAFT', 'ACTIVE', 'ARCHIVED'].includes(updated.status)) {
+    if (!['DRAFT', 'ACTIVE', 'ENDED', 'RESETTING', 'RESETDONE', 'ARCHIVED'].includes(updated.status)) {
       throw apiError(400, 'INVALID_STATUS', 'Trạng thái term không hợp lệ.');
+    }
+    if (updated.status !== current.status && ['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'INVALID_STATUS_TRANSITION', 'Trạng thái reset chỉ có thể thay đổi qua workflow reset.');
+    }
+    if (updated.status !== current.status && ['RESETTING', 'RESETDONE'].includes(updated.status)) {
+      throw apiError(409, 'INVALID_STATUS_TRANSITION', 'Trạng thái reset chỉ có thể thay đổi qua workflow reset.');
+    }
+    if (updated.status === 'ENDED' && new Date(updated.endDate).getTime() > Date.now()) {
+      throw apiError(409, 'TERM_NOT_ENDED', 'Chỉ có thể kết thúc term tại hoặc sau ngày kết thúc đã cấu hình.');
     }
     await mutate(termFile, initialTerms, (records) => { Object.assign(records.find((record) => record.id === current.id), updated); return updated; });
     sendJson(response, 200, { item: updated });
@@ -1550,6 +1916,32 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs'
+    && parts[5] && parts[6] === 'submissions' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!isDsaManager(classroomItem)) deny();
+    const lab = labs.find((item) => item.id === parts[5] && item.classroomId === classroomItem.id) ?? notFound();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const labWorkspaceIds = new Set(workspaces
+      .filter((workspace) => workspace.classroomId === classroomItem.id && workspace.labId === lab.id)
+      .map((workspace) => workspace.id));
+    const submissions = await readSubmissions();
+    const items = await Promise.all(submissions
+      .filter((submission) => submission.kind === 'CODE_SUBMISSION'
+        && submission.classroomId === classroomItem.id
+        && submission.labId === lab.id
+        && labWorkspaceIds.has(submission.workspaceId))
+      .map(async (submission) => {
+        const judgment = submission.latestJudgmentId
+          ? await grading.getJudgment(submission.latestJudgmentId)
+          : null;
+        return codeSubmissionView(submission, judgment, user.role);
+      }));
+    items.sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
+    sendJson(response, 200, { items });
+    return;
+  }
+
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'POST') {
     const classroomItem = classroom(parts[3]);
     if (!isAssignedLecturer(classroomItem)) deny();
@@ -1726,9 +2118,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const currentWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
     let workspace = currentWorkspaces.find((item) =>
       item.classroomId === classroomItem.id
-      && item.assignmentId === assignment.id
       && (!practiceContext
-        ? !item.labAssignmentId
+        ? item.assignmentId === assignment.id && !item.labAssignmentId
         : item.labId === practiceContext.lab.id && item.labAssignmentId === practiceContext.labAssignment.id)
       && item.ownerEmail === user.email);
 
@@ -1793,6 +2184,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       return;
     }
 
+    await executions.runTermTask(classroomItem.termId, async () => {
     const body = await readRequestBody(request);
     const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : '';
     if (!sourceCode.trim()) throw apiError(400, 'SOURCE_CODE_REQUIRED', 'Hãy nhập code trước khi submit.');
@@ -1841,6 +2233,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       console.error(`CodePulse submission snapshot was unavailable (${error?.code ?? 'SNAPSHOT_WRITE_ERROR'}).`);
     }
     sendJson(response, 201, { item: submissionView(submission) });
+    });
     return;
   }
 
@@ -1854,7 +2247,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     && request.method === 'POST') {
     if (user.role !== 'student') deny();
     const classroomItem = classroom(parts[3]);
+    rejectResetBlockedTerm(classroomItem.termId);
     if (!canAccessClass(classroomItem)) deny();
+    await executions.runTermTask(classroomItem.termId, async () => {
     const practiceContext = labAssignmentContext({
       classroomId: classroomItem.id,
       labId: parts[5],
@@ -1953,6 +2348,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       },
     });
     sendJson(response, 201, { item: { ...submission, ...submissionView(submission) } });
+    });
     return;
   }
 
@@ -2062,7 +2458,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
 
     const queued = await executions.enqueue({ assignment: gradingAssignment, sourceCode, body,
-      assignmentId: assignment.id, classroomId: classroomItem.id, ownerEmail: user.email,
+      assignmentId: assignment.id, classroomId: classroomItem.id, termId: classroomItem.termId, ownerEmail: user.email,
       workspaceId: savedWorkspace?.id ?? null, labId: practiceContext?.lab.id ?? null,
       labAssignmentId: practiceContext?.labAssignment.id ?? null });
     if (user.role === 'student' && gradingAssignment.status === 'PUBLISHED') await markAssignmentVersionUsed(gradingAssignment.id);
@@ -2214,6 +2610,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (user.role !== 'admin') deny();
     const current = term(parts[3]);
     if (current.courseId !== requestedCourseId) notFound();
+    if (['RESETTING', 'RESETDONE'].includes(current.status)) {
+      throw apiError(409, 'TERM_RESET_LOCKED', 'A term in reset or completed reset state cannot be deleted.');
+    }
     if (classrooms.some((classroomItem) => classroomItem.termId === current.id)) {
       throw apiError(409, 'TERM_IN_USE', 'Không thể xóa term đang được classroom sử dụng.');
     }
@@ -2328,12 +2727,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       const access = assertWorkspaceWritable(workspace, context);
       const body = await readRequestBody(request);
       const sourceCode = typeof body.sourceCode === 'string' ? body.sourceCode : workspace.sourceCode;
-      const snapshot = await recordWorkspaceSnapshot({
+      const snapshot = await executions.runTermTask(item.termId, () => recordWorkspaceSnapshot({
         workspace,
         trigger: body.trigger || 'MANUAL',
         sourceCode,
+        assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
         assignmentVersionId: context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId,
-      });
+      }));
       sendJson(response, 201, { item: snapshot });
       return;
     }
@@ -2368,6 +2768,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     if (!isOwner) deny();
     const access = assertWorkspaceWritable(workspace, context);
+    const updated = await executions.runTermTask(item.termId, async () => {
     if (item.status === 'ARCHIVED') throw apiError(409, 'CLASSROOM_ARCHIVED', 'Classroom đã được lưu trữ và chỉ đọc.');
     const body = await readRequestBody(request);
     if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode phải là chuỗi.');
@@ -2376,19 +2777,20 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
     const baseRevision = requireBaseRevision(body);
     const savedAt = new Date().toISOString();
-    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
+    const savedWorkspace = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
       return writeWorkspaceRevision(current, body.sourceCode, baseRevision, savedAt);
     }, { durable: true });
-    const assessmentVersion = resolveWorkspaceAssessmentVersion(updated, context);
+    const assessmentVersion = resolveWorkspaceAssessmentVersion(savedWorkspace, context);
     const snapshot = await recordWorkspaceSnapshot({
-      workspace: updated,
+      workspace: savedWorkspace,
       trigger: 'SAVE',
       sourceCode: body.sourceCode,
+      assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
       assignmentVersionId: assessmentVersion?.id,
     });
     await enqueueAssessment({
-      workspace: updated,
+      workspace: savedWorkspace,
       snapshot,
       assignmentVersion: assessmentVersion,
       milestone: 'SAVE',
@@ -2399,12 +2801,14 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context: access.practiceContext,
         activityAt: access.practiceAccess.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
           activityContext: access.practiceAccess.activityContext,
           workspaceId: workspace.id,
         },
       });
     }
+    return savedWorkspace;
+    });
     sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }
@@ -2422,15 +2826,21 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (request.method === 'GET') {
       if (!isOwner && !lecturerCanRead) deny();
       const records = await readSubmissions();
-      const items = records
-        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id)
-        .map(codeSubmissionView);
+      const submissions = records
+        .filter((record) => record.kind === 'CODE_SUBMISSION' && record.workspaceId === workspace.id);
+      const items = await Promise.all(submissions.map(async (submission) => {
+        const judgment = submission.latestJudgmentId
+          ? await grading.getJudgment(submission.latestJudgmentId)
+          : null;
+        return codeSubmissionView(submission, judgment, user.role);
+      }));
       sendJson(response, 200, { items });
       return;
     }
 
     if (!isOwner) deny();
     if (workspace.termId !== context.classroomItem.termId) deny();
+    rejectResetBlockedTerm(workspace.termId);
     const body = await readRequestBody(request);
     const requestKey = validateRequestKey(body.requestKey);
     if (typeof body.sourceCode !== 'string') {
@@ -2445,11 +2855,13 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (!context.lab || !context.labAssignment) {
       throw apiError(409, 'LAB_CONTEXT_REQUIRED', 'Official submission requires a LAB problem workspace.');
     }
+    const assignmentId = context.labAssignment.assignmentId;
     if (body.assignmentVersionId !== undefined
       && body.assignmentVersionId !== context.labAssignment.assignmentVersionId) {
       throw apiError(409, 'ASSIGNMENT_VERSION_MISMATCH', 'The requested problem version is not pinned to this workspace.');
     }
 
+    const result = await executions.runTermTask(workspace.termId, async () => {
     const requestReceivedAt = new Date();
     const membership = memberships.find((member) =>
       belongsToClassroom(member, context.classroomItem.id)
@@ -2462,10 +2874,17 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       classroomId: workspace.classroomId,
       labId: workspace.labId,
       labAssignmentId: workspace.labAssignmentId,
-      assignmentId: workspace.assignmentId,
+      assignmentId,
       assignmentVersionId: context.labAssignment.assignmentVersionId,
       sourceCode: body.sourceCode,
     });
+    const pinnedAssignment = assignments.find((assignment) =>
+      assignment.id === assignmentId
+      && assignment.classroomId === workspace.classroomId) ?? notFound();
+    const pinnedGradingVersion = resolvePublishedAssignmentVersion(
+      pinnedAssignment,
+      context.labAssignment.assignmentVersionId,
+    );
     const payloadHash = createHash('sha256').update(canonicalPayload).digest('hex');
     const result = await mutateSubmissions((records) => {
       const existing = records.find((record) =>
@@ -2488,7 +2907,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         classroomId: workspace.classroomId,
         labId: workspace.labId,
         labAssignmentId: workspace.labAssignmentId,
-        assignmentId: workspace.assignmentId,
+        assignmentId,
         assignmentVersionId: context.labAssignment.assignmentVersionId,
         assignmentVersion: {
           id: context.labAssignment.assignmentVersionId,
@@ -2496,6 +2915,18 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
           version: context.labAssignment.version,
           title: context.labAssignment.title,
           language: context.labAssignment.language ?? 'PYTHON',
+        },
+        // Server-only immutable snapshot. codeSubmissionView intentionally omits
+        // this object so hidden tests never cross the Student API boundary.
+        gradingSnapshot: {
+          id: pinnedGradingVersion.id,
+          assignmentId: pinnedGradingVersion.assignmentId,
+          version: pinnedGradingVersion.version,
+          runtime: pinnedGradingVersion.runtime,
+          cpuTimeLimitMs: pinnedGradingVersion.cpuTimeLimitMs,
+          memoryLimitMb: pinnedGradingVersion.memoryLimitMb,
+          comparator: structuredClone(pinnedGradingVersion.comparator),
+          testCases: structuredClone(pinnedGradingVersion.testCases),
         },
         workspaceId: workspace.id,
         student: {
@@ -2525,7 +2956,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context,
         activityAt: result.submission.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId,
           assignmentVersionId: context.labAssignment.assignmentVersionId,
           activityContext,
           workspaceId: workspace.id,
@@ -2533,18 +2964,34 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         },
       });
       try {
-        const assignment = assignments.find((item) => item.id === workspace.assignmentId
+        const assignment = assignments.find((item) => item.id === assignmentId
           && item.classroomId === workspace.classroomId) ?? notFound();
         const version = resolvePublishedAssignmentVersion(assignment, context.labAssignment.assignmentVersionId);
-        const snapshot = await recordWorkspaceSnapshot({ workspace, trigger: 'SUBMIT', sourceCode: body.sourceCode, assignmentVersionId: context.labAssignment.assignmentVersionId });
+        const issueWorkspace = assessmentWorkspace({
+          workspace,
+          classroomId: workspace.classroomId,
+          assignmentId,
+          assignmentVersionId: context.labAssignment.assignmentVersionId,
+          ownerEmail: user.email,
+          labId: workspace.labId,
+          labAssignmentId: workspace.labAssignmentId,
+        });
+        const snapshot = await recordWorkspaceSnapshot({
+          workspace: issueWorkspace,
+          trigger: 'SUBMIT',
+          sourceCode: body.sourceCode,
+          assignmentId,
+          assignmentVersionId: context.labAssignment.assignmentVersionId,
+        });
         let queuedExecution = null;
         try {
           queuedExecution = await executions.enqueue({
             assignment: version,
             sourceCode: body.sourceCode,
             body: {},
-            assignmentId: workspace.assignmentId,
+            assignmentId,
             classroomId: workspace.classroomId,
+          termId: workspace.termId,
             ownerEmail: user.email,
             workspaceId: workspace.id,
             labId: workspace.labId,
@@ -2555,7 +3002,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         }
         const executionId = queuedExecution?.item.id ?? `submission-execution-${result.submission.id}`;
         await enqueueAssessment({
-          workspace,
+          workspace: issueWorkspace,
           snapshot,
           assignmentVersion: version,
           milestone: 'SUBMIT',
@@ -2579,10 +3026,34 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       }
     }
 
+    // Stable job identity makes submit retries and duplicate delivery idempotent.
+    await grading.enqueue(result.submission.id);
+    return result;
+    });
+
     sendJson(response, result.created ? 201 : 200, {
-      item: codeSubmissionView(result.submission),
+      item: codeSubmissionView(result.submission, null, user.role),
       created: result.created,
     });
+    return;
+  }
+
+  if (parts[2] === 'submissions' && parts[3] && parts[4] === 'judgments'
+    && !parts[5] && request.method === 'GET') {
+    const records = await readSubmissions();
+    const submission = records.find((record) =>
+      record.kind === 'CODE_SUBMISSION' && record.id === parts[3]) ?? notFound();
+    const classroomItem = classroom(submission.classroomId);
+    const isOwner = normalizeEmail(submission.student.email) === normalizeEmail(user.email);
+    const lecturerCanRead = isDsaManager(classroomItem);
+    if (!isOwner && !lecturerCanRead) deny();
+    const judgments = await grading.listJudgments(submission.id);
+    const visible = lecturerCanRead
+      ? judgments.map(lecturerJudgmentView)
+      : judgments
+        .filter((judgment) => judgment.id === submission.latestJudgmentId)
+        .map(studentJudgmentView);
+    sendJson(response, 200, { items: visible });
     return;
   }
 
@@ -2594,7 +3065,10 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     const canRead = normalizeEmail(submission.student.email) === normalizeEmail(user.email)
       || isDsaManager(classroomItem);
     if (!canRead) deny();
-    sendJson(response, 200, { item: codeSubmissionView(submission) });
+    const judgment = submission.latestJudgmentId
+      ? await grading.getJudgment(submission.latestJudgmentId)
+      : null;
+    sendJson(response, 200, { item: codeSubmissionView(submission, judgment, user.role) });
     return;
   }
 
@@ -2625,11 +3099,12 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         throw conflict;
       }
     }
-    const linkedAssignment = assignments.find((assignment) => assignment.id === workspace.assignmentId
+    const assignmentId = context.labAssignment?.assignmentId ?? workspace.assignmentId;
+    const linkedAssignment = assignments.find((assignment) => assignment.id === assignmentId
       && assignment.classroomId === workspace.classroomId && assignment.status === 'PUBLISHED');
     const versionId = context.labAssignment?.assignmentVersionId ?? workspace.assignmentVersionId;
     const storedVersion = assignmentVersions.find((item) => item.id === versionId
-      && item.assignmentId === workspace.assignmentId && item.classroomId === workspace.classroomId
+      && item.assignmentId === assignmentId && item.classroomId === workspace.classroomId
       && item.status === 'PUBLISHED');
     const version = linkedAssignment
       ? versionId ? resolvePublishedAssignmentVersion(linkedAssignment, versionId) : latestPublishedAssignmentVersion(linkedAssignment)
@@ -2637,27 +3112,30 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         testCases: normalizeTestCases(storedVersion.testCases ?? []) } : notFound();
     if (!ALLOWED_RUNTIMES.has(version.runtime)) throw apiError(422, 'UNSUPPORTED_RUNTIME', 'Unsupported assignment runtime.');
     const queued = await executions.enqueue({ assignment: version, sourceCode, body,
-      assignmentId: workspace.assignmentId, classroomId: workspace.classroomId, ownerEmail: user.email,
+      assignmentId, classroomId: workspace.classroomId, termId: context.classroomItem.termId, ownerEmail: user.email,
       workspaceId: workspace.id, labId: workspace.labId ?? null, labAssignmentId: workspace.labAssignmentId ?? null });
     await markAssignmentVersionUsed(version.id);
-    const snapshot = await recordWorkspaceSnapshot({
-      workspace,
-      trigger: 'RUN',
-      sourceCode,
-      assignmentVersionId: version.id,
+    await executions.runTermTask(context.classroomItem.termId, async () => {
+      const snapshot = await recordWorkspaceSnapshot({
+        workspace,
+        trigger: 'RUN',
+        sourceCode,
+        assignmentId,
+        assignmentVersionId: version.id,
+      });
+      await enqueueAssessment({
+        workspace,
+        snapshot,
+        assignmentVersion: version,
+        milestone: 'RUN',
+        executionId: queued.item.id,
+        executionPromise: queued.completion,
+      });
+      await recordActivity({ type: 'RUN', context: access?.practiceContext,
+        activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId,
+          activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
+          executionId: queued.item.id, executionStatus: 'QUEUED' } });
     });
-    await enqueueAssessment({
-      workspace,
-      snapshot,
-      assignmentVersion: version,
-      milestone: 'RUN',
-      executionId: queued.item.id,
-      executionPromise: queued.completion,
-    });
-    await recordActivity({ type: 'RUN', context: access?.practiceContext,
-      activityAt: access?.practiceAccess.acceptedAt, metadata: { assignmentId: workspace.assignmentId,
-        activityContext: access?.practiceAccess.activityContext ?? null, workspaceId: workspace.id,
-        executionId: queued.item.id, executionStatus: 'QUEUED' } });
     sendJson(response, 202, { item: queued.item });
     return;
   }
@@ -2670,7 +3148,8 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (workspace.ownerEmail !== user.email || !isMember(context.classroomItem.id)) deny();
     const access = assertWorkspaceWritable(workspace, context);
     const hint = context.labAssignment?.hints?.find((candidate) => candidate.id === parts[5]) ?? notFound();
-    const updated = await mutate(workspaceFile, initialWorkspaces, (records) => {
+    const updated = await executions.runTermTask(context.classroomItem.termId, async () => {
+    const savedWorkspace = await mutate(workspaceFile, initialWorkspaces, (records) => {
       const current = records.find((record) => record.id === workspace.id) ?? notFound();
       current.hintProgress ??= [];
       if (!current.hintProgress.some((item) => item.hintId === hint.id)) {
@@ -2685,13 +3164,15 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
         context: access.practiceContext,
         activityAt: access.practiceAccess.acceptedAt,
         metadata: {
-          assignmentId: workspace.assignmentId,
+          assignmentId: context.labAssignment?.assignmentId ?? workspace.assignmentId,
           activityContext: access.practiceAccess.activityContext,
           workspaceId: workspace.id,
           hintId: hint.id,
         },
       });
     }
+    return savedWorkspace;
+    });
     sendJson(response, 200, { item: workspaceView(updated, context) });
     return;
   }

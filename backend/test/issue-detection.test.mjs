@@ -233,3 +233,74 @@ test('SCRUM-75: separates runner failures, provider errors, and unverifiable fin
   assert.equal(bySnapshot.get('snapshot-unverifiable')?.resultCode, 'NO_VERIFIABLE_TAXONOMY_MATCH');
   assert.deepEqual(await service.listIssueCases('class-1'), []);
 });
+
+test('SCRUM-75: constrains Ollama output to approved assessment findings and evidence', async (t) => {
+  const file = await createStore(t);
+  const envKeys = [
+    'CODEPULSE_AI_PROVIDER',
+    'CODEPULSE_AI_ENDPOINT',
+    'CODEPULSE_OLLAMA_ENDPOINT',
+    'CODEPULSE_OLLAMA_MODEL',
+    'CODEPULSE_AI_MODEL',
+  ];
+  const previousEnv = Object.fromEntries(envKeys.map((key) => [key, process.env[key]]));
+  const previousFetch = globalThis.fetch;
+  let requestBody;
+
+  process.env.CODEPULSE_AI_PROVIDER = 'ollama';
+  process.env.CODEPULSE_OLLAMA_MODEL = 'test-model';
+  delete process.env.CODEPULSE_AI_ENDPOINT;
+  delete process.env.CODEPULSE_OLLAMA_ENDPOINT;
+  delete process.env.CODEPULSE_AI_MODEL;
+  globalThis.fetch = async (_url, options) => {
+    requestBody = JSON.parse(options.body);
+    return new Response(JSON.stringify({
+      message: {
+        content: JSON.stringify({
+          findings: [{
+            problemTypeId: 'INFINITE_RECURSION',
+            rationale: 'The recursive execution never reaches a terminating base case.',
+            evidence: [{
+              kind: 'CODE',
+              snapshotId: 'snapshot-ollama-schema',
+              lineStart: 1,
+              lineEnd: 1,
+              excerpt: 'while (true) {}',
+            }],
+          }],
+        }),
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+  };
+  t.after(() => {
+    globalThis.fetch = previousFetch;
+    for (const key of envKeys) {
+      if (previousEnv[key] === undefined) delete process.env[key];
+      else process.env[key] = previousEnv[key];
+    }
+  });
+
+  const service = createIssueDetectionService({
+    file,
+    resolveSnapshot: async (id) => ({ id, sourceCode: 'while (true) {}', hash: id, revision: 1 }),
+  });
+  await service.initialize();
+  await service.trigger(triggerInput('snapshot-ollama-schema'));
+
+  const [assessment] = await waitForTerminal(service, 1);
+  const schema = requestBody.format;
+  assert.equal(assessment.state, 'EVALUATED');
+  assert.equal(assessment.provider, 'ollama');
+  assert.equal(assessment.model, 'test-model');
+  assert.equal(schema.type, 'object');
+  assert.deepEqual(schema.required, ['findings']);
+  assert.equal(schema.additionalProperties, false);
+  assert.deepEqual(
+    schema.properties.findings.items.properties.problemTypeId.enum,
+    APPROVED_PROBLEM_TYPES.map((problemType) => problemType.id),
+  );
+  assert.equal(
+    schema.properties.findings.items.properties.evidence.items.anyOf[0].properties.snapshotId.const,
+    'snapshot-ollama-schema',
+  );
+});

@@ -3,9 +3,14 @@ import http from 'node:http';
 import { PORT, SUBMISSIONS_FILE } from './config.mjs';
 import { handleRequest } from './routes.mjs';
 import { sendJson } from './http.mjs';
-import { initializeCodePulseExecutions, initializeCodePulseIssueDetection } from './codepulse.mjs';
+import {
+  initializeCodePulseExecutions,
+  initializeCodePulseGrading,
+  initializeCodePulseIssueDetection,
+} from './codepulse.mjs';
 
 await initializeCodePulseExecutions();
+await initializeCodePulseGrading();
 try {
   await initializeCodePulseIssueDetection();
 } catch (error) {

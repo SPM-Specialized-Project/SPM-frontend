@@ -1,14 +1,14 @@
 import type { ComponentType } from 'react';
 
+import { useUserStore } from '@/stores';
+
 import {
   IconDangKyMonHoc,
   IconGiamSat,
   IconKhoaHoc,
   IconLichHoc,
   IconLichSu,
-  IconThongKe,
   IconThuVien,
-  OverviewIcon,
 } from './sidebar-icons';
 import { SidebarItem } from './sidebar-item';
 
@@ -34,6 +34,12 @@ const commonItems: NavigationItem[] = [
     iconMode: 'fill',
   },
   {
+    name: 'Giám sát hệ thống',
+    route: '/system-monitoring',
+    icon: IconGiamSat,
+    iconMode: 'stroke',
+  },
+  {
     name: 'Đăng ký môn học',
     route: '/register-session',
     icon: IconDangKyMonHoc,
@@ -49,32 +55,8 @@ const commonItems: NavigationItem[] = [
   { name: 'Lịch học', route: '/schedule', icon: IconLichHoc, iconMode: 'fill' },
 ];
 
-const restrictedItems: NavigationItem[] = [
-  {
-    name: 'Giám sát hệ thống',
-    route: '/system-monitoring',
-    icon: IconGiamSat,
-    iconMode: 'stroke',
-  },
-  {
-    name: 'Thống Kê',
-    route: '/statistical',
-    icon: IconThongKe,
-    iconMode: 'stroke',
-  },
-];
-
 export function getSidebarStatsPermission() {
-  if (typeof window === 'undefined') return false;
-
-  try {
-    const userStore = window.localStorage.getItem('userStore');
-    return Boolean(
-      userStore && JSON.parse(userStore)?.state?.user?.statisticalPermission,
-    );
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 function getIconClassName(item: NavigationItem, current: string) {
@@ -92,31 +74,17 @@ function getIconClassName(item: NavigationItem, current: string) {
 export function SidebarNavigation({
   opened,
   current,
-  hasStatsPermission,
   onNavigate,
 }: SidebarNavigationProps) {
-  const items = hasStatsPermission
-    ? [...commonItems, ...restrictedItems]
-    : commonItems;
+  const { user } = useUserStore();
+  const role = String(user?.role ?? '').toLowerCase();
+  const canAccessSystemMonitoring = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(role);
+  const items = commonItems.filter((item) =>
+    item.route !== '/system-monitoring' || canAccessSystemMonitoring,
+  );
 
   return (
     <div className="relative flex shrink-0 flex-col gap-2">
-      {hasStatsPermission && (
-        <SidebarItem
-          opened={opened}
-          name="Quản lý đăng ký"
-          route="/overview"
-          current={current}
-          icon={OverviewIcon}
-          onNavigate={onNavigate}
-          iconClassName={
-            (current.startsWith('/overview')
-              ? 'stroke-white'
-              : 'stroke-tertiary group-hover:stroke-white') +
-            ' size-6 duration-200 ease-in-out'
-          }
-        />
-      )}
       {items.map((item) => (
         <SidebarItem
           key={item.route}

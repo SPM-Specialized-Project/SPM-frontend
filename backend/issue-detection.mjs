@@ -156,6 +156,80 @@ const aiMessages = (input) => [
   { role: 'user', content: JSON.stringify(input) },
 ];
 
+const ollamaAssessmentSchema = (input) => {
+  const problemTypeIds = [...new Set((input.problemTypes ?? [])
+    .filter((problemType) => problemType.approved !== false)
+    .map((problemType) => problemType.id)
+    .filter(Boolean))];
+  const evidenceTypes = [{
+    type: 'object',
+    properties: {
+      kind: { const: 'CODE' },
+      snapshotId: { const: input.snapshot.id },
+      lineStart: { type: 'integer', minimum: 1 },
+      lineEnd: { type: 'integer', minimum: 1 },
+      excerpt: { type: 'string', minLength: 1 },
+    },
+    required: ['kind', 'snapshotId', 'lineStart', 'lineEnd', 'excerpt'],
+    additionalProperties: false,
+  }];
+  const execution = input.execution;
+  const testCaseIds = [...new Set((execution?.results ?? [])
+    .filter((result) => failingStatuses.has(result.status) && result.testCaseId)
+    .map((result) => result.testCaseId))];
+
+  if (input.executionContextId && testCaseIds.length) {
+    evidenceTypes.push({
+      type: 'object',
+      properties: {
+        kind: { const: 'TEST' },
+        executionId: { const: input.executionContextId },
+        testCaseId: { type: 'string', enum: testCaseIds },
+        status: { type: 'string', enum: [...failingStatuses] },
+      },
+      required: ['kind', 'executionId', 'testCaseId', 'status'],
+      additionalProperties: false,
+    });
+  }
+
+  if (input.eventId) {
+    evidenceTypes.push({
+      type: 'object',
+      properties: {
+        kind: { const: 'EVENT' },
+        eventId: { const: input.eventId },
+      },
+      required: ['kind', 'eventId'],
+      additionalProperties: false,
+    });
+  }
+
+  return {
+    type: 'object',
+    properties: {
+      findings: {
+        type: 'array',
+        items: {
+          type: 'object',
+          properties: {
+            problemTypeId: { type: 'string', enum: problemTypeIds },
+            rationale: { type: 'string', minLength: 12 },
+            evidence: {
+              type: 'array',
+              minItems: 1,
+              items: { anyOf: evidenceTypes },
+            },
+          },
+          required: ['problemTypeId', 'rationale', 'evidence'],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['findings'],
+    additionalProperties: false,
+  };
+};
+
 function integerSetting(name, fallback, minimum, maximum) {
   const value = Number(process.env[name]);
   if (!Number.isInteger(value)) return fallback;
@@ -176,7 +250,7 @@ async function evaluateWithProvider(provider, input) {
       model: provider.model,
       messages,
       stream: false,
-      format: 'json',
+      format: ollamaAssessmentSchema(input),
       keep_alive: process.env.CODEPULSE_OLLAMA_KEEP_ALIVE?.trim() || '5m',
       think: false,
       options: { temperature: 0, num_predict: maxTokens },
@@ -740,6 +814,73 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
       await refreshPendingQueue();
       return assessmentView(assessment);
     },
+    async drainClassrooms(classroomIds) {
+      await this.initialize();
+      const targets = new Set(classroomIds);
+      if (targets.size === 0) return;
+      while (true) {
+        const state = await store.read();
+        const assessmentIds = state.assessments
+          .filter((item) => targets.has(item.classroomId))
+          .map((item) => item.id);
+        if (assessmentIds.some((id) => inFlightIds.has(id))) {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          continue;
+        }
+        for (const id of assessmentIds) {
+          queuedIds.delete(id);
+          awaitingExecution.delete(id);
+          const index = pendingIds.indexOf(id);
+          if (index >= 0) pendingIds.splice(index, 1);
+        }
+        return;
+      }
+    },
+    async purgeClassrooms(classroomIds, workspaceIds = []) {
+      await this.drainClassrooms(classroomIds);
+      const classrooms = new Set(classroomIds);
+      const workspaces = new Set(workspaceIds);
+      return store.mutate((state) => {
+        const assessments = state.assessments.filter((item) => classrooms.has(item.classroomId)
+          || workspaces.has(item.workspaceId));
+        const assessmentIds = new Set(assessments.map((item) => item.id));
+        const cases = state.issueCases.filter((item) => classrooms.has(item.classroomId)
+          || workspaces.has(item.workspaceId));
+        const caseIds = new Set(cases.map((item) => item.id));
+        const counts = {
+          assessments: assessments.length,
+          issueCases: cases.length,
+          evidence: state.caseEvidence.filter((item) => caseIds.has(item.caseId)
+            || assessmentIds.has(item.assessmentId)).length,
+          caseTests: state.caseTests.filter((item) => caseIds.has(item.caseId)).length,
+        };
+        state.assessments = state.assessments.filter((item) => !assessmentIds.has(item.id));
+        state.issueCases = state.issueCases.filter((item) => !caseIds.has(item.id));
+        state.caseEvidence = state.caseEvidence.filter((item) => !caseIds.has(item.caseId)
+          && !assessmentIds.has(item.assessmentId));
+        state.caseTests = state.caseTests.filter((item) => !caseIds.has(item.caseId));
+        return counts;
+      });
+    },
+    async inspectClassrooms(classroomIds, workspaceIds = []) {
+      await this.initialize();
+      const classrooms = new Set(classroomIds);
+      const workspaces = new Set(workspaceIds);
+      const state = await store.read();
+      const assessmentIds = new Set(state.assessments
+        .filter((item) => classrooms.has(item.classroomId) || workspaces.has(item.workspaceId))
+        .map((item) => item.id));
+      const caseIds = new Set(state.issueCases
+        .filter((item) => classrooms.has(item.classroomId) || workspaces.has(item.workspaceId))
+        .map((item) => item.id));
+      return {
+        assessments: assessmentIds.size,
+        issueCases: caseIds.size,
+        evidence: state.caseEvidence.filter((item) => caseIds.has(item.caseId)
+          || assessmentIds.has(item.assessmentId)).length,
+        caseTests: state.caseTests.filter((item) => caseIds.has(item.caseId)).length,
+      };
+    },
     async listAssessments(classroomId) {
       const state = await store.read();
       return state.assessments.filter((item) => item.classroomId === classroomId)
@@ -775,6 +916,12 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
     async getIssueCase(id) {
       const state = await store.read();
       return state.issueCases.find((item) => item.id === id) ?? null;
+    },
+    getQueueStats() {
+      return {
+        pendingCount: queuedIds.size + pendingIds.length,
+        inFlightCount: inFlightIds.size,
+      };
     },
     subscribe(listener) {
       listeners.add(listener);

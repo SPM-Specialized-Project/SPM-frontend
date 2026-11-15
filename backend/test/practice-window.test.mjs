@@ -158,6 +158,7 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
     { sourceCode: 'print(input())' },
   );
   assert.equal(inactiveTermSubmission.status, 403);
+  assert.equal(inactiveTermSubmission.data.code, 'FORBIDDEN');
   const inactiveTermSave = await request(
     baseUrl,
     `/api/codepulse/workspaces/${workspaceId}`,
@@ -167,6 +168,28 @@ test('SCRUM-66: practice windows stay open outside LAB hours and enforce server 
   );
   assert.equal(inactiveTermSave.status, 403);
   assert.equal(inactiveTermSave.data.code, 'PRACTICE_TERM_INACTIVE');
+
+  activeTerm.status = 'RESETTING';
+  await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
+  const resetTermSubmission = await request(
+    baseUrl,
+    `/api/codepulse/classrooms/class-1/labs/${labId}/assignments/${labAssignmentId}/submit`,
+    student,
+    'POST',
+    { sourceCode: 'print(input())' },
+  );
+  assert.equal(resetTermSubmission.status, 409);
+  assert.equal(resetTermSubmission.data.code, 'TERM_RESET_IN_PROGRESS');
+  const resetTermSave = await request(
+    baseUrl,
+    `/api/codepulse/workspaces/${workspaceId}`,
+    student,
+    'PATCH',
+    { sourceCode: 'must not save while reset is running' },
+  );
+  assert.equal(resetTermSave.status, 409);
+  assert.equal(resetTermSave.data.code, 'TERM_RESET_IN_PROGRESS');
+
   activeTerm.status = 'ACTIVE';
   await writeFile(termsFile, `${JSON.stringify(terms, null, 2)}\n`, 'utf8');
 

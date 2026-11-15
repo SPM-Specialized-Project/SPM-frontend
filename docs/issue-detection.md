@@ -17,7 +17,7 @@ The backend does not download models or start either inference server. The selec
 - `CODEPULSE_AI_TIMEOUT_MS`: per-provider timeout; defaults to 60 seconds and is capped at 180 seconds.
 - `CODEPULSE_AI_MAX_TOKENS`: response token limit; defaults to 512 and is capped at 1,024.
 
-Ollama uses its native JSON chat API with thinking disabled and deterministic output. The worker has one inference in flight at a time, and each response is capped to keep background resource use bounded. Student save, run, and submit requests do not wait for this worker.
+Ollama uses its native JSON chat API with a JSON Schema constrained to approved issue types and evidence fields, thinking disabled, and deterministic output. The worker has one inference in flight at a time, and each response is capped to keep background resource use bounded. Student save, run, and submit requests do not wait for this worker.
 
 Colibri can be selected as the only provider or configured as a sequential fallback. It exposes an OpenAI-compatible endpoint:
 

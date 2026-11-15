@@ -33,7 +33,7 @@ function command(args, input = '', timeout = 30000) {
   });
 }
 
-export async function runSandbox(job) {
+async function runContainer(job) {
   const name = `codepulse-${job.executionId ?? randomUUID()}`;
   const image = job.sandboxImage || process.env.CODEPULSE_SANDBOX_IMAGE || 'codepulse-sandbox:1';
   try {
@@ -43,16 +43,32 @@ export async function runSandbox(job) {
     const inspected = JSON.parse(state.stdout);
     if (inspected.OOMKilled) return { ...internalError(), status: 'MEMORY_LIMIT_EXCEEDED', stderr: 'Memory limit exceeded.' };
     if (result.failed || result.code !== 0) return internalError();
-    const verdict = JSON.parse(result.stdout);
-    if (!['SUCCESS', 'COMPILE_ERROR', 'RUNTIME_ERROR', 'TIME_LIMIT_EXCEEDED',
-      'MEMORY_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED', 'INTERNAL_ERROR'].includes(verdict.status)
-      || typeof verdict.stdout !== 'string' || typeof verdict.stderr !== 'string') return internalError();
-    return verdict;
+    return JSON.parse(result.stdout);
   } catch {
     return internalError();
   } finally {
     await command(['rm', '--force', name], '', 5000);
   }
+}
+
+const validVerdict = (verdict) => ['SUCCESS', 'COMPILE_ERROR', 'RUNTIME_ERROR',
+  'TIME_LIMIT_EXCEEDED', 'MEMORY_LIMIT_EXCEEDED', 'OUTPUT_LIMIT_EXCEEDED',
+  'INTERNAL_ERROR'].includes(verdict?.status)
+  && typeof verdict.stdout === 'string'
+  && typeof verdict.stderr === 'string';
+
+export async function runSandbox(job) {
+  const verdict = await runContainer(job);
+  return validVerdict(verdict) ? verdict : internalError();
+}
+
+export async function runSandboxBatch(job) {
+  const verdict = await runContainer(job);
+  if (verdict?.status === 'COMPILE_ERROR' && validVerdict(verdict)) return verdict;
+  if (verdict?.status !== 'SUCCESS' || !Array.isArray(verdict.results)
+    || verdict.results.length !== job.tests?.length
+    || verdict.results.some((result) => !validVerdict(result))) return internalError();
+  return verdict;
 }
 
 export async function removeExecutionContainer(id) {
