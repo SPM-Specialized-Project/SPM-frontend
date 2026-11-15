@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   assertVolumeContinuity, composeOverride, configurationFromEnvironment,
@@ -8,6 +9,15 @@ import {
 } from '../actions/deployment-lib.mjs';
 
 const environment = { GITEA_ADMIN_PASSWORD: 'integration-test-password', SPM_RUNNER_USER: 'runner' };
+
+test('main and staging deploys keep persistent backend data writable by the spm service', () => {
+  for (const script of ['spm-deploy', 'spm-staging-deploy']) {
+    const source = readFileSync(new URL(`../bin/${script}`, import.meta.url), 'utf8');
+    const installCommand = source.split(/\r?\n/)
+      .find((line) => line.includes('"$app_root/shared/data"'));
+    assert.match(installCommand ?? '', /^install -d -o spm -g spm -m 0750 /, script);
+  }
+});
 
 test('configuration fails before deployment for missing or unsafe inputs', () => {
   assert.equal(configurationFromEnvironment(environment).owner, 'codepulse-bot');
