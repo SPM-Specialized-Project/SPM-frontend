@@ -38,7 +38,7 @@ if (-not [string]::IsNullOrWhiteSpace($env:SPM_WSL_RELEASE_ID)) {
   $wslArguments += $env:SPM_WSL_RELEASE_ID
 }
 
-$maxAttempts = if ($Phase -eq 'host-check') { 3 } else { 1 }
+$maxAttempts = 3
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt += 1) {
   $previousErrorActionPreference = $ErrorActionPreference
   try {
@@ -59,8 +59,8 @@ for ($attempt = 1; $attempt -le $maxAttempts; $attempt += 1) {
     exit 0
   }
 
-  if ($Phase -eq 'host-check' -and $diagnostic -match 'Wsl/Service/0x8007274c' -and $attempt -lt $maxAttempts) {
-    Write-Warning "WSL service timed out while starting the distro; retrying host-check ($($attempt + 1)/$maxAttempts)."
+  if ($diagnostic -match 'Wsl/Service/0x8007274c' -and $attempt -lt $maxAttempts) {
+    Write-Warning "WSL service timed out while starting the distro during '$Phase'; retrying ($($attempt + 1)/$maxAttempts)."
     Start-Sleep -Seconds $attempt
     continue
   }
