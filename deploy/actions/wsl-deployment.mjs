@@ -1,5 +1,7 @@
-import { appendFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publicRootUrl } from './deployment-lib.mjs';
@@ -13,6 +15,17 @@ const isStaging = deployment === 'staging';
 const baseUrl = isStaging ? 'http://127.0.0.1:18080' : 'http://127.0.0.1';
 const tunnelUnit = isStaging ? 'spm-staging-quick-tunnel.service' : 'spm-quick-tunnel.service';
 const deployCommand = isStaging ? '/usr/local/sbin/spm-staging-deploy' : '/usr/local/sbin/spm-deploy';
+const buildxVersion = 'v0.39.0';
+const buildxAssets = {
+  x64: {
+    name: 'linux-amd64',
+    sha256: '5fb31a097304fbf6dd4038649a0decf32c2b9510e4047acd7d68b9d700c46194',
+  },
+  arm64: {
+    name: 'linux-arm64',
+    sha256: '722cdcdfdd6f3fb943fa1ba75102d057feb18ba72aab93b1b0a8cf2b2b48a25f',
+  },
+};
 
 function run(command, args, { cwd = workspace, env = process.env, timeout = 300_000, quiet = false } = {}) {
   const result = spawnSync(command, args, {
@@ -54,6 +67,50 @@ function runWithRetry(command, args, options = {}) {
   });
 }
 
+function ensureDockerBuildx() {
+  const existing = spawnSync('docker', ['buildx', 'version'], {
+    encoding: 'utf8', timeout: 30_000, maxBuffer: 1024 * 1024,
+  });
+  if (existing.status === 0) return;
+  if (existing.error && existing.error.code !== 'ENOENT') {
+    throw new Error(`Docker Buildx check failed: ${existing.error.message}`);
+  }
+  if (existing.error?.code === 'ENOENT') {
+    throw new Error('Docker CLI is unavailable while checking for Buildx.');
+  }
+
+  const asset = buildxAssets[process.arch];
+  if (!asset) throw new Error(`Docker Buildx ${buildxVersion} is not configured for ${process.arch}.`);
+
+  const downloadUrl = `https://github.com/docker/buildx/releases/download/${buildxVersion}/buildx-${buildxVersion}.${asset.name}`;
+  const download = spawnSync('curl', ['--fail', '--silent', '--show-error', '--location',
+    '--max-time', '90', downloadUrl], {
+    encoding: null, timeout: 100_000, maxBuffer: 128 * 1024 * 1024,
+  });
+  if (download.error) throw new Error(`Docker Buildx download failed: ${download.error.message}`);
+  if (download.status !== 0 || !download.stdout?.length) {
+    throw new Error(`Docker Buildx download failed with curl exit code ${download.status ?? 'unknown'}.`);
+  }
+
+  const actualSha256 = createHash('sha256').update(download.stdout).digest('hex');
+  if (actualSha256 !== asset.sha256) {
+    throw new Error(`Docker Buildx checksum mismatch: expected ${asset.sha256}, got ${actualSha256}.`);
+  }
+
+  const pluginDirectory = path.join(os.homedir(), '.docker', 'cli-plugins');
+  const pluginPath = path.join(pluginDirectory, 'docker-buildx');
+  const temporaryPath = `${pluginPath}.${process.pid}.tmp`;
+  mkdirSync(pluginDirectory, { recursive: true });
+  try {
+    writeFileSync(temporaryPath, download.stdout, { mode: 0o755 });
+    chmodSync(temporaryPath, 0o755);
+    renameSync(temporaryPath, pluginPath);
+  } finally {
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+  run('docker', ['buildx', 'version'], { timeout: 30_000 });
+}
+
 function assertWslHost() {
   if (process.platform !== 'linux' || !process.env.WSL_DISTRO_NAME) {
     throw new Error('This step must run inside the configured WSL2 distribution. Check SPM_WSL_DISTRO and the Windows runner account.');
@@ -66,6 +123,7 @@ function assertWslHost() {
   }
   runWithRetry('docker', ['info'], { quiet: true, timeout: 45_000 });
   runWithRetry('docker', ['compose', 'version'], { quiet: true, timeout: 45_000 });
+  ensureDockerBuildx();
   runWithRetry('cloudflared', ['--version'], { quiet: true, timeout: 45_000 });
 }
 
@@ -160,13 +218,13 @@ try {
     runSetup('check');
   } else if (phase === 'build-sandbox') {
     assertWslHost();
-    runWithRetry('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+    runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
       timeout: 1_800_000,
       retryDelayMs: 2_000,
     });
   } else if (phase === 'tests') {
     assertWslHost();
-    runWithRetry('docker', ['build', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+    runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
       timeout: 1_800_000,
       retryDelayMs: 2_000,
     });

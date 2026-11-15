@@ -40,12 +40,22 @@ if (-not [string]::IsNullOrWhiteSpace($env:SPM_WSL_RELEASE_ID)) {
 
 $maxAttempts = if ($Phase -eq 'host-check') { 3 } else { 1 }
 for ($attempt = 1; $attempt -le $maxAttempts; $attempt += 1) {
-  $output = & $wsl.Source @wslArguments 2>&1
-  $exitCode = $LASTEXITCODE
+  $previousErrorActionPreference = $ErrorActionPreference
+  try {
+    # Windows PowerShell 5 can promote native-command stderr to a terminating
+    # NativeCommandError when ErrorActionPreference is Stop. WSL tools may emit
+    # warnings on stderr even when the command succeeds, so use the process exit
+    # code as the source of truth and restore the caller's preference afterwards.
+    $ErrorActionPreference = 'Continue'
+    $output = & $wsl.Source @wslArguments 2>&1
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
   $diagnostic = ($output | Out-String) -replace "`0", ''
 
   if ($exitCode -eq 0) {
-    if ($output) { $output | Write-Output }
+    if ($diagnostic) { Write-Output $diagnostic.TrimEnd() }
     exit 0
   }
 
