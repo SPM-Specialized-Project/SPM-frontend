@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { publicRootUrl } from './deployment-lib.mjs';
+import { startQuickTunnel } from './quick-tunnel.mjs';
 import { retry } from './retry.mjs';
 
 const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
@@ -111,7 +112,7 @@ function ensureDockerBuildx() {
   run('docker', ['buildx', 'version'], { timeout: 30_000 });
 }
 
-function assertWslHost() {
+async function assertWslHost() {
   if (process.platform !== 'linux' || !process.env.WSL_DISTRO_NAME) {
     throw new Error('This step must run inside the configured WSL2 distribution. Check SPM_WSL_DISTRO and the Windows runner account.');
   }
@@ -121,10 +122,10 @@ function assertWslHost() {
   if (Number(process.versions.node.split('.')[0]) < 22) {
     throw new Error(`Node.js 22 or newer is required inside WSL2; found ${process.versions.node}.`);
   }
-  runWithRetry('docker', ['info'], { quiet: true, timeout: 45_000 });
-  runWithRetry('docker', ['compose', 'version'], { quiet: true, timeout: 45_000 });
+  await runWithRetry('docker', ['info'], { quiet: true, timeout: 45_000 });
+  await runWithRetry('docker', ['compose', 'version'], { quiet: true, timeout: 45_000 });
   ensureDockerBuildx();
-  runWithRetry('cloudflared', ['--version'], { quiet: true, timeout: 45_000 });
+  await runWithRetry('cloudflared', ['--version'], { quiet: true, timeout: 45_000 });
 }
 
 function runSetup(step) {
@@ -171,27 +172,7 @@ async function verifyLocal() {
 }
 
 async function startTunnel() {
-  const startedAt = new Date().toISOString();
-  runWithRetry('sudo', ['-n', 'systemctl', 'restart', tunnelUnit], {
-    retryDelayMs: 2_000,
-    maxRetryDelayMs: 8_000,
-  });
-  let publicUrl = '';
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const log = runWithRetry('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--since', startedAt,
-      '--no-pager', '-n', '100'], { quiet: true });
-    publicUrl = (log.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/g) || [])
-      .filter((url) => url !== 'https://api.trycloudflare.com').at(-1) || '';
-    if (publicUrl) break;
-    await new Promise((resolve) => setTimeout(resolve, 2_000));
-  }
-  if (!publicUrl) {
-    const log = runWithRetry('sudo', ['-n', 'journalctl', '-u', tunnelUnit, '--no-pager', '-n', '100'], { quiet: true });
-    process.stderr.write(log);
-    throw new Error(`${tunnelUnit} did not return a Cloudflare Quick Tunnel URL.`);
-  }
-  publicRootUrl(publicUrl);
-  appendOutput('public_url', publicUrl);
+  const publicUrl = await startQuickTunnel({ runWithRetry, tunnelUnit, appendOutput });
   console.log(`Public URL: ${publicUrl}`);
 }
 
@@ -211,29 +192,29 @@ try {
     process.chdir(workspace);
   }
   if (phase === 'host-check') {
-    assertWslHost();
+    await assertWslHost();
     console.log(`WSL2 host is ready: ${process.env.WSL_DISTRO_NAME}.`);
   } else if (phase === 'check') {
-    assertWslHost();
+    await assertWslHost();
     runSetup('check');
   } else if (phase === 'build-sandbox') {
-    assertWslHost();
-    runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+    await assertWslHost();
+    await runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
       timeout: 1_800_000,
       retryDelayMs: 2_000,
     });
   } else if (phase === 'tests') {
-    assertWslHost();
-    runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
+    await assertWslHost();
+    await runWithRetry('docker', ['buildx', 'build', '--load', '-t', 'codepulse-sandbox:1', 'deploy/sandbox'], {
       timeout: 1_800_000,
       retryDelayMs: 2_000,
     });
     run('npm', ['run', 'backend:test'], { timeout: 1_800_000 });
   } else if (phase === 'setup') {
-    assertWslHost();
+    await assertWslHost();
     runSetup('setup');
   } else if (phase === 'deploy') {
-    assertWslHost();
+    await assertWslHost();
     const releaseId = process.env.SPM_WSL_RELEASE_ID || '';
     if (!/^[A-Za-z0-9._-]+$/.test(releaseId)) throw new Error('Invalid release ID.');
     await retry((attempt) => {
@@ -250,16 +231,16 @@ try {
       },
     });
   } else if (phase === 'verify-local') {
-    assertWslHost();
+    await assertWslHost();
     await verifyLocal();
   } else if (phase === 'tunnel') {
-    assertWslHost();
+    await assertWslHost();
     await startTunnel();
   } else if (phase === 'public') {
-    assertWslHost();
+    await assertWslHost();
     runSetup('public');
   } else if (phase === 'verify-public') {
-    assertWslHost();
+    await assertWslHost();
     await verifyPublic();
   } else {
     throw new Error('Unknown WSL deployment phase.');
