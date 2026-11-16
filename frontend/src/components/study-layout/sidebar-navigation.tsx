@@ -79,9 +79,15 @@ export function SidebarNavigation({
   const { user } = useUserStore();
   const role = String(user?.role ?? '').toLowerCase();
   const canAccessSystemMonitoring = ['admin', 'coordinator', 'chairman', 'lecturer'].includes(role);
-  const items = commonItems.filter((item) =>
-    item.route !== '/system-monitoring' || canAccessSystemMonitoring,
-  );
+  const isLecturer = role === 'lecturer';
+  const items = commonItems
+    .filter((item) => item.route !== '/system-monitoring' || canAccessSystemMonitoring)
+    .map((item) => {
+      if (item.route === '/system-monitoring' && isLecturer) {
+        return { ...item, name: 'Cảnh báo học tập' };
+      }
+      return item;
+    });
 
   return (
     <div className="relative flex shrink-0 flex-col gap-2">
