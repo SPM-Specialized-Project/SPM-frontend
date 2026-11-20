@@ -15,6 +15,11 @@ tunnel. They use two independent Cloudflare Quick Tunnels instead:
 - `staging` -> Nginx on `127.0.0.1:18080`
 - Gitea -> Nginx `/git/` -> `127.0.0.1:8211`
 
+The main installer disables Ubuntu's packaged `sites-enabled/default` symlink
+when it resolves to `/etc/nginx/sites-available/default`. This leaves the SPM
+virtual host as the port-80 default so `/api/*` and `/git/` requests reach their
+configured services; custom Nginx default files are left untouched.
+
 Quick Tunnel links are random `trycloudflare.com` URLs and can change when a
 tunnel restarts. They are for staging/testing, not stable production hosting.
 The public URL is HTTPS; do not append the origin port (`:80`, `:18080`, or
