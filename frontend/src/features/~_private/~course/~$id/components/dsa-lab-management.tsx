@@ -6,15 +6,21 @@ import {
   PlayIcon,
   XCircleIcon,
 } from '@heroicons/react/24/outline';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'react-toastify';
 
+import {
+  useCodePulseWorkspaceAutosave,
+  type WorkspaceAutosaveStatus,
+} from '@/hooks/use-codepulse-workspace-autosave';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
+import { waitForExecution } from '@/services/codepulse-api';
 import {
   codePulseApi,
   type CodePulseAssignment,
   type CodePulseClassroom,
+  type CodePulseExecutionResult,
   type CodePulseLab,
   type CodePulseLabSubmission,
   type CodePulseLabAssignment,
@@ -22,17 +28,37 @@ import {
   type CodePulseRunSummary,
   type CodePulseSubmission,
   type CodePulseTerm,
+  type CodePulseResetRecord,
+  type CodePulseWorkspaceSubmission,
+  type CodePulseWorkspace,
 } from '@/services/codepulse-api';
 import { getCurrentViewerContext } from '@/services/viewer-context';
 
 import { AssignmentEditor } from './assignment-editor';
+import { ExecutionPanel } from './execution-panel';
+import { GradingResult } from './grading-result';
+import { IssueCasesPanel } from './issue-cases-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
+import { SandboxRunControls } from './sandbox-run-controls';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
 
-type WorkspaceSaveState = 'loading' | 'saved' | 'dirty' | 'saving' | 'error';
 type MobileWorkspaceTab = 'problem' | 'code' | 'tests';
+
+const saveStateLabel: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'Saving...',
+  saved: 'Saved',
+  dirty: 'Unsaved changes',
+  offline: 'Offline',
+};
+
+const saveStateClass: Record<WorkspaceAutosaveStatus, string> = {
+  saving: 'text-slate-500',
+  saved: 'text-emerald-700',
+  dirty: 'text-amber-700',
+  offline: 'text-rose-700',
+};
 
 const runtimeLabel: Record<CodePulseAssignment['runtime'], string> = {
   PYTHON: 'Python',
@@ -59,24 +85,43 @@ function StudentWorkspaceEditor({
   assignment: CodePulseAssignment;
   mobileTab: MobileWorkspaceTab;
 }) {
-  const [workspace, setWorkspace] = useState<{
-    id: string;
-    sourceCode: string;
-    updatedAt?: string;
-  }>();
+  const [workspace, setWorkspace] = useState<CodePulseWorkspace>();
   const [sourceCode, setSourceCode] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState(false);
+  const [runMode, setRunMode] = useState<'STDIN' | 'PUBLIC_TESTS'>('PUBLIC_TESTS');
+  const [stdin, setStdin] = useState('');
+  const [runState, setRunState] = useState('');
+  const selectedProblem = useRef(labAssignment.id);
+  selectedProblem.current = labAssignment.id;
   const [submitting, setSubmitting] = useState(false);
   const [runSummary, setRunSummary] = useState<CodePulseRunSummary>();
+  const [execution, setExecution] = useState<CodePulseExecutionResult>();
   const [submission, setSubmission] = useState<CodePulseLabSubmission>();
   const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
     usePracticeWindow(workspace?.id);
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [submitError, setSubmitError] = useState<string>();
-  const [saveState, setSaveState] = useState<WorkspaceSaveState>('loading');
+  const {
+    status: saveState,
+    error: saveError,
+    saveNow,
+  } = useCodePulseWorkspaceAutosave({
+    workspace,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+    onSaved: setWorkspace,
+  });
+  const [confirmingSubmission, setConfirmingSubmission] = useState(false);
+  const [snapshotSubmitting, setSnapshotSubmitting] = useState(false);
+  const [workspaceSubmission, setWorkspaceSubmission] = useState<CodePulseWorkspaceSubmission>();
+  const [submissionError, setSubmissionError] = useState<string>();
+  const [pendingRequest, setPendingRequest] = useState<{
+    sourceCode: string;
+    requestKey: string;
+  }>();
 
   useEffect(() => {
     let active = true;
@@ -85,10 +130,17 @@ function StudentWorkspaceEditor({
     setWorkspace(undefined);
     setSourceCode('');
     setRunSummary(undefined);
+    setExecution(undefined);
+    setRunning(false);
+    setRunState('');
     setSubmission(undefined);
     setRunError(undefined);
     setSubmitError(undefined);
-    setSaveState('loading');
+    setConfirmingSubmission(false);
+    setWorkspaceSubmission(undefined);
+    setSubmissionError(undefined);
+    setPendingRequest(undefined);
+    setSnapshotSubmitting(false);
 
     void codePulseApi
       .getStudentLabWorkspace(classroomId, lab.id, labAssignment.id)
@@ -96,7 +148,6 @@ function StudentWorkspaceEditor({
         if (!active) return;
         setWorkspace(response.data.item);
         setSourceCode(response.data.item.sourceCode);
-        setSaveState('saved');
       })
       .catch((reason: unknown) => {
         if (!active) return;
@@ -105,7 +156,6 @@ function StudentWorkspaceEditor({
             ? reason.message
             : 'Không thể tải workspace bài làm.',
         );
-        setSaveState('error');
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -116,27 +166,41 @@ function StudentWorkspaceEditor({
     };
   }, [assignment.id, classroomId, lab.id, labAssignment.id]);
 
+  useEffect(() => {
+    if (!workspace?.id || !workspace.problem) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const history = await codePulseApi.listWorkspaceSubmissions(workspace.id);
+        if (!active) return;
+        const latest = history.data.items.at(-1);
+        setWorkspaceSubmission(latest);
+        if (latest && ['PENDING', 'JUDGING'].includes(latest.status)) {
+          timer = setTimeout(() => void poll(), 1_000);
+        }
+      } catch {
+        if (active) timer = setTimeout(() => void poll(), 2_000);
+      }
+    };
+    void poll();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [workspace?.id, workspace?.problem, workspaceSubmission?.id]);
+
   const persistWorkspace = async (showToast = true) => {
-    if (!workspace) return false;
+    if (!workspace) return undefined;
     setSaving(true);
-    setSaveState('saving');
     try {
-      const response = await codePulseApi.updateWorkspace(
-        workspace.id,
-        sourceCode,
-      );
-      setWorkspace(response.data.item);
-      setSourceCode(response.data.item.sourceCode);
-      setSaveState('saved');
+      const savedWorkspace = await saveNow();
+      if (!savedWorkspace) {
+        if (showToast) toast.error('Could not save workspace code.');
+        return undefined;
+      }
       if (showToast) toast.success(`Đã lưu bài làm: ${assignment.title}.`);
-      return true;
-    } catch (reason: unknown) {
-      setSaveState('error');
-      if (showToast)
-        toast.error(
-          reason instanceof Error ? reason.message : 'Không thể lưu bài làm.',
-        );
-      return false;
+      return savedWorkspace;
     } finally {
       setSaving(false);
     }
@@ -144,29 +208,37 @@ function StudentWorkspaceEditor({
 
   const run = async () => {
     if (!workspace) return;
+    const problemId = labAssignment.id;
     setRunning(true);
     setRunError(undefined);
     setRunSummary(undefined);
     try {
-      const saved = await persistWorkspace(false);
-      if (!saved) {
+      const savedWorkspace = await persistWorkspace(false);
+      if (!savedWorkspace) {
         setRunError('Không thể lưu code trước khi chạy.');
         return;
       }
-      const response = await codePulseApi.runAssignment(
-        classroomId,
-        assignment.id,
-        sourceCode,
-        undefined,
-        { labId: lab.id, labAssignmentId: labAssignment.id },
-      );
-      setRunSummary(response.data.item);
+      const response = await codePulseApi.executeWorkspace(workspace.id, savedWorkspace.sourceCode, {
+        mode: runMode,
+        stdin,
+        baseRevision: savedWorkspace.revision,
+      });
+      if (selectedProblem.current === problemId) setExecution(response.data.item);
+      const execution = await waitForExecution(response.data.item, (item) => {
+        if (selectedProblem.current === problemId) setRunState(item.state);
+      });
+      if (selectedProblem.current !== problemId) return;
+      setExecution(execution);
+      setRunSummary({ ...execution, results: execution.results ?? [], passedCount: execution.passedCount ?? 0,
+        totalCount: execution.totalCount ?? 0 });
+      setRunState(execution.status);
     } catch (reason: unknown) {
+      if (selectedProblem.current !== problemId) return;
       setRunError(
         reason instanceof Error ? reason.message : 'Không thể chạy bài làm.',
       );
     } finally {
-      setRunning(false);
+      if (selectedProblem.current === problemId) setRunning(false);
     }
   };
 
@@ -190,24 +262,38 @@ function StudentWorkspaceEditor({
     }
   };
 
-  const saveStateLabel: Record<WorkspaceSaveState, string> = {
-    loading: 'Đang tải',
-    saved: workspace?.updatedAt
-      ? `Đã lưu ${new Date(workspace.updatedAt).toLocaleTimeString('vi-VN')}`
-      : 'Đã lưu',
-    dirty: 'Chưa lưu thay đổi',
-    saving: 'Đang lưu',
-    error: 'Lưu thất bại',
-  };
+  const createRequestKey = () =>
+    globalThis.crypto?.randomUUID?.() ??
+    `submit-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
-  const saveStateClass: Record<WorkspaceSaveState, string> = {
-    loading: 'text-slate-500',
-    saved: 'text-emerald-700',
-    dirty: 'text-amber-700',
-    saving: 'text-slate-500',
-    error: 'text-rose-700',
+  const submitImmutableSnapshot = async () => {
+    if (!workspace?.problem || !sourceCode.trim() || !practiceOpen || snapshotSubmitting) return;
+    const logicalRequest = pendingRequest?.sourceCode === sourceCode
+      ? pendingRequest
+      : { sourceCode, requestKey: createRequestKey() };
+    setPendingRequest(logicalRequest);
+    setSnapshotSubmitting(true);
+    setSubmissionError(undefined);
+    try {
+      const response = await codePulseApi.submitWorkspace(workspace.id, {
+        sourceCode: logicalRequest.sourceCode,
+        requestKey: logicalRequest.requestKey,
+        assignmentVersionId: workspace.problem.assignmentVersionId,
+      });
+      setWorkspaceSubmission(response.data.item);
+      setPendingRequest(undefined);
+      setConfirmingSubmission(false);
+      toast.success(
+        response.data.created
+          ? `Đã tiếp nhận snapshot bài nộp: ${assignment.title}.`
+          : `Đã khôi phục snapshot bài nộp: ${assignment.title}.`,
+      );
+    } catch (reason: unknown) {
+      setSubmissionError(reason instanceof Error ? reason.message : 'Không thể nộp snapshot bài làm.');
+    } finally {
+      setSnapshotSubmitting(false);
+    }
   };
-
   const editorLanguage = assignment.runtime === 'CPP' ? 'cpp' : 'python';
   const filename = assignment.runtime === 'CPP' ? 'main.cpp' : 'main.py';
   const unauthorized =
@@ -216,7 +302,7 @@ function StudentWorkspaceEditor({
     error?.toLowerCase().includes('unauthorized');
 
   return (
-    <section className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
+    <section aria-label="Student code workspace" className="min-w-0 overflow-hidden rounded-md border border-slate-200 bg-white">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <span className="truncate font-mono text-sm font-medium text-slate-900">
@@ -241,7 +327,7 @@ function StudentWorkspaceEditor({
             className={`text-xs ${saveStateClass[saveState]}`}
             aria-live="polite"
           >
-            {saveStateLabel[saveState]}
+            {loading ? 'Loading...' : saveStateLabel[saveState]}
           </span>
           <span className={`text-xs font-semibold ${practiceOpen ? 'text-emerald-700' : 'text-slate-500'}`}>
             {activityContext && `${activityContext === 'OUTSIDE_LAB' ? 'Outside-Lab' : 'In-Lab'} · `}
@@ -279,7 +365,7 @@ function StudentWorkspaceEditor({
             ) : (
               <PlayIcon className="size-4" aria-hidden="true" />
             )}
-            {running ? 'Đang chạy' : 'Run'}
+            {running ? runState === 'QUEUED' ? 'Đang chờ' : 'Đang chạy' : 'Run'}
           </button>
           <button
             type="button"
@@ -288,11 +374,38 @@ function StudentWorkspaceEditor({
             className="inline-flex h-8 items-center gap-1.5 rounded bg-amber-600 px-3 text-xs font-semibold text-white transition hover:bg-amber-700 focus:outline-none focus:ring-2 focus:ring-amber-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {submitting ? <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" /> : <CloudArrowUpIcon className="size-4" aria-hidden="true" />}
-            {submitting ? 'Submitting' : 'Submit'}
+            {submitting ? 'Đang chấm' : 'Submit & grade'}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setSubmissionError(undefined);
+              setConfirmingSubmission(true);
+            }}
+            disabled={
+              saving || running || snapshotSubmitting || loading || !workspace?.problem || !sourceCode.trim() || !practiceOpen
+            }
+            title={workspace?.problem ? undefined : 'Official Submit is available for an active LAB problem.'}
+            className="inline-flex h-8 items-center gap-1.5 rounded bg-slate-900 px-3 text-xs font-semibold text-white transition hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-600/40 disabled:cursor-not-allowed disabled:bg-slate-300"
+          >
+            {snapshotSubmitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+            Official submit
           </button>
         </div>
       </div>
+      {saveError && (
+        <p className="border-b border-rose-200 bg-rose-50 px-4 py-2 text-xs text-rose-800" role="alert">
+          {saveError}
+        </p>
+      )}
 
+      <SandboxRunControls mode={runMode} stdin={stdin} disabled={running || !practiceOpen}
+        onMode={setRunMode} onStdin={setStdin} />
+      {workspaceSubmission && (
+        <div className="border-b border-slate-200 px-4 pb-4">
+          <GradingResult submission={workspaceSubmission} />
+        </div>
+      )}
       {loading && (
         <p className="px-4 py-8 text-sm text-slate-500">Đang tải editor...</p>
       )}
@@ -332,7 +445,6 @@ function StudentWorkspaceEditor({
               value={sourceCode}
               onChange={(value) => {
                 setSourceCode(value);
-                setSaveState('dirty');
               }}
               height="min(52vh, 520px)"
             />
@@ -340,6 +452,7 @@ function StudentWorkspaceEditor({
           <div
             className={`${mobileTab === 'tests' ? 'block' : 'hidden'} border-t border-slate-200 lg:block`}
           >
+            <ExecutionPanel key={workspace.id} workspaceId={workspace.id} latest={execution ?? workspace.executionResult} />
             <TestResultsPanel
               summary={runSummary}
               running={running}
@@ -349,10 +462,58 @@ function StudentWorkspaceEditor({
           </div>
         </>
       )}
-      {submission && (
-        <p className="border-t border-slate-200 bg-emerald-50 px-4 py-3 text-xs text-emerald-800">
-          Đã chấp nhận lúc {new Date(submission.acceptedAt).toLocaleString('vi-VN')} · {submission.score}% · AI analysis và notification đã được đưa vào hàng đợi.
-        </p>
+      {confirmingSubmission && workspace?.problem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="presentation">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="submission-confirmation-title"
+            className="w-full max-w-md rounded-lg bg-white p-5 shadow-xl"
+          >
+            <h2 id="submission-confirmation-title" className="text-lg font-semibold text-slate-950">
+              Xác nhận nộp bài chính thức
+            </h2>
+            <p className="mt-2 text-sm text-slate-600">
+              Code hiện tại sẽ được lưu thành snapshot bất biến để chấm điểm.
+            </p>
+            <dl className="mt-4 space-y-3 rounded border border-slate-200 bg-slate-50 p-4 text-sm">
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Problem</dt>
+                <dd className="mt-1 font-semibold text-slate-900">{workspace.problem.title}</dd>
+              </div>
+              <div>
+                <dt className="text-xs font-medium text-slate-500">Pinned version</dt>
+                <dd className="mt-1 font-mono text-slate-900">
+                  v{workspace.problem.version} · {workspace.problem.assignmentVersionId}
+                </dd>
+              </div>
+            </dl>
+            {submissionError && (
+              <p className="mt-3 rounded border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800" role="alert">
+                {submissionError}
+              </p>
+            )}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmingSubmission(false)}
+                disabled={snapshotSubmitting}
+                className="rounded border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                onClick={() => void submitImmutableSnapshot()}
+                disabled={snapshotSubmitting}
+                className="inline-flex items-center gap-2 rounded bg-teal-700 px-4 py-2 text-sm font-semibold text-white disabled:bg-slate-300"
+              >
+                {snapshotSubmitting && <ArrowPathIcon className="size-4 animate-spin" aria-hidden="true" />}
+                {snapshotSubmitting ? 'Đang nộp' : 'Nộp snapshot'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </section>
   );
@@ -390,6 +551,11 @@ const runStatusMeta: Record<
   CodePulseRunResult['status'],
   { label: string; className: string }
 > = {
+  SUCCESS: { label: 'Success', className: 'text-emerald-700' },
+  TIME_LIMIT_EXCEEDED: { label: 'Time Limit Exceeded (TLE)', className: 'text-orange-700' },
+  MEMORY_LIMIT_EXCEEDED: { label: 'Memory Limit Exceeded (MLE)', className: 'text-orange-700' },
+  OUTPUT_LIMIT_EXCEEDED: { label: 'Output truncated', className: 'text-orange-700' },
+  INTERNAL_ERROR: { label: 'Internal Error · Lỗi hệ thống', className: 'text-slate-700' },
   PASSED: { label: 'Passed', className: 'text-emerald-700' },
   WRONG_ANSWER: { label: 'Wrong answer', className: 'text-amber-700' },
   RUNTIME_ERROR: { label: 'Runtime error', className: 'text-rose-700' },
@@ -422,7 +588,7 @@ function TestResultsPanel({
         <div>
           <h3 className="text-sm font-semibold text-slate-900">Tests</h3>
           <p className="mt-1 text-xs text-slate-500">
-            Public test cases for this problem.
+            {summary?.mode === 'STDIN' ? 'Custom input · Không chấm điểm' : 'Public test cases for this problem.'}
           </p>
         </div>
         {summary && (
@@ -430,8 +596,7 @@ function TestResultsPanel({
             <span
               className={`font-semibold ${allPassed ? 'text-emerald-700' : 'text-rose-700'}`}
             >
-              {allPassed ? 'Passed' : 'Failed'} · {summary.passedCount}/
-              {summary.totalCount}
+              {summary.status === 'INTERNAL_ERROR' ? 'Internal Error · Lỗi hệ thống' : summary.mode === 'STDIN' ? summary.status : `${allPassed ? 'Passed' : 'Failed'} · ${summary.passedCount}/${summary.totalCount}`}
             </span>
             <span className="ml-2">{totalDuration} ms</span>
           </div>
@@ -468,15 +633,14 @@ function TestResultsPanel({
                 <th className="p-2 font-medium">Status</th>
                 <th className="p-2 font-medium">Time</th>
                 <th className="p-2 font-medium">Input</th>
-                <th className="p-2 font-medium">Output</th>
+                <th className="p-2 font-medium">stdout</th>
+                <th className="p-2 font-medium">stderr</th>
                 <th className="p-2 font-medium">Expected</th>
               </tr>
             </thead>
             <tbody>
               {summary.results.map((result, index) => {
                 const meta = runStatusMeta[result.status];
-                const renderedOutput =
-                  result.actualOutput || result.stderr || '—';
                 return (
                   <tr
                     key={result.testCaseId}
@@ -508,8 +672,12 @@ function TestResultsPanel({
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       <output aria-label={`Output for test ${index + 1}`}>
-                        {renderedOutput}
+                        {result.actualOutput.slice(0, 32000) || '—'}
                       </output>
+                      {result.outputTruncated && <span className="block text-amber-800">⚠ Output truncated</span>}
+                    </td>
+                    <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-rose-700">
+                      <output aria-label={`stderr for test ${index + 1}`}>{result.stderr.slice(0, 32000) || '—'}</output>
                     </td>
                     <td className="max-w-40 whitespace-pre-wrap px-2 py-3 font-mono text-slate-700">
                       {result.expectedOutput || '—'}
@@ -793,6 +961,10 @@ export function DsaLabManagement({
 }: DsaLabManagementProps) {
   const [classrooms, setClassrooms] = useState<CodePulseClassroom[]>([]);
   const [terms, setTerms] = useState<CodePulseTerm[]>([]);
+  const [resetRecords, setResetRecords] = useState<CodePulseResetRecord[]>([]);
+  const [resetRecordsLoading, setResetRecordsLoading] = useState(false);
+  const [resetRecordsError, setResetRecordsError] = useState('');
+  const [resetRecordsVersion, setResetRecordsVersion] = useState(0);
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [lecturerEmail, setLecturerEmail] = useState('');
@@ -800,6 +972,7 @@ export function DsaLabManagement({
   const [role, setRole] = useState<string>(
     () => getCurrentViewerContext().viewerRole,
   );
+  const [currentUserEmail, setCurrentUserEmail] = useState('');
   const [termName, setTermName] = useState('');
   const [termStart, setTermStart] = useState('');
   const [termEnd, setTermEnd] = useState('');
@@ -807,8 +980,10 @@ export function DsaLabManagement({
   const [termStatus, setTermStatus] =
     useState<CodePulseTerm['status']>('DRAFT');
   const [editingTermId, setEditingTermId] = useState<string>();
+  const [resetReviewTermId, setResetReviewTermId] = useState('');
   const [termFilter, setTermFilter] = useState('current');
   const [selectedClassroomId, setSelectedClassroomId] = useState<string>();
+  const [resetAction, setResetAction] = useState<'start' | 'execute' | 'acknowledge'>();
   const isStudent = role === 'student';
   const currentTerm = useMemo(() => {
     const now = Date.now();
@@ -848,6 +1023,21 @@ export function DsaLabManagement({
     editMode && ['admin', 'lecturer'].includes(role ?? '');
   const canManageAssignments = editMode && role === 'lecturer';
   const showClassroomDirectory = role !== undefined && role !== 'student';
+  const selectedResetTermId = role === 'admin'
+    ? editingTermId
+    : resetReviewTermId;
+  const selectedResetRecord = resetRecords
+    .filter((record) => record.termId === selectedResetTermId)
+    .reduce<CodePulseResetRecord | undefined>((latest, record) => {
+      if (!latest) return record;
+      return Date.parse(record.completedAt ?? record.executedAt)
+        > Date.parse(latest.completedAt ?? latest.executedAt) ? record : latest;
+    }, undefined);
+  const termEndHasPassed = Boolean(termEnd && new Date(termEnd).getTime() <= Date.now());
+  const resetStateLocked = termStatus === 'RESETTING' || termStatus === 'RESETDONE';
+  const resetAcknowledged = selectedResetRecord?.acknowledgements?.some(
+    (acknowledgement) => acknowledgement.acknowledgedBy.toLowerCase() === currentUserEmail.toLowerCase(),
+  ) ?? false;
 
   const load = useCallback(async () => {
     const [sessionResult, classroomResult, termResult] = await Promise.all([
@@ -856,8 +1046,15 @@ export function DsaLabManagement({
       codePulseApi.listTerms(courseId),
     ]);
     setRole(sessionResult.data.role);
+    setCurrentUserEmail(sessionResult.data.user.email);
     setClassrooms(classroomResult.data.items);
     setTerms(termResult.data.items);
+    setResetReviewTermId((current) => current || termResult.data.items.find((term) =>
+      term.status === 'RESETDONE' || term.status === 'RESETTING')?.id || '');
+    if (editingTermId) {
+      const selectedTerm = termResult.data.items.find((term) => term.id === editingTermId);
+      if (selectedTerm) setTermStatus(selectedTerm.status);
+    }
     setTermId(
       (current) =>
         current ||
@@ -865,7 +1062,35 @@ export function DsaLabManagement({
         termResult.data.items[0]?.id ||
         '',
     );
-  }, [courseId]);
+  }, [courseId, editingTermId]);
+
+  useEffect(() => {
+    let active = true;
+    if (!selectedResetTermId) {
+      setResetRecords([]);
+      setResetRecordsError('');
+      setResetRecordsLoading(false);
+      return () => { active = false; };
+    }
+
+    setResetRecords([]);
+    setResetRecordsError('');
+    setResetRecordsLoading(true);
+    codePulseApi.listResetRecords(selectedResetTermId)
+      .then((result) => {
+        if (active) setResetRecords(result.data.items);
+      })
+      .catch((error: unknown) => {
+        if (!active) return;
+        setResetRecords([]);
+        setResetRecordsError(error instanceof Error ? error.message : 'Unable to load reset records.');
+      })
+      .finally(() => {
+        if (active) setResetRecordsLoading(false);
+      });
+
+    return () => { active = false; };
+  }, [resetRecordsVersion, selectedResetTermId]);
 
   useEffect(() => {
     void load();
@@ -940,6 +1165,7 @@ export function DsaLabManagement({
 
   const createTerm = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (resetStateLocked) return;
     try {
       if (editingTermId) {
         await codePulseApi.updateTerm(editingTermId, {
@@ -976,11 +1202,57 @@ export function DsaLabManagement({
 
   const editTerm = (term: CodePulseTerm) => {
     setEditingTermId(term.id);
+    setResetReviewTermId(term.id);
     setTermName(term.name);
     setTermStart(term.startDate);
     setTermEnd(term.endDate);
     setTermReset(term.resetDate);
     setTermStatus(term.status);
+  };
+
+  const startTermReset = async () => {
+    if (!editingTermId || !window.confirm('Start reset for this ended term? New student writes will be blocked.')) return;
+    setResetAction('start');
+    try {
+      await codePulseApi.startTermReset(editingTermId);
+      toast.success('Term reset is now in progress.');
+      await load();
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to start term reset.');
+    } finally {
+      setResetAction(undefined);
+    }
+  };
+
+  const executeTermReset = async () => {
+    if (!editingTermId || !window.confirm('Permanently purge student data for this term? Problem-bank definitions will be retained.')) return;
+    setResetAction('execute');
+    try {
+      const result = await codePulseApi.executeTermReset(editingTermId);
+      toast.success(`Term reset complete. ${Object.values(result.data.resetRecord.affectedRowCounts).reduce((total, count) => total + count, 0)} records purged.`);
+      await load();
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to complete term reset.');
+    } finally {
+      setResetAction(undefined);
+    }
+  };
+
+  const acknowledgeReset = async () => {
+    const record = selectedResetRecord;
+    if (!record || !selectedResetTermId || record.status !== 'COMPLETE' || resetAcknowledged) return;
+    setResetAction('acknowledge');
+    try {
+      await codePulseApi.acknowledgeReset(selectedResetTermId, record.id);
+      toast.success('Reset completion acknowledged.');
+      setResetRecordsVersion((version) => version + 1);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Unable to acknowledge reset.');
+    } finally {
+      setResetAction(undefined);
+    }
   };
 
   const deleteTerm = async () => {
@@ -1240,6 +1512,7 @@ export function DsaLabManagement({
                           required
                           value={termName}
                           onChange={(event) => setTermName(event.target.value)}
+                          disabled={resetStateLocked}
                           className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
                         />
                       </label>
@@ -1250,6 +1523,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termStart}
+                            disabled={resetStateLocked}
                             onChange={(event) =>
                               setTermStart(event.target.value)
                             }
@@ -1262,6 +1536,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termEnd}
+                            disabled={resetStateLocked}
                             onChange={(event) => setTermEnd(event.target.value)}
                             className="mt-1 w-full rounded border border-gray-300 p-2"
                           />
@@ -1272,6 +1547,7 @@ export function DsaLabManagement({
                             required
                             type="date"
                             value={termReset}
+                            disabled={resetStateLocked}
                             onChange={(event) =>
                               setTermReset(event.target.value)
                             }
@@ -1279,7 +1555,7 @@ export function DsaLabManagement({
                           />
                         </label>
                       </div>
-                      {editingTermId && (
+                      {editingTermId && !resetStateLocked && (
                         <label className="mt-3 block text-sm text-gray-700">
                           Status
                           <select
@@ -1293,17 +1569,28 @@ export function DsaLabManagement({
                           >
                             <option>DRAFT</option>
                             <option>ACTIVE</option>
+                            <option value="ENDED" disabled={!termEndHasPassed}>
+                              ENDED{termEndHasPassed ? '' : ' (end date not reached)'}
+                            </option>
                             <option>ARCHIVED</option>
                           </select>
                         </label>
                       )}
-                      <button
-                        type="submit"
-                        className="mt-4 rounded bg-slate-900 px-4 py-2 font-semibold text-white"
-                      >
-                        {editingTermId ? 'Save term' : 'Create term'}
-                      </button>
-                      {editingTermId && (
+                      {editingTermId && resetStateLocked && (
+                        <div className="mt-3 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                          Reset workflow status: <strong>{termStatus}</strong>. This state can only be changed by the reset workflow.
+                        </div>
+                      )}
+                      {!resetStateLocked && (
+                        <button
+                          type="submit"
+                          disabled={Boolean(resetAction)}
+                          className="mt-4 rounded bg-slate-900 px-4 py-2 font-semibold text-white"
+                        >
+                          {editingTermId ? 'Save term' : 'Create term'}
+                        </button>
+                      )}
+                      {editingTermId && !resetStateLocked && (
                         <button
                           type="button"
                           onClick={() => void deleteTerm()}
@@ -1312,12 +1599,171 @@ export function DsaLabManagement({
                           Delete term
                         </button>
                       )}
+                      {editingTermId && role === 'admin' && termStatus === 'ENDED' && (
+                        <button type="button" disabled={Boolean(resetAction)} onClick={() => void startTermReset()} className="ml-2 mt-4 rounded bg-amber-700 px-4 py-2 font-semibold text-white disabled:cursor-wait disabled:opacity-60">
+                          {resetAction === 'start' ? 'Starting reset...' : 'Start reset'}
+                        </button>
+                      )}
+                      {editingTermId && role === 'admin' && termStatus === 'RESETTING' && (
+                        <button type="button" disabled={Boolean(resetAction)} onClick={() => void executeTermReset()} className="ml-2 mt-4 rounded bg-red-700 px-4 py-2 font-semibold text-white disabled:cursor-wait disabled:opacity-60">
+                          {resetAction === 'execute' ? 'Waiting for in-flight work, then purging...' : 'Purge term data'}
+                        </button>
+                      )}
+                      {resetRecordsLoading && (
+                        <p role="status" className="mt-3 w-full text-sm text-gray-600">Loading reset audit...</p>
+                      )}
+                      {resetRecordsError && (
+                        <p role="alert" className="mt-3 w-full text-sm text-red-700">
+                          Unable to load reset audit: {resetRecordsError}
+                          <button type="button" className="ml-2 underline" onClick={() => setResetRecordsVersion((version) => version + 1)}>
+                            Retry
+                          </button>
+                        </p>
+                      )}
+                      {!resetRecordsLoading && !resetRecordsError && editingTermId && !selectedResetRecord && (
+                        <p className="mt-3 w-full text-sm text-gray-600">No reset record exists for this term.</p>
+                      )}
+                      {selectedResetRecord && (
+                        <section className="mt-5 w-full rounded-lg border border-slate-200 bg-slate-50 p-4" aria-label="Term reset audit">
+                          <h4 className="font-semibold text-gray-900">Reset audit</h4>
+                          <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                            <div><dt className="font-medium text-gray-600">Result</dt><dd>{selectedResetRecord.status}</dd></div>
+                            <div><dt className="font-medium text-gray-600">Executed by</dt><dd>{selectedResetRecord.executedBy}</dd></div>
+                            <div><dt className="font-medium text-gray-600">Started</dt><dd>{new Date(selectedResetRecord.executedAt).toLocaleString()}</dd></div>
+                            {selectedResetRecord.completedAt && (
+                              <div><dt className="font-medium text-gray-600">Completed</dt><dd>{new Date(selectedResetRecord.completedAt).toLocaleString()}</dd></div>
+                            )}
+                          </dl>
+                          <h5 className="mt-3 text-sm font-semibold">Affected row counts</h5>
+                          <ul className="mt-1 grid gap-x-4 text-sm sm:grid-cols-2">
+                            {Object.entries(selectedResetRecord.affectedRowCounts).map(([scope, count]) => (
+                              <li key={scope}>{scope}: {count}</li>
+                            ))}
+                          </ul>
+                          <h5 className="mt-3 text-sm font-semibold">Reconciliation</h5>
+                          <ul className="mt-1 grid gap-x-4 text-sm sm:grid-cols-2">
+                            {Object.entries(selectedResetRecord.reconciliation).map(([scope, passed]) => (
+                              <li key={scope}>{passed ? 'PASS' : 'INCOMPLETE'}: {scope}</li>
+                            ))}
+                          </ul>
+                          {selectedResetRecord.errors.length > 0 && (
+                            <div role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-800">
+                              <strong>Reset incomplete:</strong>
+                              <ul className="list-inside list-disc">
+                                {selectedResetRecord.errors.map((error) => <li key={error}>{error}</li>)}
+                              </ul>
+                            </div>
+                          )}
+                          {(selectedResetRecord.acknowledgements?.length ?? 0) > 0 && (
+                            <div className="mt-3 text-sm">
+                              <strong>Lecturer acknowledgements</strong>
+                              <ul>
+                                {selectedResetRecord.acknowledgements?.map((acknowledgement) => (
+                                  <li key={`${acknowledgement.acknowledgedBy}-${acknowledgement.acknowledgedAt}`}>
+                                    {acknowledgement.acknowledgedBy} — {new Date(acknowledgement.acknowledgedAt).toLocaleString()}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </section>
+                      )}
+                      {resetAction === 'execute' && (
+                        <p role="status" className="mt-3 w-full text-sm text-amber-800">
+                          Existing runner jobs and admitted submissions are being allowed to finish before deletion begins. Please keep this page open.
+                        </p>
+                      )}
                     </form>
                   )}
                 </div>
               )}
             </div>
           </>
+        )}
+        {role === 'lecturer' && (
+          <section className="mb-6 rounded-lg border border-slate-200 bg-white p-5" aria-label="Term reset sign-off">
+            <h3 className="text-lg font-semibold text-gray-900">Term reset review</h3>
+            <label className="mt-3 block max-w-xl text-sm font-medium text-gray-700">
+              Academic term
+              <select
+                aria-label="Select term reset to review"
+                value={resetReviewTermId}
+                onChange={(event) => setResetReviewTermId(event.target.value)}
+                className="mt-1 w-full rounded border border-gray-300 px-3 py-2"
+              >
+                <option value="">Select a term</option>
+                {terms.map((term) => (
+                  <option key={term.id} value={term.id}>{term.name} ({term.status})</option>
+                ))}
+              </select>
+            </label>
+            {resetRecordsLoading ? (
+              <p role="status" className="mt-3 text-sm text-gray-600">Loading reset audit...</p>
+            ) : resetRecordsError ? (
+              <div role="alert" className="mt-3 text-sm text-red-700">
+                Unable to load reset audit: {resetRecordsError}
+                <button type="button" className="ml-2 underline" onClick={() => setResetRecordsVersion((version) => version + 1)}>
+                  Retry
+                </button>
+              </div>
+            ) : selectedResetRecord ? (
+              <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
+                <p><strong>Reset status:</strong> {selectedResetRecord.status}</p>
+                <p><strong>Executed by:</strong> {selectedResetRecord.executedBy}</p>
+                <p><strong>Executed at:</strong> {new Date(selectedResetRecord.executedAt).toLocaleString()}</p>
+                {selectedResetRecord.completedAt && (
+                  <p><strong>Completed at:</strong> {new Date(selectedResetRecord.completedAt).toLocaleString()}</p>
+                )}
+                <h4 className="mt-3 font-semibold">Affected row counts</h4>
+                <ul className="grid gap-x-4 text-sm sm:grid-cols-2">
+                  {Object.entries(selectedResetRecord.affectedRowCounts).map(([scope, count]) => (
+                    <li key={scope}>{scope}: {count}</li>
+                  ))}
+                </ul>
+                <h4 className="mt-3 font-semibold">Reconciliation</h4>
+                <ul className="grid gap-x-4 text-sm sm:grid-cols-2">
+                  {Object.entries(selectedResetRecord.reconciliation).map(([scope, passed]) => (
+                    <li key={scope}>{passed ? 'PASS' : 'INCOMPLETE'}: {scope}</li>
+                  ))}
+                </ul>
+                {selectedResetRecord.errors.length > 0 && (
+                  <div role="alert" className="mt-3 rounded bg-red-50 p-3 text-sm text-red-800">
+                    <strong>Reset incomplete:</strong>
+                    <ul className="list-inside list-disc">
+                      {selectedResetRecord.errors.map((error) => <li key={error}>{error}</li>)}
+                    </ul>
+                  </div>
+                )}
+                {(selectedResetRecord.acknowledgements?.length ?? 0) > 0 && (
+                  <div className="mt-3 text-sm">
+                    <strong>Lecturer acknowledgements</strong>
+                    <ul>
+                      {selectedResetRecord.acknowledgements?.map((acknowledgement) => (
+                        <li key={`${acknowledgement.acknowledgedBy}-${acknowledgement.acknowledgedAt}`}>
+                          {acknowledgement.acknowledgedBy} — {new Date(acknowledgement.acknowledgedAt).toLocaleString()}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+                {selectedResetRecord.status === 'COMPLETE' && !resetAcknowledged && (
+                  <button type="button" disabled={Boolean(resetAction)} onClick={() => void acknowledgeReset()} className="mt-4 rounded bg-emerald-700 px-4 py-2 font-semibold text-white disabled:opacity-60">
+                    {resetAction === 'acknowledge' ? 'Saving acknowledgement...' : 'Acknowledge reset'}
+                  </button>
+                )}
+                {resetAcknowledged && (
+                  <p className="mt-3 text-sm font-medium text-emerald-800">You have acknowledged this reset.</p>
+                )}
+              </div>
+            ) : resetReviewTermId ? (
+              <p className="mt-3 text-sm text-gray-600">No reset record is available for this term.</p>
+            ) : (
+              <p className="mt-3 text-sm text-gray-600">Select a term to review its reset status and audit.</p>
+            )}
+          </section>
+        )}
+        {role === 'lecturer' && assignmentClassroomId && (
+          <IssueCasesPanel classroomId={assignmentClassroomId} />
         )}
         {role &&
           assignmentClassroomId &&

@@ -1,0 +1,15 @@
+[
+  {
+    "id": "snapshot-1792851399685-yb0ns5",
+    "workspaceId": "workspace-lab-1790744799755-lab-assignment-lab-1790744799755-3-membership-13-student-account-1",
+    "classroomId": "class-1",
+    "assignmentId": "problem-3",
+    "assignmentVersionId": "problem-3-v1",
+    "studentEmail": "student@gmail.com",
+    "sourceCode": "",
+    "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "revision": 2,
+    "trigger": "SAVE",
+    "createdAt": "2026-10-24T14:16:39.685Z"
+  }
+]

@@ -9,8 +9,10 @@ import {
   type CodePulseLabStatus,
   type CodePulseLabAssignment,
   type CodePulsePracticeWindowAudit,
+  type CodePulseWorkspaceSubmission,
 } from '@/services/codepulse-api';
 
+import { GradingResult } from './grading-result';
 import { StudentLabWorkspace } from './student-lab-workspace';
 
 type LabSessionManagementProps = {
@@ -185,6 +187,74 @@ function PracticeWindowControls({
         </button>
       </div>
     </div>
+  );
+}
+
+function LecturerLabSubmissions({
+  classroomId,
+  labId,
+}: {
+  classroomId: string;
+  labId: string;
+}) {
+  const [submissions, setSubmissions] = useState<CodePulseWorkspaceSubmission[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const load = async () => {
+      try {
+        const result = await codePulseApi.listLabSubmissions(classroomId, labId);
+        if (!active) return;
+        setSubmissions(result.data.items);
+        setError('');
+        const grading = result.data.items.some((item) => item.status === 'PENDING' || item.status === 'JUDGING');
+        timer = setTimeout(() => void load(), grading ? 1000 : 5000);
+      } catch (loadError) {
+        if (!active) return;
+        setError(loadError instanceof Error ? loadError.message : 'Không thể tải bài nộp.');
+        timer = setTimeout(() => void load(), 5000);
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+
+    void load();
+    return () => {
+      active = false;
+      if (timer) clearTimeout(timer);
+    };
+  }, [classroomId, labId]);
+
+  return (
+    <section className="mt-5 border-t border-gray-200 pt-4" aria-label="Bài nộp và kết quả chấm">
+      <h5 className="font-semibold text-gray-900">Bài nộp và kết quả chấm</h5>
+      {loading && submissions.length === 0 && (
+        <p className="mt-2 text-sm text-gray-500">Đang tải bài nộp...</p>
+      )}
+      {error && <p role="alert" className="mt-2 text-sm text-rose-700">{error}</p>}
+      {!loading && !error && submissions.length === 0 && (
+        <p className="mt-2 text-sm text-gray-500">Chưa có bài nộp cho LAB này.</p>
+      )}
+      <div className="mt-3 space-y-4">
+        {submissions.map((submission) => (
+          <article key={submission.id} className="rounded-lg border border-gray-200 bg-white p-3">
+            <div className="text-sm text-gray-700">
+              <p className="font-semibold text-gray-900">
+                {submission.student.name} · {submission.student.email}
+              </p>
+              <p className="mt-1">
+                {submission.assignmentVersion.title} · {formatDateTime(submission.acceptedAt)}
+              </p>
+            </div>
+            <GradingResult submission={submission} />
+          </article>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -471,6 +541,9 @@ export function LabSessionManagement({
                     </button>
                   ))}
                 </div>
+              )}
+              {isLecturer && (
+                <LecturerLabSubmissions classroomId={classroomId} labId={lab.id} />
               )}
             </article>
           ))}

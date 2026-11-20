@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import {
   assertVolumeContinuity, composeOverride, configurationFromEnvironment,
@@ -8,6 +9,15 @@ import {
 } from '../actions/deployment-lib.mjs';
 
 const environment = { GITEA_ADMIN_PASSWORD: 'integration-test-password', SPM_RUNNER_USER: 'runner' };
+
+test('main and staging deploys keep persistent backend data writable by the spm service', () => {
+  for (const script of ['spm-deploy', 'spm-staging-deploy']) {
+    const source = readFileSync(new URL(`../bin/${script}`, import.meta.url), 'utf8');
+    const installCommand = source.split(/\r?\n/)
+      .find((line) => line.includes('"$app_root/shared/data"'));
+    assert.match(installCommand ?? '', /^install -d -o spm -g spm -m 0750 /, script);
+  }
+});
 
 test('configuration fails before deployment for missing or unsafe inputs', () => {
   assert.equal(configurationFromEnvironment(environment).owner, 'codepulse-bot');
@@ -54,7 +64,8 @@ test('existing database password takes precedence and cannot be replaced acciden
 test('public URL is normalized once and Compose preserves literal dollars in passwords', () => {
   assert.equal(publicRootUrl('https://example-test.trycloudflare.com'), 'https://example-test.trycloudflare.com/git/');
   for (const value of ['https://https://example-test.trycloudflare.com', 'http://example-test.trycloudflare.com',
-    'https://example-test.trycloudflare.com:8080', 'https://example-test.trycloudflare.com/git/', 'https://example.com']) {
+    'https://example-test.trycloudflare.com:8080', 'https://example-test.trycloudflare.com:18080',
+    'https://example-test.trycloudflare.com/git/', 'https://example.com']) {
     assert.throws(() => publicRootUrl(value));
   }
   const password = 'abc$VALUE${NOT_A_VARIABLE}';

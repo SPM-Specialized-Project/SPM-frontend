@@ -1,48 +1,64 @@
 [
   {
-    "id": "lab-1790744799755",
+    "id": "lab-1790764823448",
     "classroomId": "class-1",
-    "name": "LAB 01 - Linked structures",
-    "description": "Ba bài cấu trúc liên kết trong một buổi thực hành 5 giờ.",
-    "startAt": "2026-09-30T06:05:00.000Z",
-    "endAt": "2026-09-30T11:05:00.000Z",
-    "status": "CANCELLED",
+    "name": "LAB1: PRACTICE",
+    "description": "",
+    "startAt": "2026-11-01T00:00:00.000Z",
+    "endAt": "2026-12-31T23:59:59.000Z",
+    "status": "LIVE",
     "createdBy": "lecturer@gmail.com",
-    "createdAt": "2026-09-30T05:06:39.755Z",
-    "updatedAt": "2026-09-30T07:10:32.901Z",
+    "createdAt": "2026-09-30T10:40:23.448Z",
+    "updatedAt": "2026-09-30T10:40:46.122Z",
     "assignments": [
       {
-        "id": "lab-assignment-lab-1790744799755-1",
+        "id": "lab-assignment-lab-1790764823448-1",
         "assignmentId": "problem-1",
         "assignmentVersionId": "problem-1-v1",
         "version": 1,
         "title": "Singly Linked List",
+        "description": "Implement the core operations of a singly linked list.",
+        "language": "PYTHON",
+        "starterCode": "# Implement the singly linked list here\n",
+        "hints": [
+          {
+            "id": "problem-1-v1-hint-1",
+            "title": "Head pointer",
+            "content": "Keep the first node in a dedicated head reference."
+          },
+          {
+            "id": "problem-1-v1-hint-2",
+            "title": "Traversal",
+            "content": "Move through the list by following each node next reference."
+          }
+        ],
         "order": 1,
         "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+        "practiceStartAt": "2026-11-01T00:00:00.000Z",
+        "practiceEndAt": "2026-12-31T23:59:59.000Z",
+        "practiceWindowStatus": "OPEN"
       },
       {
-        "id": "lab-assignment-lab-1790744799755-2",
-        "assignmentId": "problem-2",
-        "assignmentVersionId": "problem-2-v2",
-        "version": 2,
-        "title": "Doubly Linked List",
-        "order": 2,
-        "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
-      },
-      {
-        "id": "lab-assignment-lab-1790744799755-3",
+        "id": "lab-assignment-lab-1790764823448-2",
         "assignmentId": "problem-3",
         "assignmentVersionId": "problem-3-v1",
         "version": 1,
         "title": "Queue implementation",
-        "order": 3,
+        "description": "Read a number of ENQUEUE and DEQUEUE commands. Print each value removed from the front of the FIFO queue.",
+        "language": "PYTHON",
+        "starterCode": "# Implement the queue here\n",
+        "hints": [
+          {
+            "id": "problem-3-v1-hint-1",
+            "title": "FIFO",
+            "content": "Insert at the rear and remove from the front."
+          }
+        ],
+        "order": 2,
         "mandatory": true,
-        "practiceStartAt": "2026-09-30T06:05:00.000Z",
-        "practiceEndAt": "2026-09-30T11:05:00.000Z"
+        "practiceStartAt": "2026-11-01T00:00:00.000Z",
+        "practiceEndAt": "2026-12-31T23:59:59.000Z",
+        "practiceWindowStatus": "OPEN"
       }
     ]
   }

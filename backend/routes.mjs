@@ -34,7 +34,27 @@ import {
 } from './data/storage.mjs';
 import { apiError, readRequestBody, sendJson } from './http.mjs';
 import { createSession, getSessionUser } from './auth.mjs';
-import { getCodePulseClassrooms, getCodePulseSubmissionContext, handleCodePulse } from './codepulse.mjs';
+import {
+  getCodePulseClassrooms,
+  getCodePulseSubmissionContext,
+  getCodePulseExecutionQueueStats,
+  getCodePulseAiQueueStats,
+  handleCodePulse,
+} from './codepulse.mjs';
+import { getAlerts, updateAlertStatus, getAlertStats } from './alerts.mjs';
+import {
+  getSystemOperationsHealth,
+  getRequestTrace,
+  getAuditLogs,
+  recordAuditLog,
+} from './admin-operations.mjs';
+import {
+  getBackups,
+  createSemesterBackup,
+  verifyBackupDisasterRecovery,
+  restoreSemesterBackup,
+} from './backups.mjs';
+import { generateSessionReport } from './session-reports.mjs';
 
 const isMembershipRoute = (parts) =>
   parts[0] === 'api' &&
@@ -239,6 +259,118 @@ async function handleRequest(request, response) {
   const viewerRole = normalizeRole(currentUser.role);
   const effectiveUser = { ...currentUser, role: viewerRole };
   const viewerEmail = currentUser.email;
+
+  const sessionReportMatch = requestUrl.pathname.match(/^\/api\/codepulse\/sessions\/([^/]+)\/report$/);
+  if (sessionReportMatch && request.method === 'GET') {
+    const sessionId = sessionReportMatch[1];
+    const report = await generateSessionReport(sessionId);
+    if (!report) throw apiError(404, 'SESSION_NOT_FOUND', 'Không tìm thấy buổi thực hành được yêu cầu.');
+    sendJson(response, 200, { item: report });
+    return;
+  }
+
+  if (parts[0] === 'api' && parts[1] === 'admin') {
+    const isAlertsRoute = parts[2] === 'alerts';
+    const isAdminOrOperator = ['admin', 'coordinator', 'chairman'].includes(viewerRole);
+    const isLecturer = viewerRole === 'lecturer';
+
+    // Access control: Only system administrators have full admin access; lecturers only have access to alerts
+    if (!isAdminOrOperator && !(isLecturer && isAlertsRoute)) {
+      throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền truy cập chức năng quản trị hệ thống.');
+    }
+
+    // Health (D-07: dynamic AI queue and worker pool)
+    if (parts[2] === 'operations' && parts[3] === 'health' && request.method === 'GET') {
+      const health = await getSystemOperationsHealth(
+        getCodePulseExecutionQueueStats(),
+        typeof getCodePulseAiQueueStats === 'function' ? getCodePulseAiQueueStats() : null,
+      );
+      sendJson(response, 200, { item: health });
+      return;
+    }
+
+    // Trace (D-06: returns 404 when trace does not exist)
+    if (parts[2] === 'operations' && parts[3] === 'traces' && parts[4] && request.method === 'GET') {
+      const trace = await getRequestTrace(parts[4]);
+      if (!trace) {
+        throw apiError(404, 'TRACE_NOT_FOUND', 'Không tìm thấy bản ghi vết cho mã yêu cầu này.');
+      }
+      sendJson(response, 200, { item: trace });
+      return;
+    }
+
+    // Audit logs
+    if (parts[2] === 'operations' && parts[3] === 'audit-logs' && request.method === 'GET') {
+      const logs = await getAuditLogs();
+      sendJson(response, 200, { items: logs, total: logs.length });
+      return;
+    }
+
+    // Smart Alerts
+    if (parts[2] === 'alerts' && parts[3] === 'stats' && request.method === 'GET') {
+      const stats = await getAlertStats({ classroomId: requestUrl.searchParams.get('classroomId') });
+      sendJson(response, 200, { item: stats });
+      return;
+    }
+
+    if (parts[2] === 'alerts' && !parts[3] && request.method === 'GET') {
+      const alerts = await getAlerts({
+        classroomId: requestUrl.searchParams.get('classroomId'),
+        status: requestUrl.searchParams.get('status'),
+      });
+      sendJson(response, 200, { items: alerts, total: alerts.length });
+      return;
+    }
+
+    if (parts[2] === 'alerts' && parts[3] && parts[4] === 'status' && request.method === 'PATCH') {
+      const body = await readRequestBody(request);
+      if (!body.status) throw apiError(400, 'INVALID_INPUT', 'Trạng thái mới không hợp lệ.');
+      const updated = await updateAlertStatus(parts[3], body.status, viewerEmail);
+      await recordAuditLog({
+        actor: viewerEmail,
+        action: 'UPDATE_ALERT_STATUS',
+        target: `Alert:${parts[3]}`,
+        requestId: `req-alert-${Date.now()}`,
+        result: 'SUCCESS',
+        details: `Cập nhật trạng thái alert sang: ${body.status}`,
+      });
+      sendJson(response, 200, { item: updated });
+      return;
+    }
+
+    // Backups
+    if (parts[2] === 'backups' && !parts[3] && request.method === 'GET') {
+      const backups = await getBackups();
+      sendJson(response, 200, { items: backups, total: backups.length });
+      return;
+    }
+
+    if (parts[2] === 'backups' && !parts[3] && request.method === 'POST') {
+      const body = await readRequestBody(request).catch(() => ({}));
+      const created = await createSemesterBackup({
+        actorEmail: viewerEmail,
+        termId: body.termId || 'term-2026-1',
+      });
+      sendJson(response, 201, { item: created });
+      return;
+    }
+
+    if (parts[2] === 'backups' && parts[3] && parts[4] === 'verify' && request.method === 'POST') {
+      const result = await verifyBackupDisasterRecovery(parts[3], viewerEmail);
+      sendJson(response, 200, { item: result });
+      return;
+    }
+
+    // Restore backup (D-04 / AC-16c)
+    if (parts[2] === 'backups' && parts[3] && parts[4] === 'restore' && request.method === 'POST') {
+      const result = await restoreSemesterBackup(parts[3], viewerEmail);
+      sendJson(response, 200, { item: result });
+      return;
+    }
+
+    throw apiError(404, 'NOT_FOUND', 'Không tìm thấy API admin endpoint.');
+  }
+
   if (requestUrl.pathname.startsWith('/api/codepulse/')) {
     await handleCodePulse({ request, response, requestUrl, user: effectiveUser, sendJson, readRequestBody, apiError });
     return;
@@ -483,6 +615,9 @@ async function handleRequest(request, response) {
     if (index < 0) throw apiError(404, 'SUBMISSION_NOT_FOUND', `Không tìm thấy submission ${parts[2]}.`);
 
     const current = records[index];
+    if (current.kind === 'CODE_SUBMISSION') {
+      throw apiError(409, 'IMMUTABLE_SUBMISSION', 'Accepted code submissions cannot be modified.');
+    }
     if (!['student', 'lecturer'].includes(viewerRole)) {
       throw apiError(403, 'FORBIDDEN', 'Bạn không có quyền sửa bài nộp.');
     }

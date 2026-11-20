@@ -1,4 +1,4 @@
-// Run only in the disposable harness documented in docs/staging-deploy-debian.md.
+// Run only in the disposable harness documented in docs/staging-deploy-windows-wsl.md.
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';

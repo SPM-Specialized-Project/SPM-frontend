@@ -40,6 +40,7 @@ type ApiErrorPayload = {
   code?: string;
   message?: string;
   errors?: Record<string, string>;
+  details?: any;
 };
 
 const backendUrl = import.meta.env.VITE_BACKEND_URL?.trim() || '/api';
@@ -69,6 +70,7 @@ export class ApiError extends Error {
     public readonly status: number,
     public readonly code: string,
     public readonly errors: Record<string, string> = {},
+    public readonly details?: any,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -84,6 +86,7 @@ const toApiError = (error: unknown): ApiError => {
       error.response?.status ?? 500,
       error.response?.data?.code ?? 'API_ERROR',
       error.response?.data?.errors ?? {},
+      error.response?.data?.details,
     );
   }
 

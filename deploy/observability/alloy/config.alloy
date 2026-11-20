@@ -1,0 +1,19 @@
+loki.write "local" {
+  endpoint {
+    url = "http://loki:3100/loki/api/v1/push"
+  }
+}
+
+loki.source.journal "spm_backend" {
+  matches    = "_SYSTEMD_UNIT=spm-backend.service"
+  max_age    = "12h"
+  labels     = { job = "spm-backend", environment = "production" }
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.source.journal "spm_staging_backend" {
+  matches    = "_SYSTEMD_UNIT=spm-staging-backend.service"
+  max_age    = "12h"
+  labels     = { job = "spm-staging-backend", environment = "staging" }
+  forward_to = [loki.write.local.receiver]
+}

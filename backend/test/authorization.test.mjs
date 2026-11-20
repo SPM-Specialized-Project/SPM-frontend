@@ -197,7 +197,11 @@ test('SCRUM-20: authentication, scope, sanitization and revocation', async (t) =
   assert.equal(gradedSubmission.data.item.score, 9);
   assert.equal(gradedSubmission.data.item.permissions.canReview, true);
   assert.equal((await api('/api/codepulse/terms?courseId=13', lecturer)).status, 200);
-  assert.equal((await api('/api/codepulse/workspaces/workspace-1', student, 'PATCH', { sourceCode: 'safe edit', is_admin: true })).status, 200);
+  assert.equal((await api('/api/codepulse/workspaces/workspace-1', student, 'PATCH', {
+    sourceCode: 'safe edit',
+    baseRevision: 0,
+    is_admin: true,
+  })).status, 200);
   assert.equal((await api('/api/codepulse/classrooms/class-1/dashboard', student)).status, 403);
 
   assert.equal((await api('/api/codepulse/memberships/member-1', admin, 'PATCH', { status: 'revoked' })).status, 200);

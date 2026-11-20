@@ -7,8 +7,8 @@ const readRequestBody = async (request) => {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'));
 };
 
-const apiError = (status, code, message) =>
-  Object.assign(new Error(message), { status, code });
+const apiError = (status, code, message, details) =>
+  Object.assign(new Error(message), { status, code, ...(details ? { details } : {}) });
 
 const sendJson = (response, status, payload) => {
   response.writeHead(status, {

@@ -34,6 +34,11 @@ fi
 if ! id -u spm >/dev/null 2>&1; then
   sudo useradd --system --gid spm --home-dir "$app_root" --shell /usr/sbin/nologin spm
 fi
+if ! getent group docker >/dev/null; then
+  echo 'The Docker group is required so the backend service can run sandbox containers.' >&2
+  exit 69
+fi
+sudo usermod --append --groups docker spm
 
 sudo install -d -o root -g spm -m 0755 \
   "$app_root" \
@@ -42,6 +47,9 @@ sudo install -d -o spm -g spm -m 0750 \
   "$app_root/shared" \
   "$app_root/shared/data"
 sudo install -d -m 0755 /etc/spm-frontend
+sudo install -d -m 0755 /etc/nginx/conf.d
+sudo install -m 0644 deploy/nginx/spm-observability-redirects.conf \
+  /etc/nginx/conf.d/spm-observability-redirects.conf
 
 if [[ ! -f /etc/spm-frontend/backend.env ]]; then
   printf 'BACKEND_CORS_ORIGIN=http://localhost:3000\n' \
@@ -59,8 +67,9 @@ sed "s|__CLOUDFLARED_PATH__|$cloudflared_path|g" \
   | sudo tee /etc/systemd/system/spm-quick-tunnel.service >/dev/null
 sudo install -m 0644 deploy/nginx/spm.conf \
   /etc/nginx/sites-available/spm.conf
-sudo install -m 0755 deploy/bin/spm-deploy \
-  /usr/local/sbin/spm-deploy
+sed 's/\r$//' deploy/bin/spm-deploy \
+  | sudo tee /usr/local/sbin/spm-deploy >/dev/null
+sudo chmod 0755 /usr/local/sbin/spm-deploy
 sudo ln -sfn /etc/nginx/sites-available/spm.conf \
   /etc/nginx/sites-enabled/spm.conf
 
@@ -81,6 +90,7 @@ sudo visudo -cf /etc/sudoers.d/spm-quick-tunnel
 
 sudo systemctl daemon-reload
 sudo systemctl enable nginx spm-backend spm-quick-tunnel.service
+sudo bash deploy/observability/install-host.sh
 sudo nginx -t
 sudo systemctl start nginx
 
