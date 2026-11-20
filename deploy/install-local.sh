@@ -73,6 +73,12 @@ sudo chmod 0755 /usr/local/sbin/spm-deploy
 sudo ln -sfn /etc/nginx/sites-available/spm.conf \
   /etc/nginx/sites-enabled/spm.conf
 
+# Ubuntu's packaged default site also claims port 80 and becomes the default
+# virtual host, which shadows the application routes during local health checks.
+sudo bash deploy/bin/disable-default-nginx-site \
+  /etc/nginx/sites-enabled/default \
+  /etc/nginx/sites-available/default
+
 printf '%s ALL=(root) NOPASSWD: /usr/local/sbin/spm-deploy *\n' "$runner_user" \
   | sudo tee /etc/sudoers.d/spm-deploy >/dev/null
 sudo chmod 0440 /etc/sudoers.d/spm-deploy

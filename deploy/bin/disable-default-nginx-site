@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $# -ne 2 ]]; then
+  echo "usage: disable-default-nginx-site <enabled-site> <distribution-default-site>" >&2
+  exit 64
+fi
+
+enabled_site="$1"
+distribution_default_site="$2"
+
+# Keep a custom site named "default" intact. Only remove the enabled symlink
+# when it resolves to the distribution-provided site that shadows the app vhost.
+if [[ ! -L "$enabled_site" ]]; then
+  exit 0
+fi
+
+enabled_target="$(readlink -f -- "$enabled_site")"
+default_target="$(readlink -f -- "$distribution_default_site")"
+if [[ "$enabled_target" == "$default_target" ]]; then
+  rm -- "$enabled_site"
+  echo "Disabled the distribution default Nginx site: $enabled_site"
+fi
