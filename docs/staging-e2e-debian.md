@@ -103,16 +103,17 @@ Push vào `staging` không tạo lượt chạy **Staging Deploy** riêng. Có t
 thủ công bằng **Actions → Staging E2E Gate → Run workflow** trên nhánh `staging`;
 lượt thủ công chỉ deploy, không dispatch E2E.
 
-Job `Promotion source` có sẵn sẽ kiểm tra Windows runner `TUNGQUAN` trước khi cho phép
-`deploy-staging` được schedule. Runner cần đủ label `self-hosted`, `windows`, `x64`,
-`local-deploy`, `status=online` và `busy=false`; nếu không thì dừng ngay, không poll
-chờ idle. Sau đó deployment job chạy dịch vụ Linux trong Ubuntu WSL2 trên cùng máy.
-Không thêm job riêng. Cần secret `RUNNER_STATUS_TOKEN` có quyền repository
-**Administration: Read** trên `SPM-frontend`; token E2E hiện tại vẫn dùng cho E2E.
+Job Promotion source kiểm tra runner triển khai Debian trước khi cho phép
+deploy-staging được schedule. Runner cần các label self-hosted, Linux, X64, debian-13,
+trạng thái online và busy=false; nếu không thì dừng ngay, không poll chờ idle.
+Job deploy chạy trực tiếp trên host Debian 13, không qua WSL. Bước host-check
+xác nhận Debian 13, systemd, Node.js 22, Docker Compose, Buildx và cloudflared trước
+khi thay đổi dịch vụ. Cần secret RUNNER_STATUS_TOKEN có quyền repository
+Administration: Read trên SPM-frontend; token E2E hiện tại vẫn dùng cho E2E.
 API check chỉ xác nhận trạng thái tại thời điểm kiểm tra, không giữ chỗ runner.
-`staging-deploy.yml` chỉ nhận `workflow_call` với `runner_ready=true` từ bước kiểm tra
-này, không có nút chạy thủ công để bỏ qua preflight.
-
+staging-deploy.yml chỉ nhận workflow_call với runner_ready=true từ bước kiểm tra
+này, không có nút chạy thủ công để bỏ qua preflight. Hướng dẫn cài host ở
+[deploy-debian-13.md](deploy-debian-13.md).
 Workflow gửi payload chứa:
 
 - repository SPM cần test;

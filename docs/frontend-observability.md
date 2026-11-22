@@ -12,9 +12,9 @@ Từ thư mục gốc repository, chạy PowerShell:
 
 Mở Grafana qua Nginx tại `http://localhost:8081/observation/grafana/`. Tài khoản là `admin`; mật khẩu được tạo ngẫu nhiên và lưu trong `%LOCALAPPDATA%\SPM-Observability\grafana.env`. Local chỉ mở gateway Nginx ở cổng `8081`; cổng Grafana `3000` nằm trong Docker network và không publish ra host. Dừng dịch vụ bằng `.\deploy\observability\stop-local.ps1`; dữ liệu vẫn được giữ trong Docker volumes.
 
-Grafana đã được provision datasource Loki (`http://loki:3100`) và Loki không mở cổng ra máy chủ. Khi triển khai trên WSL, Alloy đọc journal của `spm-backend.service` và `spm-staging-backend.service`, rồi gửi log vào Loki. Trong Grafana chọn **Explore → Loki** và chạy `{job="spm-backend"}` hoặc `{job="spm-staging-backend"}`. Bản local trên Windows chỉ khởi động Grafana và Loki; log sẽ trống cho tới khi có nguồn gửi log.
+Grafana đã được provision datasource Loki (`http://loki:3100`) và Loki không mở cổng ra máy chủ. Khi triển khai trên Debian 13, Alloy đọc journal của `spm-backend.service` và `spm-staging-backend.service`, rồi gửi log vào Loki. Trong Grafana chọn **Explore → Loki** và chạy `{job="spm-backend"}` hoặc `{job="spm-staging-backend"}`. Bản local trên Windows chỉ khởi động Grafana và Loki; log sẽ trống cho tới khi có nguồn gửi log.
 
-Trên WSL deploy host, mật khẩu admin được lưu riêng ở `/etc/spm-observability/grafana.env`; chủ máy có thể đọc bằng `sudo cat /etc/spm-observability/grafana.env`. Không chạy lệnh đó trong GitHub Actions vì nó sẽ in credential vào log.
+Trên Debian 13 deploy host, mật khẩu admin được lưu riêng ở `/etc/spm-observability/grafana.env`; chủ máy có thể đọc bằng `sudo cat /etc/spm-observability/grafana.env`. Không chạy lệnh đó trong GitHub Actions vì nó sẽ in credential vào log.
 
 ## Cấu hình local
 
