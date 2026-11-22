@@ -62,20 +62,48 @@ jobs:
             echo 'Started the official Ollama 0.40.17 image on Debian loopback.'
           fi
 
-          curl_local --retry 12 --retry-connrefused --retry-max-time 45 --max-time 5 "$OLLAMA_HOST/api/version"
+          if ! curl_local --retry 20 --retry-all-errors --retry-delay 2 --retry-max-time 90 --max-time 5 "$OLLAMA_HOST/api/version"; then
+            if docker container inspect spm-codepulse-ollama >/dev/null 2>&1; then
+              docker inspect --format '{{.State.Status}} (restarts={{.RestartCount}}, exit={{.State.ExitCode}})' spm-codepulse-ollama
+              docker logs --tail 20 spm-codepulse-ollama 2>&1
+            fi
+            exit 1
+          fi
           printf '\n'
           tags="$(curl_local --max-time 10 "$OLLAMA_HOST/api/tags")"
           if ! node -e 'const tags = JSON.parse(process.argv[1]); process.exitCode = tags.models.some(({name}) => name === process.env.CODEPULSE_OLLAMA_MODEL) ? 0 : 1' "$tags"; then
             echo "Downloading $CODEPULSE_OLLAMA_MODEL into Ollama's model store."
-            request="$(node -e 'console.log(JSON.stringify({model:process.env.CODEPULSE_OLLAMA_MODEL,stream:false}))')"
-            curl_local --max-time 1200 --header 'Content-Type: application/json' --data-binary "$request" "$OLLAMA_HOST/api/pull" |
-              node -e 'const response = JSON.parse(require("node:fs").readFileSync(0,"utf8")); if (response.status !== "success") throw new Error("Ollama model download did not complete"); console.log(response.status)'
+            request="$(node -e 'console.log(JSON.stringify({model:process.env.CODEPULSE_OLLAMA_MODEL,stream:true}))')"
+            curl_local --no-buffer --max-time 1500 --header 'Content-Type: application/json' --data-binary "$request" "$OLLAMA_HOST/api/pull" |
+              node --input-type=module -e '
+                import { createInterface } from "node:readline";
+                const reported = new Map();
+                let finalStatus;
+                for await (const line of createInterface({input: process.stdin})) {
+                  if (!line) continue;
+                  const result = JSON.parse(line);
+                  if (result.error) throw new Error(result.error);
+                  finalStatus = result.status;
+                  if (result.total < 100_000_000 || !result.completed || !result.digest) continue;
+                  const segment = Math.floor(10 * result.completed / result.total);
+                  if (segment > (reported.get(result.digest) || 0)) {
+                    console.log(`Model download: ${Math.min(segment * 10, 100)}%`);
+                    reported.set(result.digest, segment);
+                  }
+                }
+                if (finalStatus !== "success") throw new Error("Ollama model download did not complete");
+                console.log("Model is installed.");
+              '
           fi
 
       - name: Verify real inference through the CodePulse worker
         env:
           CODEPULSE_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/chat
-        run: node deploy/actions/debian-ollama-smoke.mjs
+        shell: bash
+        run: |
+          node deploy/actions/debian-ollama-smoke.mjs
+          curl --noproxy '*' --fail --silent --show-error --max-time 5 "$OLLAMA_HOST/api/ps" |
+            node -e 'const result = JSON.parse(require("node:fs").readFileSync(0,"utf8")); const model = result.models.find(({name}) => name === process.env.CODEPULSE_OLLAMA_MODEL); if (model) console.log(JSON.stringify({name:model.name,loadedBytes:model.size,gpuBytes:model.size_vram}));'
 
       - name: Start Colibri on the Debian desktop loopback
         shell: bash
