@@ -1,4 +1,4 @@
-# Gitea in Ubuntu WSL2 on the Windows runner
+# Gitea on the Debian 13 deployment host
 
 This example runs rootless Gitea with PostgreSQL and exposes only the local
 HTTP origin used by the host Nginx:
@@ -10,7 +10,7 @@ HTTP origin used by the host Nginx:
 
 ## Install or recreate the stack
 
-In the persistent Ubuntu WSL2 distribution on the Windows runner:
+On the Debian 13 deployment host:
 
 ```bash
 sudo install -d -m 0750 /srv/git-platform
@@ -41,7 +41,7 @@ The host Nginx configuration in `deploy/nginx/spm.conf` and
 ## Start automatically after a runner reset
 
 The containers have `restart: unless-stopped`, but install a host systemd unit
-as well so the Compose stack is explicitly brought up after Docker starts inside WSL2:
+as well so the Compose stack is explicitly brought up after Docker starts on Debian 13:
 
 ```bash
 cd /path/to/SPM-frontend

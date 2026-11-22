@@ -67,12 +67,12 @@ jobs:
         run: npm run deploy:test
 
   deploy-local:
-    name: Deploy main on Windows (WSL2)
+    name: Deploy main on Debian 13
     if: github.ref == 'refs/heads/main'
     needs:
       - frontend-quality
       - backend-quality
-    runs-on: [self-hosted, windows, x64, local-deploy]
+    runs-on: [self-hosted, linux, x64, debian-13]
     timeout-minutes: 30
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
@@ -81,7 +81,6 @@ jobs:
       cancel-in-progress: false
     env:
       SPM_DEPLOY_ENVIRONMENT: main
-      SPM_WSL_DISTRO: ${{ vars.SPM_WSL_DISTRO }}
     steps:
       - name: Checkout main
         uses: actions/checkout@v7
@@ -93,9 +92,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Check WSL2 deployment runtime
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase host-check
+      - name: Check Debian 13 deployment runtime
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs host-check
 
       - name: Validate main secrets and runner permissions
         env:
@@ -104,8 +103,8 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase check
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs check
 
       - name: Build production frontend
         env:
@@ -129,8 +128,8 @@ jobs:
         working-directory: frontend
 
       - name: Build isolated code runner on deployment host
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase build-sandbox
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs build-sandbox
 
       - name: Configure main services and shared Gitea
         env:
@@ -141,23 +140,23 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase setup
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs setup
 
       - name: Deploy atomic release
-        shell: powershell
+        shell: bash
         env:
-          SPM_WSL_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase deploy
+          SPM_DEPLOY_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        run: node deploy/actions/linux-deployment.mjs deploy
 
       - name: Verify local deployment
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-local
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs verify-local
 
       - name: Start one Cloudflare Quick Tunnel
         id: cloudflare
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase tunnel
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs tunnel
 
       - name: Configure shared Gitea canonical URL
         id: gitea
@@ -170,31 +169,31 @@ jobs:
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_MAIN_OWNER }}
           SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase public
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs public
 
       - name: Verify public main and shared Gitea
         env:
           SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-public
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs verify-public
 
       - name: Publish main and shared Gitea URLs
-        shell: powershell
+        shell: bash
         env:
           MAIN_URL: ${{ steps.cloudflare.outputs.public_url }}
           GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
         run: |
-          @"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ### Public deployment URL
 
-          - Frontend: [$env:MAIN_URL/]($env:MAIN_URL/)
-          - Backend health: [$env:MAIN_URL/api/health]($env:MAIN_URL/api/health)
-          - Local Grafana with Loki: [$env:MAIN_URL/observation/grafana/]($env:MAIN_URL/observation/grafana/)
+          - Frontend: [$MAIN_URL/]($MAIN_URL/)
+          - Backend health: [$MAIN_URL/api/health]($MAIN_URL/api/health)
+          - Local Grafana with Loki: [$MAIN_URL/observation/grafana/]($MAIN_URL/observation/grafana/)
           - Datadog/Sentry: configure DATADOG_DASHBOARD_URL and SENTRY_DASHBOARD_URL to your account URLs.
-          - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
+          - Shared Gitea: [$GITEA_URL]($GITEA_URL)
           - Repository owner for main: configured GITEA_MAIN_OWNER, or codepulse-bot-main.
           - Gitea uses the same PostgreSQL database and volumes as staging.
 
-          > The public URL is HTTPS. Do not append the WSL origin port (for example `:18080`).
-          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          > The public URL is HTTPS. Do not append the local Nginx port.
+          EOF

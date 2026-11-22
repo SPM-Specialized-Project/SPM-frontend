@@ -8,7 +8,7 @@ on:
         required: false
         type: string
       runner_ready:
-        description: The caller verified an online idle local-deploy runner
+        description: The caller verified an online idle Debian deployment runner
         required: true
         type: boolean
     secrets:
@@ -34,16 +34,15 @@ concurrency:
 
 jobs:
   deploy-staging:
-    name: Deploy staging on Windows (WSL2)
+    name: Deploy staging on Debian 13
     if: inputs.runner_ready && (inputs.app_ref != '' || github.ref == 'refs/heads/staging')
-    runs-on: [self-hosted, windows, x64, local-deploy]
+    runs-on: [self-hosted, linux, x64, debian-13]
     timeout-minutes: 45
     concurrency:
       group: spm-git-platform-deploy
       cancel-in-progress: false
     env:
       SPM_DEPLOY_ENVIRONMENT: staging
-      SPM_WSL_DISTRO: ${{ vars.SPM_WSL_DISTRO }}
     outputs:
       public_url: ${{ steps.cloudflare.outputs.public_url }}
     steps:
@@ -59,9 +58,9 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Check WSL2 deployment runtime
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase host-check
+      - name: Check Debian 13 deployment runtime
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs host-check
 
       - name: Validate staging secrets and runner permissions
         env:
@@ -70,8 +69,8 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase check
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs check
 
       - name: Build staging frontend
         env:
@@ -97,8 +96,8 @@ jobs:
           npm run build
 
       - name: Test staging backend
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase tests
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs tests
 
       - name: Test staging deployment configuration
         run: npm run deploy:test
@@ -112,23 +111,23 @@ jobs:
           GITEA_ADMIN_USERNAME: ${{ vars.GITEA_ADMIN_USERNAME }}
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase setup
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs setup
 
       - name: Deploy staging release
-        shell: powershell
+        shell: bash
         env:
-          SPM_WSL_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase deploy
+          SPM_DEPLOY_RELEASE_ID: ${{ github.run_id }}-${{ github.run_attempt }}-${{ github.sha }}
+        run: node deploy/actions/linux-deployment.mjs deploy
 
       - name: Verify staging locally
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-local
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs verify-local
 
       - name: Start staging Cloudflare Quick Tunnel
         id: cloudflare
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase tunnel
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs tunnel
 
       - name: Configure Gitea public URL
         id: gitea
@@ -141,40 +140,36 @@ jobs:
           GITEA_ADMIN_EMAIL: ${{ vars.GITEA_ADMIN_EMAIL }}
           GITEA_OWNER: ${{ vars.GITEA_OWNER }}
           SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase public
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs public
 
       - name: Verify public staging and Gitea
         env:
           SPM_DEPLOY_PUBLIC_URL: ${{ steps.cloudflare.outputs.public_url }}
-        shell: powershell
-        run: ./deploy/actions/invoke-wsl.ps1 -Phase verify-public
+        shell: bash
+        run: node deploy/actions/linux-deployment.mjs verify-public
 
       - name: Publish staging URL to job summary
         if: ${{ success() && steps.cloudflare.outputs.public_url != '' }}
-        shell: powershell
+        shell: bash
         env:
           STAGING_URL: ${{ steps.cloudflare.outputs.public_url }}
           GITEA_URL: ${{ steps.gitea.outputs.gitea_url }}
         run: |
-          @"
+          cat >> "$GITHUB_STEP_SUMMARY" <<EOF
           ## Staging deployment ready
 
-          ### Open staging: [$env:STAGING_URL/]($env:STAGING_URL/)
+          ### Open staging: [$STAGING_URL/]($STAGING_URL/)
 
-          **Staging URL (copy):**
+          **Staging URL (copy):** $STAGING_URL
 
-          ```text
-          $env:STAGING_URL
-          ```
-
-          - Backend health: [$env:STAGING_URL/api/health]($env:STAGING_URL/api/health)
-          - Local Grafana with Loki: [$env:STAGING_URL/observation/grafana/]($env:STAGING_URL/observation/grafana/)
+          - Backend health: [$STAGING_URL/api/health]($STAGING_URL/api/health)
+          - Local Grafana with Loki: [$STAGING_URL/observation/grafana/]($STAGING_URL/observation/grafana/)
           - Datadog/Sentry: configure DATADOG_DASHBOARD_URL and SENTRY_DASHBOARD_URL to your account URLs.
-          - Shared Gitea: [$env:GITEA_URL]($env:GITEA_URL)
+          - Shared Gitea: [$GITEA_URL]($GITEA_URL)
           - Gitea admin username: configured GITEA_ADMIN_USERNAME, or spm-admin.
-          - Backend Gitea token: verified by private repository/branch/file writes and saved in WSL.
+          - Backend Gitea token: verified by private repository/branch/file writes and saved on the Debian host.
           - Link type: Cloudflare Quick Tunnel; it may change when the tunnel restarts.
-          - The public URL is HTTPS; do not append the WSL origin port (for example `:18080`).
+          - The public URL is HTTPS; do not append a local Nginx port.
           - Backend service: spm-staging-backend.service
-          "@ | Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY
+          EOF
