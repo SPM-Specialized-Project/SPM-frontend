@@ -1,0 +1,32 @@
+name: Verify deployed staging CodePulse with Ollama
+on:
+  push:
+    branches: [ops/staging-codepulse-verify]
+    paths: [.github/workflows/staging-codepulse-verify.yml, deploy/actions/staging-codepulse-smoke.mjs]
+permissions:
+  contents: read
+concurrency:
+  group: spm-git-platform-deploy
+  cancel-in-progress: false
+jobs:
+  codepulse:
+    runs-on: [self-hosted, linux, x64, debian-13]
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Verify the live staging release
+        shell: bash
+        run: |
+          systemctl is-active --quiet spm-staging-backend.service
+          source /etc/os-release
+          test "$ID:$VERSION_ID" = 'debian:13'
+          curl --noproxy '*' -fsS --max-time 10 http://127.0.0.1:18080/api/health >/dev/null
+          backend="$(readlink -f /opt/spm-frontend-staging/current/backend)"
+          cmp -- "$backend/issue-detection.mjs" "$GITHUB_WORKSPACE/backend/issue-detection.mjs"
+          echo 'The running staging release contains the evidence fix.'
+          SPM_SMOKE_BACKEND="$backend" node deploy/actions/staging-codepulse-smoke.mjs
