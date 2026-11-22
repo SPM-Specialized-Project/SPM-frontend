@@ -136,6 +136,31 @@ jobs:
             node -e 'const models = JSON.parse(require("node:fs").readFileSync(0,"utf8")); if (!models.data.some(({id}) => id === "qwen3:4b")) throw new Error("Colibri cannot reach qwen3:4b");'
           echo 'Colibri is available in the Debian browser at http://127.0.0.1:5186/.'
 
+      - name: Apply Ollama reasoning control to the Colibri preview
+        shell: bash
+        run: |
+          pid="$(ss -Hlnp 'sport = :5186' | sed -nE 's/.*"node",pid=([0-9]+).*/\1/p')"
+          [[ "$pid" =~ ^[1-9][0-9]*$ ]] || { echo 'Colibri preview process not found.' >&2; exit 1; }
+          web="$(readlink -f "/proc/$pid/cwd")"
+          case "$web" in
+            "$HOME"/.cache/spm-colibri-ollama.*/web) ;;
+            *) echo 'The process on port 5186 is not the CodePulse Colibri preview.' >&2; exit 1 ;;
+          esac
+          node --input-type=module - "$web/src/lib/api.ts" <<'JS'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const filename = process.argv[2];
+          const source = readFileSync(filename, 'utf8');
+          const setting = 'reasoning_effort: options.enableThinking ? "medium" : "none",';
+          if (!source.includes(setting)) {
+            const upstream = 'enable_thinking: options.enableThinking,';
+            if (source.split(upstream).length !== 2) throw new Error('Unexpected Colibri chat request format');
+            const replacement = upstream + '\n      ' + setting;
+            writeFileSync(filename, source.replace(upstream, replacement));
+          }
+          JS
+          response="$(curl --noproxy '*' --fail --silent --show-error --max-time 10 http://127.0.0.1:5186/src/lib/api.ts)"
+          grep -q 'reasoning_effort' <<< "$response"
+
       - name: Verify staging runtime configuration
         env:
           RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
