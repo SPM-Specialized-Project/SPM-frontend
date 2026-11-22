@@ -152,6 +152,7 @@ const aiMessages = (input) => [
       'Do not provide hints, solutions, grades, integrity judgments, or code edits.',
       'Return only JSON: {"findings":[{"problemTypeId":"...","rationale":"...","evidence":[{"kind":"CODE","snapshotId":"...","lineStart":1,"lineEnd":1,"excerpt":"exact lines"},{"kind":"TEST","executionId":"...","testCaseId":"...","status":"WRONG_ANSWER"},{"kind":"EVENT","eventId":"..."}]}]}. For TEST references, executionId must equal executionContextId in the input.',
       'Cite only exact source lines or concrete execution events and failed test cases provided in the input.',
+      'Each finding needs at least one CODE or TEST reference. For CODE, lineStart and lineEnd are inclusive and must span every line in excerpt.',
       'Use an empty findings array when evidence is insufficient or the issue type is outside the approved taxonomy.',
     ].join(' '),
   },
@@ -334,6 +335,32 @@ function createProvider() {
   };
 }
 
+function verifiedCodeReference(reference, sourceLines) {
+  const { snapshotId, lineStart, lineEnd } = reference;
+  if (!Number.isInteger(lineStart) || !Number.isInteger(lineEnd)
+    || lineStart < 1 || lineEnd < lineStart || typeof reference.excerpt !== 'string') return null;
+
+  const excerpt = reference.excerpt.replace(/\r\n/g, '\n').trim();
+  const excerptLineCount = excerpt.split('\n').length;
+  if (!excerpt || excerptLineCount > 40) return null;
+  const matchesExcerpt = (start, count = excerptLineCount) => sourceLines.slice(start, start + count).join('\n').trim() === excerpt;
+
+  const claimedLineCount = lineEnd - lineStart + 1;
+  if (lineEnd <= sourceLines.length && claimedLineCount <= 40 && matchesExcerpt(lineStart - 1, claimedLineCount)) {
+    return { kind: 'CODE', snapshotId, lineStart, lineEnd, excerpt };
+  }
+
+  let matchedStart = -1;
+  for (let start = 0; start + excerptLineCount <= sourceLines.length; start += 1) {
+    if (!matchesExcerpt(start)) continue;
+    if (matchedStart !== -1) return null;
+    matchedStart = start;
+  }
+  if (matchedStart === -1) return null;
+
+  return { kind: 'CODE', snapshotId, lineStart: matchedStart + 1, lineEnd: matchedStart + excerptLineCount, excerpt };
+}
+
 function modelEvidenceIsVerifiable(item, assessment, execution) {
   const evidence = Array.isArray(item?.evidence) ? item.evidence : [];
   const sourceLines = String(assessment.analysisInput?.snapshot?.sourceCode ?? '').split(/\r?\n/);
@@ -345,22 +372,9 @@ function modelEvidenceIsVerifiable(item, assessment, execution) {
   const results = new Map((execution?.results ?? []).map((result) => [result.testCaseId, result]));
   const accepted = [];
   for (const reference of evidence) {
-    if (reference?.kind === 'CODE'
-      && reference.snapshotId === assessment.snapshotId
-      && Number.isInteger(reference.lineStart)
-      && Number.isInteger(reference.lineEnd)
-      && reference.lineStart > 0
-      && reference.lineEnd >= reference.lineStart
-      && reference.lineEnd - reference.lineStart < 40
-      && reference.lineEnd <= sourceLines.length
-      && typeof reference.excerpt === 'string'
-      && reference.excerpt.trim()
-      && sourceLines.slice(reference.lineStart - 1, reference.lineEnd).join('\n').trim() === reference.excerpt.trim()) {
-      accepted.push({
-        kind: 'CODE', snapshotId: assessment.snapshotId,
-        lineStart: reference.lineStart, lineEnd: reference.lineEnd,
-        excerpt: reference.excerpt.trim(),
-      });
+    if (reference?.kind === 'CODE' && reference.snapshotId === assessment.snapshotId) {
+      const verified = verifiedCodeReference(reference, sourceLines);
+      if (verified) accepted.push(verified);
     }
     if (reference?.kind === 'TEST'
       && reference.executionId === (assessment.executionId ?? assessment.submissionId)
