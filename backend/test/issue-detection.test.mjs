@@ -234,6 +234,37 @@ test('SCRUM-75: separates runner failures, provider errors, and unverifiable fin
   assert.deepEqual(await service.listIssueCases('class-1'), []);
 });
 
+test('recovers incorrect line numbers only when an exact code excerpt has one location', async (t) => {
+  const excerpt = 'int factorial(int n) {\n  return n * factorial(n - 1);\n}';
+  const snapshots = {
+    'snapshot-unique': `// Factorial\n${excerpt}`,
+    'snapshot-ambiguous': `// Factorial\n${excerpt}\n\n${excerpt}`,
+  };
+  const service = createIssueDetectionService({
+    file: await createStore(t),
+    evaluate: async ({ snapshot }) => ({
+      findings: [{
+        problemTypeId: 'INFINITE_RECURSION',
+        rationale: 'The recursive call lacks a condition that terminates execution.',
+        evidence: [{ kind: 'CODE', snapshotId: snapshot.id, lineStart: 1, lineEnd: 1, excerpt }],
+      }],
+    }),
+    resolveSnapshot: async (id) => ({ id, sourceCode: snapshots[id], hash: id, revision: 1 }),
+  });
+
+  for (const id of Object.keys(snapshots)) await service.trigger(triggerInput(id));
+
+  const assessments = await waitForTerminal(service, 2);
+  const bySnapshot = new Map(assessments.map((item) => [item.snapshotId, item.state]));
+  assert.equal(bySnapshot.get('snapshot-unique'), 'EVALUATED');
+  assert.equal(bySnapshot.get('snapshot-ambiguous'), 'INSUFFICIENT_EVIDENCE');
+  const cases = await service.listIssueCases('class-1');
+  assert.equal(cases.length, 1);
+  assert.deepEqual(cases[0].evidence[0].references, [
+    { kind: 'CODE', snapshotId: 'snapshot-unique', lineStart: 2, lineEnd: 4, excerpt },
+  ]);
+});
+
 test('SCRUM-75: constrains Ollama output to approved assessment findings and evidence', async (t) => {
   const file = await createStore(t);
   const envKeys = [

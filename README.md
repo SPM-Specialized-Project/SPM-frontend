@@ -26,6 +26,10 @@
 
 ---
 
+## Deployment
+
+The production and staging GitHub Actions workflows deploy on a self-hosted Debian 13 runner. See [docs/deploy-debian-13.md](docs/deploy-debian-13.md) for setup and operations.
+
 ## 🌟 Overview
 
 This project is a comprehensive course management system built for Ho Chi Minh City University of Technology (HCMUT). It provides a modern, scalable platform for managing courses, students, assignments, and system monitoring.

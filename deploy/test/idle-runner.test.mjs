@@ -5,8 +5,8 @@ import { requireIdleDeployRunner } from '../actions/check-idle-runner.mjs';
 
 const repository = 'example/application';
 const token = 'fixture-token-not-for-logging';
-const runner = (patch = {}) => ({ id: 1, name: 'TUNGQUAN', status: 'online', busy: false,
-  labels: ['self-hosted', 'Windows', 'X64', 'local-deploy'].map((name) => ({ name })), ...patch });
+const runner = (patch = {}) => ({ id: 1, name: 'debian', status: 'online', busy: false,
+  labels: ['self-hosted', 'Linux', 'X64', 'debian-13'].map((name) => ({ name })), ...patch });
 
 async function inventory(t, pages, status = 200) {
   const requests = [];
@@ -36,7 +36,7 @@ test('busy, offline, unlabelled and unknown-state runners stop deployment withou
     runner({ busy: undefined }), runner({ labels: [{ name: 'self-hosted' }, { name: 'test-e2e-local' }] }),
     runner({ status: 'unknown' })]) {
     const options = await inventory(t, [{ total_count: 1, runners: [candidate] }]);
-    await assert.rejects(requireIdleDeployRunner(options), /No idle local-deploy runner/);
+    await assert.rejects(requireIdleDeployRunner(options), /No idle Debian deployment runner/);
     assert.equal(options.requests.length, 1);
   }
 });
@@ -70,7 +70,7 @@ test('an eligible idle runner on the second inventory page is considered', async
 
 test('empty or invalid inventories and network failures never permit deployment', async (t) => {
   const empty = await inventory(t, [{ total_count: 0, runners: [] }]);
-  await assert.rejects(requireIdleDeployRunner(empty), /No idle local-deploy runner/);
+  await assert.rejects(requireIdleDeployRunner(empty), /No idle Debian deployment runner/);
   const malformed = await inventory(t, [{ runners: [runner()] }]);
   await assert.rejects(requireIdleDeployRunner(malformed), /invalid runner inventory/);
   let requests = 0;
