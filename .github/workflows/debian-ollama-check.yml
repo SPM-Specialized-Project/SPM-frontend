@@ -1,0 +1,150 @@
+name: Configure Ollama on the Debian runner
+on:
+  push:
+    branches: [ops/debian-ollama-check]
+    paths: [.github/workflows/debian-ollama-check.yml, deploy/actions/debian-ollama-smoke.mjs]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: spm-git-platform-deploy
+  cancel-in-progress: false
+jobs:
+  ollama:
+    if: github.ref == 'refs/heads/ops/debian-ollama-check'
+    runs-on: [self-hosted, linux, x64, debian-13]
+    timeout-minutes: 40
+    env:
+      OLLAMA_HOST: http://127.0.0.1:11434
+      CODEPULSE_AI_PROVIDER: ollama
+      CODEPULSE_OLLAMA_MODEL: qwen3:4b
+      CODEPULSE_AI_TIMEOUT_MS: '120000'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Start persistent local Ollama and load the model
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+        shell: bash
+        run: |
+          source /etc/os-release
+          test "$ID:$VERSION_ID" = 'debian:13'
+          test "$(uname -m)" = 'x86_64'
+          as_root() {
+            if sudo -n true 2>/dev/null; then
+              sudo -n "$@"
+            elif [[ -n "$RUNNER_SUDO_PASSWORD" ]]; then
+              printf '%s\n' "$RUNNER_SUDO_PASSWORD" | sudo -S -p '' "$@"
+            else
+              echo 'Starting the installed Ollama service requires runner sudo access.' >&2
+              return 1
+            fi
+          }
+          curl_local() { curl --noproxy '*' --fail --silent --show-error "$@"; }
+          if systemctl cat ollama.service >/dev/null 2>&1; then
+            if ! systemctl is-active --quiet ollama.service || ! systemctl is-enabled --quiet ollama.service; then
+              as_root systemctl enable --now ollama.service
+            fi
+            echo 'Using the installed Ollama systemd service.'
+          elif docker container inspect spm-codepulse-ollama >/dev/null 2>&1; then
+            docker start spm-codepulse-ollama >/dev/null
+            echo 'Using the existing CodePulse Ollama container.'
+          elif curl_local --max-time 3 "$OLLAMA_HOST/api/version" >/dev/null 2>&1; then
+            echo 'Using the existing Ollama endpoint on this host.'
+          else
+            docker run --detach --name spm-codepulse-ollama --restart unless-stopped \
+              --publish 127.0.0.1:11434:11434 --volume spm-codepulse-ollama:/root/.ollama \
+              ollama/ollama@sha256:5e5802d3c018ecdee7c7dff32a7e3b10ca9a2c4b3a461392cff97c313c2af0fc >/dev/null
+            echo 'Started the official Ollama 0.40.17 image on Debian loopback.'
+          fi
+
+          curl_local --retry 12 --retry-connrefused --retry-max-time 45 --max-time 5 "$OLLAMA_HOST/api/version"
+          printf '\n'
+          tags="$(curl_local --max-time 10 "$OLLAMA_HOST/api/tags")"
+          if ! node -e 'const tags = JSON.parse(process.argv[1]); process.exitCode = tags.models.some(({name}) => name === process.env.CODEPULSE_OLLAMA_MODEL) ? 0 : 1' "$tags"; then
+            echo "Downloading $CODEPULSE_OLLAMA_MODEL into Ollama's model store."
+            request="$(node -e 'console.log(JSON.stringify({model:process.env.CODEPULSE_OLLAMA_MODEL,stream:false}))')"
+            curl_local --max-time 1200 --header 'Content-Type: application/json' --data-binary "$request" "$OLLAMA_HOST/api/pull" |
+              node -e 'const response = JSON.parse(require("node:fs").readFileSync(0,"utf8")); if (response.status !== "success") throw new Error("Ollama model download did not complete"); console.log(response.status)'
+          fi
+
+      - name: Verify real inference through the CodePulse worker
+        env:
+          CODEPULSE_OLLAMA_ENDPOINT: http://127.0.0.1:11434/api/chat
+        run: node deploy/actions/debian-ollama-smoke.mjs
+
+      - name: Start Colibri on the Debian desktop loopback
+        shell: bash
+        run: |
+          if curl --noproxy '*' --fail --silent --max-time 3 http://127.0.0.1:5186/v1/models >/dev/null; then
+            echo 'Colibri preview already responds on port 5186.'
+            exit 0
+          fi
+          if ss -Hln 'sport = :5186' | grep -q .; then
+            echo 'Port 5186 is already in use.' >&2
+            exit 1
+          fi
+          mkdir -p "$HOME/.cache"
+          app="$(mktemp -d "$HOME/.cache/spm-colibri-ollama.XXXXXX")"
+          git -C "$app" init --quiet
+          git -C "$app" fetch --quiet --depth=1 https://github.com/JustVugg/colibri.git e0db083cdc9e563e0766cc6fc661ef23c32298e0
+          git -C "$app" checkout --quiet --detach FETCH_HEAD
+          cd "$app/web"
+          npm ci --no-audit --no-fund
+          cat > spm-local-preview.mjs <<'JS'
+          import { createServer } from 'vite';
+          const proxy = { target: 'http://127.0.0.1:11434', changeOrigin: true };
+          const server = await createServer({
+            server: { host: '127.0.0.1', port: 5186, strictPort: true, proxy: { '/v1': proxy, '/health': proxy } },
+          });
+          await server.listen();
+          JS
+          env -u RUNNER_TRACKING_ID nohup "$(command -v node)" spm-local-preview.mjs > "$app/preview.log" 2>&1 < /dev/null &
+          curl --noproxy '*' --fail --silent --show-error --retry 10 --retry-connrefused --retry-max-time 30 --max-time 3 http://127.0.0.1:5186/v1/models |
+            node -e 'const models = JSON.parse(require("node:fs").readFileSync(0,"utf8")); if (!models.data.some(({id}) => id === "qwen3:4b")) throw new Error("Colibri cannot reach qwen3:4b");'
+          echo 'Colibri is available in the Debian browser at http://127.0.0.1:5186/.'
+
+      - name: Verify staging runtime configuration
+        env:
+          RUNNER_SUDO_PASSWORD: ${{ secrets.RUNNER_SUDO_PASSWORD }}
+        shell: bash
+        run: |
+          pid="$(systemctl show --property MainPID --value spm-staging-backend.service)"
+          if [[ ! "$pid" =~ ^[1-9][0-9]*$ ]]; then
+            echo '::warning::The staging backend service is inactive.'
+            exit 0
+          fi
+          read_process_environment() {
+            if [[ -r "/proc/$pid/environ" ]]; then
+              cat "/proc/$pid/environ"
+            elif sudo -n true 2>/dev/null; then
+              sudo -n cat "/proc/$pid/environ"
+            elif [[ -n "$RUNNER_SUDO_PASSWORD" ]]; then
+              printf '%s\n' "$RUNNER_SUDO_PASSWORD" | sudo -S -p '' cat "/proc/$pid/environ"
+            else
+              echo '::error::Runner could not read the effective staging provider settings.' >&2
+              return 1
+            fi
+          }
+          read_process_environment | node -e '
+            const fs = require("node:fs");
+            const entries = fs.readFileSync(0,"utf8").split("\0").filter(Boolean).map(entry => {
+              const equals = entry.indexOf("=");
+              return [entry.slice(0,equals),entry.slice(equals+1)];
+            });
+            const env = Object.fromEntries(entries);
+            const value = name => env[name]?.trim();
+            if (!entries.length) throw new Error("Reading staging environment failed");
+            const provider = value("CODEPULSE_AI_PROVIDER")?.toLowerCase() || (value("CODEPULSE_AI_ENDPOINT") ? "openai" : "ollama");
+            const model = value("CODEPULSE_OLLAMA_MODEL") || (provider === "ollama" ? value("CODEPULSE_AI_MODEL") : "") || "qwen3:4b";
+            const endpoint = value("CODEPULSE_OLLAMA_ENDPOINT") || "http://127.0.0.1:11434/api/chat";
+            const local = /^http:\/\/(127\.0\.0\.1|localhost):11434\/api\/chat$/.test(endpoint);
+            if (provider !== "ollama" || model !== "qwen3:4b" || !local) {
+              throw new Error("Staging has an override for the AI provider, model, or endpoint");
+            }
+            console.log("Running staging backend uses Ollama qwen3:4b over Debian loopback.");
+          '
