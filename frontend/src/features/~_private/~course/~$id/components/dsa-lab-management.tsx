@@ -40,6 +40,7 @@ import { GradingResult } from './grading-result';
 import { IssueCasesPanel } from './issue-cases-panel';
 import { LabSessionManagement } from './lab-session-management';
 import { MonacoCodeEditor } from './monaco-code-editor';
+import { RealtimeClassroomDashboard } from './realtime-classroom-dashboard';
 import { SandboxRunControls } from './sandbox-run-controls';
 
 type DsaLabManagementProps = { courseId: string; editMode?: boolean };
@@ -1761,6 +1762,9 @@ export function DsaLabManagement({
               <p className="mt-3 text-sm text-gray-600">Select a term to review its reset status and audit.</p>
             )}
           </section>
+        )}
+        {(role === 'lecturer' || role === 'admin') && assignmentClassroomId && (
+          <RealtimeClassroomDashboard classroomId={assignmentClassroomId} />
         )}
         {role === 'lecturer' && assignmentClassroomId && (
           <IssueCasesPanel classroomId={assignmentClassroomId} />
