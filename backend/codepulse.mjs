@@ -1,8 +1,8 @@
 import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
-import { evaluateExecutionAlert } from './alerts.mjs';
-import { recordTraceEvent } from './admin-operations.mjs';
+import { evaluateExecutionAlert, getAlerts } from './alerts.mjs';
+import { recordTraceEvent, recordAuditLog } from './admin-operations.mjs';
 import {
   createGradingQueue,
   lecturerJudgmentView,
@@ -2089,6 +2089,169 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     if (!isDsaManager(item)) deny();
     sendJson(response, 200, { classroom: item, activeMembers: memberships.filter((member) =>
       belongsToClassroom(member, item.id) && isActiveMembership(member)).length });
+    return;
+  }
+
+  if (parts[2] === 'classrooms' && parts[4] === 'realtime-dashboard' && request.method === 'GET') {
+    const item = classroom(parts[3]);
+    if (user.role === 'student') {
+      throw apiError(403, 'FORBIDDEN', 'Học sinh không có quyền truy cập realtime classroom dashboard.');
+    }
+    if (user.role === 'lecturer' && !isDsaManager(item)) {
+      throw apiError(403, 'FORBIDDEN', 'Bạn không được phân công giảng dạy classroom này.');
+    }
+    if (user.role !== 'admin' && user.role !== 'lecturer' && user.role !== 'coordinator') {
+      deny();
+    }
+
+    try {
+      await recordAuditLog({
+        actor: user.email,
+        action: 'CLASSROOM_REALTIME_DASHBOARD_ACCESS',
+        target: `classroom:${item.id}`,
+        result: 'SUCCESS',
+        details: { classroomId: item.id, role: user.role },
+      });
+    } catch {}
+
+    const filterLabId = requestUrl.searchParams.get('labId');
+    const filterProblemId = requestUrl.searchParams.get('problemId') || requestUrl.searchParams.get('assignmentId');
+
+    const allWorkspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const allSnapshots = await readRecords(snapshotFile, initialSnapshots);
+    const alerts = await getAlerts({ classroomId: item.id });
+    let assessments = [];
+    let issueCases = [];
+    try {
+      assessments = await issueDetection.listAssessments(item.id);
+    } catch {}
+    try {
+      issueCases = await issueDetection.listIssueCases(item.id);
+    } catch {}
+
+    const classroomMembers = memberships.filter((member) =>
+      (belongsToClassroom(member, item.id) || belongsToClassroom(member, membershipClassroomId(item.id)))
+      && isActiveMembership(member)
+      && member.role !== 'lecturer'
+    );
+
+    const studentList = classroomMembers.map((member) => {
+      const studentEmail = normalizeEmail(member.studentEmail ?? member.userEmail ?? member.email);
+      let studentWorkspaces = allWorkspaces.filter((ws) =>
+        (ws.classroomId === item.id || ws.classroomId === membershipClassroomId(item.id))
+        && normalizeEmail(ws.ownerEmail) === studentEmail
+      );
+
+      if (filterLabId) {
+        studentWorkspaces = studentWorkspaces.filter((ws) => ws.labId === filterLabId);
+      }
+      if (filterProblemId) {
+        studentWorkspaces = studentWorkspaces.filter((ws) => ws.assignmentId === filterProblemId);
+      }
+
+      studentWorkspaces.sort((a, b) => {
+        const timeA = new Date(a.updatedAt || a.executionResult?.finishedAt || 0).getTime();
+        const timeB = new Date(b.updatedAt || b.executionResult?.finishedAt || 0).getTime();
+        return timeB - timeA;
+      });
+
+      const activeWorkspace = studentWorkspaces[0] ?? null;
+
+      let activeProblem = null;
+      let practiceMode = 'OUTSIDE';
+      if (activeWorkspace) {
+        const assignment = assignments.find((a) => a.id === activeWorkspace.assignmentId);
+        const lab = labs.find((l) => l.id === activeWorkspace.labId);
+        activeProblem = {
+          assignmentId: activeWorkspace.assignmentId,
+          title: assignment?.title ?? 'DSA Problem',
+          labId: activeWorkspace.labId ?? null,
+          labTitle: lab?.name ?? null,
+        };
+        const isLabLive = lab && lab.status === 'LIVE';
+        practiceMode = isLabLive ? 'IN_LAB' : 'HOMEWORK';
+      }
+
+      let milestone = 'NOT_STARTED';
+      const hasSubmitted = allSnapshots.some((s) => s.workspaceId === activeWorkspace?.id && s.trigger === 'SUBMIT');
+      if (hasSubmitted) {
+        milestone = 'SUBMITTED';
+      } else if (activeWorkspace?.executionResult?.status === 'QUEUED' || activeWorkspace?.executionResult?.status === 'RUNNING') {
+        milestone = 'RUNNING';
+      } else if (activeWorkspace?.executionResult) {
+        milestone = 'EXECUTED';
+      } else if (activeWorkspace && (activeWorkspace.revision > 0 || allSnapshots.some((s) => s.workspaceId === activeWorkspace.id))) {
+        milestone = 'SAVED';
+      }
+
+      const passedCount = activeWorkspace?.executionResult?.passedCount ?? 0;
+      const totalCount = activeWorkspace?.executionResult?.totalCount ?? (activeWorkspace?.executionResult?.results?.length ?? 0);
+      const passRatio = totalCount > 0 ? Number((passedCount / totalCount).toFixed(2)) : 0;
+      const lastExecutedAt = activeWorkspace?.executionResult?.finishedAt ?? activeWorkspace?.executionResult?.startedAt ?? null;
+
+      const studentAlert = alerts.find((a) => normalizeEmail(a.studentEmail) === studentEmail && a.status === 'ACTIVE');
+
+      const studentAssessment = assessments.find((a) => a.workspaceId === activeWorkspace?.id || normalizeEmail(a.studentEmail) === studentEmail);
+      const studentIssueCase = issueCases.find((c) => (c.workspaceId === activeWorkspace?.id || normalizeEmail(c.studentEmail) === studentEmail) && c.status === 'OPEN');
+      let aiStatus = 'UNEVALUATED';
+      if (studentAlert || studentIssueCase) {
+        aiStatus = 'ACTIVE_ALERT';
+      } else if (studentAssessment?.state === 'FAILED' || studentAssessment?.resultCode === 'INTERNAL_ERROR' || studentAssessment?.resultCode === 'TIMEOUT') {
+        aiStatus = 'AI_ERROR';
+      } else if (studentAssessment?.state === 'COMPLETED' && studentAssessment?.resultCode === 'NO_ISSUES') {
+        aiStatus = 'NO_ISSUES';
+      } else {
+        aiStatus = 'UNEVALUATED';
+      }
+
+      const lastActivityAt = activeWorkspace?.updatedAt ?? activeWorkspace?.executionResult?.finishedAt ?? member.enrolledAt ?? null;
+      const idleMinutes = lastActivityAt ? Math.max(0, Math.floor((Date.now() - new Date(lastActivityAt).getTime()) / 60000)) : null;
+      const isStale = idleMinutes === null || idleMinutes >= 10;
+
+      return {
+        studentId: member.studentId ?? member.id,
+        studentName: member.studentName ?? member.name ?? studentEmail.split('@')[0],
+        studentEmail,
+        avatar: member.avatar ?? null,
+        status: member.status ?? 'ACTIVE',
+        activeProblem,
+        milestone,
+        testProgress: {
+          passedCount,
+          totalCount,
+          passRatio,
+          lastExecutedAt,
+        },
+        activeAlert: studentAlert ? {
+          id: studentAlert.id,
+          ruleType: studentAlert.ruleType,
+          severity: studentAlert.severity,
+          message: studentAlert.message,
+          createdAt: studentAlert.createdAt,
+          consecutiveFailures: studentAlert.details?.consecutiveCount ?? null,
+        } : null,
+        aiStatus,
+        lastActivityAt,
+        idleMinutes,
+        isStale,
+        practiceMode,
+      };
+    });
+
+    const summary = {
+      totalStudents: studentList.length,
+      activeCount: studentList.filter((s) => !s.isStale && s.milestone !== 'NOT_STARTED').length,
+      staleCount: studentList.filter((s) => s.isStale).length,
+      alertCount: studentList.filter((s) => s.activeAlert !== null).length,
+      submittedCount: studentList.filter((s) => s.milestone === 'SUBMITTED').length,
+      lastRefreshedAt: new Date().toISOString(),
+    };
+
+    sendJson(response, 200, {
+      classroom: item,
+      students: studentList,
+      summary,
+    });
     return;
   }
 

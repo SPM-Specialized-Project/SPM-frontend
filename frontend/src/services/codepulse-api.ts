@@ -239,6 +239,55 @@ export type CodePulseLecturerJudgment = Omit<
   internalError: string | null;
 };
 
+export type CodePulseStudentProgress = {
+  studentId: string;
+  studentName: string;
+  studentEmail: string;
+  avatar: string | null;
+  status: string;
+  activeProblem: {
+    assignmentId: string;
+    title: string;
+    labId: string | null;
+    labTitle: string | null;
+  } | null;
+  milestone: 'NOT_STARTED' | 'SAVED' | 'RUNNING' | 'EXECUTED' | 'SUBMITTED';
+  testProgress: {
+    passedCount: number;
+    totalCount: number;
+    passRatio: number;
+    lastExecutedAt: string | null;
+  };
+  activeAlert: {
+    id: string;
+    ruleType: string;
+    severity: 'INFO' | 'WARNING' | 'CRITICAL';
+    message: string;
+    createdAt: string;
+    consecutiveFailures: number | null;
+  } | null;
+  aiStatus: 'NO_ISSUES' | 'UNEVALUATED' | 'AI_ERROR' | 'ACTIVE_ALERT';
+  lastActivityAt: string | null;
+  idleMinutes: number | null;
+  isStale: boolean;
+  practiceMode: 'IN_LAB' | 'HOMEWORK' | 'OUTSIDE';
+};
+
+export type CodePulseDashboardSummary = {
+  totalStudents: number;
+  activeCount: number;
+  staleCount: number;
+  alertCount: number;
+  submittedCount: number;
+  lastRefreshedAt: string;
+};
+
+export type CodePulseRealtimeDashboardResponse = {
+  classroom: CodePulseClassroom;
+  students: CodePulseStudentProgress[];
+  summary: CodePulseDashboardSummary;
+};
+
 export type CodePulseWorkspaceSubmission = {
   id: string;
   workspaceId: string;
@@ -655,6 +704,19 @@ export const codePulseApi = {
         `/codepulse/classrooms/${encodeURIComponent(id)}/dashboard`,
       ),
     ),
+  getRealtimeDashboard: (
+    classroomId: string,
+    params?: { labId?: string; problemId?: string },
+  ) =>
+    request(() => {
+      const query = new URLSearchParams();
+      if (params?.labId) query.set('labId', params.labId);
+      if (params?.problemId) query.set('problemId', params.problemId);
+      const qs = query.toString();
+      return apiClient.get<CodePulseRealtimeDashboardResponse>(
+        `/codepulse/classrooms/${encodeURIComponent(classroomId)}/realtime-dashboard${qs ? `?${qs}` : ''}`,
+      );
+    }),
   listAssessments: (classroomId: string) =>
     request(() =>
       apiClient.get<{ items: CodePulseAssessment[] }>('/codepulse/assessments', {
