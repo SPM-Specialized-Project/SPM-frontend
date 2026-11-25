@@ -7,6 +7,8 @@ import {
   type CodePulseIssueCase,
 } from '@/services/codepulse-api';
 
+import { CaseInspection, type InspectionTarget } from './case-inspection';
+
 const assessmentLabel: Record<CodePulseAssessment['state'], string> = {
   PENDING: 'Pending',
   EVALUATING: 'Evaluating',
@@ -15,57 +17,12 @@ const assessmentLabel: Record<CodePulseAssessment['state'], string> = {
   FAILED: 'AI error',
 };
 
-function EvidenceReferences({ item }: { item: CodePulseIssueCase['evidence'][number] }) {
-  return (
-    <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
-      <p className="font-medium text-slate-800">{item.rationale}</p>
-      {item.references.map((reference, index) => {
-        if (reference.kind === 'CODE') {
-          return (
-            <div key={`${item.id}-code-${index}`} className="mt-2">
-              <p className="text-xs text-slate-500">
-                Snapshot {reference.snapshotId} · lines {reference.lineStart}–{reference.lineEnd}
-              </p>
-              <pre className="mt-1 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
-                {reference.excerpt}
-              </pre>
-            </div>
-          );
-        }
-        if (reference.kind === 'TEST') {
-          return (
-            <div key={`${item.id}-test-${index}`} className="mt-2">
-              <p className="text-xs text-slate-600">
-                Execution {reference.executionId} · test {reference.testCaseId} · {reference.status}
-              </p>
-              {reference.traceExcerpt && (
-                <pre className="mt-1 overflow-x-auto rounded bg-slate-900 p-3 text-xs text-slate-100">
-                  {reference.traceExcerpt}
-                </pre>
-              )}
-            </div>
-          );
-        }
-        return (
-          <p key={`${item.id}-event-${index}`} className="mt-2 text-xs text-slate-600">
-            Event {reference.eventId}
-          </p>
-        );
-      })}
-      <p className="mt-2 text-xs text-slate-500">
-        Snapshot {item.snapshotId}
-        {item.executionId ? ` · Run ${item.executionId}` : ''}
-        {item.submissionId ? ` · Submission ${item.submissionId}` : ''}
-      </p>
-    </div>
-  );
-}
-
 export function IssueCasesPanel({ classroomId }: { classroomId: string }) {
   const [cases, setCases] = useState<CodePulseIssueCase[]>([]);
   const [assessments, setAssessments] = useState<CodePulseAssessment[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>();
+  const [inspection, setInspection] = useState<InspectionTarget>();
   const [updatingId, setUpdatingId] = useState<string>();
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<'ALL' | CodePulseIssueCase['status']>('ALL');
@@ -101,7 +58,7 @@ export function IssueCasesPanel({ classroomId }: { classroomId: string }) {
     };
   }, [classroomId, load]);
 
-  const changeStatus = async (item: CodePulseIssueCase, status: 'RESOLVED' | 'DISMISSED') => {
+  const changeStatus = async (item: CodePulseIssueCase, status: 'RESOLVED') => {
     setUpdatingId(item.id);
     try {
       await codePulseApi.updateIssueCase(item.id, status);
@@ -178,6 +135,10 @@ export function IssueCasesPanel({ classroomId }: { classroomId: string }) {
         </button>
       </div>
 
+      {inspection && (
+        <CaseInspection key={`${inspection.kind}-${inspection.id}`} target={inspection}
+          close={() => setInspection(undefined)} refreshCases={load} />
+      )}
       {error && <p role="alert" className="mt-4 rounded-md bg-rose-50 p-3 text-sm text-rose-800">{error}</p>}
 
       {loading ? (
@@ -299,17 +260,16 @@ export function IssueCasesPanel({ classroomId }: { classroomId: string }) {
                         <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${item.status === 'ACTIVE' ? 'bg-amber-100 text-amber-950' : item.status === 'RESOLVED' ? 'bg-emerald-100 text-emerald-900' : 'bg-slate-100 text-slate-700'}`}>{item.status}</span>
                       </td>
                       <td className="min-w-56 p-4">
-                        <details>
-                          <summary className="cursor-pointer font-medium text-amber-900 underline decoration-amber-300 underline-offset-2">Inspect {item.evidence.length} evidence item{item.evidence.length === 1 ? '' : 's'}</summary>
-                          <div className="mt-2 space-y-2">{item.evidence.map((evidence) => <EvidenceReferences key={evidence.id} item={evidence} />)}</div>
-                          {item.relatedTestCaseIds.length > 0 && <p className="mt-2 text-xs text-slate-600">Related tests: {item.relatedTestCaseIds.join(', ')}</p>}
-                        </details>
+                        <button type="button" onClick={() => setInspection({ kind: 'case', id: item.id })}
+                          className="text-left font-medium text-amber-900 underline decoration-amber-300 underline-offset-2">
+                          Inspect case
+                        </button>
+                        <p className="mt-1 text-xs text-slate-600">{item.evidence.length} evidence item{item.evidence.length === 1 ? '' : 's'}</p>
                       </td>
                       <td className="whitespace-nowrap p-4">
                         {item.status === 'ACTIVE' ? (
                           <div className="flex flex-col items-start gap-2">
                             <button type="button" disabled={updatingId === item.id} onClick={() => void changeStatus(item, 'RESOLVED')} className="rounded-md bg-emerald-800 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-900 disabled:opacity-50">Mark resolved</button>
-                            <button type="button" disabled={updatingId === item.id} onClick={() => void changeStatus(item, 'DISMISSED')} className="rounded-md border border-slate-300 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50">Dismiss</button>
                           </div>
                         ) : <span className="text-xs text-slate-400">No action</span>}
                       </td>
@@ -344,7 +304,10 @@ export function IssueCasesPanel({ classroomId }: { classroomId: string }) {
                     {filteredAssessments.slice(0, 8).map((assessment) => (
                       <tr key={assessment.id}>
                         <td className="whitespace-nowrap p-3 font-mono text-xs text-slate-600">#{assessment.eventSequence}</td>
-                        <td className="whitespace-nowrap p-3 text-slate-700">{assessment.studentEmail} · {assessment.milestone.toLowerCase()}</td>
+                        <td className="whitespace-nowrap p-3 text-slate-700">{assessment.studentEmail} · {assessment.milestone.toLowerCase()}
+                          <button type="button" onClick={() => setInspection({ kind: 'workspace', id: assessment.workspaceId })}
+                            className="mt-1 block text-xs font-medium text-sky-800 underline">Open student timeline</button>
+                        </td>
                         <td className="whitespace-nowrap p-3">
                           <span className={`inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-semibold ${assessment.state === 'FAILED' ? 'bg-rose-50 text-rose-800' : assessment.state === 'INSUFFICIENT_EVIDENCE' ? 'bg-amber-50 text-amber-800' : assessment.state === 'EVALUATED' ? 'bg-emerald-50 text-emerald-800' : 'bg-slate-100 text-slate-700'}`}>
                             {assessment.state === 'FAILED' ? <ExclamationTriangleIcon className="size-3.5" /> : assessment.state === 'EVALUATED' ? <CheckCircleIcon className="size-3.5" /> : null}

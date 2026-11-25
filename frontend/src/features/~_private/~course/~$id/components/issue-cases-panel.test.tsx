@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   codePulseApi,
   type CodePulseAssessment,
+  type CodePulseInspection,
   type CodePulseIssueCase,
 } from '@/services/codepulse-api';
 
@@ -16,6 +17,8 @@ vi.mock('@/services/codepulse-api', () => ({
     listIssueCases: vi.fn(),
     listAssessments: vi.fn(),
     updateIssueCase: vi.fn(),
+    getIssueCase: vi.fn(),
+    getStudentTimeline: vi.fn(),
     subscribeIssueUpdates: vi.fn(),
   },
 }));
@@ -90,5 +93,55 @@ describe('lecturer issue cases panel', () => {
       expect(within(lifecycleTable).getByText('#2')).toBeInTheDocument();
       expect(within(lifecycleTable).queryByText('#1')).not.toBeInTheDocument();
     });
+  });
+
+  it('opens read-only code and scoped event details, then requires a reason to dismiss', async () => {
+    const snapshot = {
+      id: 'snapshot-alert', revision: 1, assignmentVersionId: 'version-1',
+      createdAt: '2026-11-07T10:00:00.000Z', sourceCode: 'return broken();',
+    };
+    const item: CodePulseInspection = {
+      issue: issueCase, studentEmail: issueCase.studentEmail,
+      problem: { id: 'assignment-1', title: 'Sample list', versionId: 'version-1', version: 1 },
+      alertSnapshot: snapshot, currentCode: { ...snapshot, id: 'workspace-1', revision: 2, sourceCode: 'return fixed();' },
+      timeline: [
+        { id: 'submission-1', kind: 'SUBMIT', createdAt: snapshot.createdAt, snapshot: null, executionId: null, submissionId: 'submission-1', status: 'GRADED' },
+        { id: snapshot.id, kind: 'RUN', createdAt: snapshot.createdAt, snapshot, executionId: 'run-1', submissionId: null, status: 'COMPILE_ERROR' },
+      ],
+      selectedEvent: {
+        id: snapshot.id, snapshot, eventCode: null, executionId: 'run-1', submissionId: null,
+        compilerTrace: 'Compiler error on line 1', submissionVerdict: null, runTests: [], submissionTests: [],
+      },
+      hintHistory: [],
+    };
+    vi.mocked(codePulseApi.getIssueCase).mockImplementation(async (_id, eventId) => ({
+      status: 200,
+      data: { item: eventId === 'submission-1' ? {
+        ...item,
+        selectedEvent: { id: eventId, snapshot: null, eventCode: null, executionId: null, submissionId: eventId,
+          compilerTrace: null, submissionVerdict: 'WRONG_ANSWER', runTests: [], submissionTests: [] },
+      } : item },
+    }));
+    vi.mocked(codePulseApi.updateIssueCase).mockResolvedValue({
+      status: 200, data: { item: { id: issueCase.id, status: 'DISMISSED', updatedAt: snapshot.createdAt } },
+    });
+    render(<IssueCasesPanel classroomId="class-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Inspect case' }));
+    const dialog = within(await screen.findByRole('dialog', { name: 'Case detail' }));
+    expect(await dialog.findByText('return broken();')).toBeInTheDocument();
+    expect(dialog.getByText('return fixed();')).toBeInTheDocument();
+    expect(dialog.getByText('Compiler error on line 1')).toBeInTheDocument();
+    expect(dialog.queryByRole('textbox')).not.toBeInTheDocument();
+    expect(dialog.queryByRole('button', { name: /^(Run code|Submit code)$/ })).not.toBeInTheDocument();
+    fireEvent.click(dialog.getByRole('button', { name: /Submit.*GRADED/ }));
+    expect(await dialog.findByText(/Submission submission-1 · WRONG_ANSWER/)).toBeInTheDocument();
+    expect(dialog.queryByText('Compiler error on line 1')).not.toBeInTheDocument();
+    expect(dialog.getByText('return broken();')).toBeInTheDocument();
+
+    fireEvent.click(dialog.getByRole('button', { name: 'Dismiss case' }));
+    expect(dialog.getByRole('button', { name: 'Confirm dismissal' })).toBeDisabled();
+    fireEvent.change(dialog.getByRole('textbox', { name: 'Dismissal reason' }), { target: { value: '  False positive  ' } });
+    fireEvent.click(dialog.getByRole('button', { name: 'Confirm dismissal' }));
+    await waitFor(() => expect(codePulseApi.updateIssueCase).toHaveBeenCalledWith('issue-1', 'DISMISSED', 'False positive'));
   });
 });
