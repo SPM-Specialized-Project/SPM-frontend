@@ -915,23 +915,39 @@ export function createIssueDetectionService({ file, evaluate = createProvider(),
           relatedTestCaseIds: state.caseTests.filter((caseTest) => caseTest.caseId === item.id).map((caseTest) => caseTest.testCaseId),
         }));
     },
-    async updateIssueCaseStatus(id, status) {
+    async updateIssueCaseStatus(id, status, { reason, actor } = {}) {
       const result = await store.mutate((state) => {
         const item = state.issueCases.find((candidate) => candidate.id === id);
         if (!item) return null;
         if (item.status !== 'ACTIVE' || !['RESOLVED', 'DISMISSED'].includes(status)) {
           throw Object.assign(new Error('Only active issue cases can be resolved or dismissed.'), { status: 409, code: 'INVALID_CASE_TRANSITION' });
         }
+        const note = typeof reason === 'string' ? reason.trim() : '';
+        if (status === 'DISMISSED' && (!note || note.length > 1000)) {
+          throw Object.assign(new Error('Enter a dismissal reason of 1–1,000 characters.'), { status: 400, code: 'DISMISSAL_REASON_REQUIRED' });
+        }
         item.status = status;
         item.updatedAt = new Date().toISOString();
+        item.reviewHistory = [...(item.reviewHistory ?? []), {
+          status, actor: actor ?? null, createdAt: item.updatedAt,
+          ...(status === 'DISMISSED' ? { reason: note } : {}),
+        }];
         return { ...item };
       });
       if (result) emit({ type: 'issue-cases', classroomId: result.classroomId, issueCaseId: result.id });
       return result;
     },
-    async getIssueCase(id) {
+    async getIssueCase(id, { includeEvidence = false } = {}) {
       const state = await store.read();
-      return state.issueCases.find((item) => item.id === id) ?? null;
+      const item = state.issueCases.find((candidate) => candidate.id === id);
+      if (!item || !includeEvidence) return item ?? null;
+      return {
+        ...item,
+        problemType: state.problemTypes.find((type) => type.id === item.problemTypeId)
+          ?? { id: item.problemTypeId, name: item.problemTypeId },
+        evidence: state.caseEvidence.filter((evidence) => evidence.caseId === id),
+        relatedTestCaseIds: state.caseTests.filter((entry) => entry.caseId === id).map((entry) => entry.testCaseId),
+      };
     },
     getQueueStats() {
       return {

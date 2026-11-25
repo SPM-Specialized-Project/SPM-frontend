@@ -553,6 +553,46 @@ export type CodePulseIssueCase = {
   updatedAt: string;
   evidence: CodePulseCaseEvidence[];
   relatedTestCaseIds: string[];
+  reviewHistory?: Array<{ status: 'RESOLVED' | 'DISMISSED'; actor: string | null; createdAt: string; reason?: string }>;
+};
+
+type InspectionCode = {
+  id: string;
+  revision: number | null;
+  assignmentVersionId: string | null;
+  createdAt: string | null;
+  sourceCode: string;
+};
+
+export type InspectionTest = { testCaseId: string; status: string; passed: boolean; trace: string | null };
+
+export type CodePulseInspection = {
+  issue: CodePulseIssueCase | null;
+  studentEmail: string;
+  problem: { id: string | null; title: string | null; versionId: string | null; version: number | null };
+  alertSnapshot: InspectionCode | null;
+  currentCode: InspectionCode | null;
+  timeline: Array<{
+    id: string;
+    kind: 'SNAPSHOT' | 'RUN' | 'SUBMIT';
+    createdAt: string;
+    snapshot: Omit<InspectionCode, 'sourceCode'> | null;
+    executionId: string | null;
+    submissionId: string | null;
+    status: string | null;
+  }>;
+  selectedEvent: {
+    id: string;
+    snapshot: InspectionCode | null;
+    eventCode: InspectionCode | null;
+    executionId: string | null;
+    submissionId: string | null;
+    compilerTrace: string | null;
+    submissionVerdict: string | null;
+    runTests: InspectionTest[];
+    submissionTests: InspectionTest[];
+  } | null;
+  hintHistory: Array<{ id: string; createdAt: string }>;
 };
 
 export const codePulseApi = {
@@ -709,11 +749,23 @@ export const codePulseApi = {
         params: { classroomId },
       }),
     ),
-  updateIssueCase: (id: string, status: 'RESOLVED' | 'DISMISSED') =>
+  getIssueCase: (id: string, eventId?: string) =>
+    request(() =>
+      apiClient.get<{ item: CodePulseInspection }>(`/codepulse/issue-cases/${encodeURIComponent(id)}`, {
+        params: { eventId },
+      }),
+    ),
+  getStudentTimeline: (workspaceId: string, eventId?: string) =>
+    request(() =>
+      apiClient.get<{ item: CodePulseInspection }>(`/codepulse/workspaces/${encodeURIComponent(workspaceId)}/timeline`, {
+        params: { eventId },
+      }),
+    ),
+  updateIssueCase: (id: string, status: 'RESOLVED' | 'DISMISSED', reason?: string) =>
     request(() =>
       apiClient.patch<{ item: Pick<CodePulseIssueCase, 'id' | 'status' | 'updatedAt'> }>(
         `/codepulse/issue-cases/${encodeURIComponent(id)}`,
-        { status },
+        { status, ...(reason ? { reason } : {}) },
       ),
     ),
   getProblem: (classroomId: string, problemId: string) =>

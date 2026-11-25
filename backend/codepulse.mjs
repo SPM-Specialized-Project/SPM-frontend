@@ -2,7 +2,8 @@ import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/p
 import { runSandbox } from './sandbox.mjs';
 import { createExecutionQueue } from './executions.mjs';
 import { evaluateExecutionAlert } from './alerts.mjs';
-import { recordTraceEvent } from './admin-operations.mjs';
+import { recordAuditLog, recordTraceEvent } from './admin-operations.mjs';
+import { inspectStudentWork } from './case-inspection.mjs';
 import {
   createGradingQueue,
   lecturerJudgmentView,
@@ -1569,17 +1570,82 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
-  if (parts[2] === 'issue-cases' && parts[3] && request.method === 'PATCH') {
+  const isCaseDetail = parts[2] === 'issue-cases' && parts[3] && !parts[4];
+  const isTimeline = parts[2] === 'workspaces' && parts[3] && parts[4] === 'timeline' && !parts[5];
+  if ((isCaseDetail || isTimeline) && request.method === 'GET') {
+    if (!['lecturer', 'admin'].includes(user.role)) deny();
+    const issue = isCaseDetail ? await issueDetection.getIssueCase(parts[3], { includeEvidence: true }) ?? notFound() : null;
+    const workspaceId = issue?.workspaceId ?? parts[3];
+    const [workspaces, snapshots] = await Promise.all([
+      readRecords(workspaceFile, initialWorkspaces),
+      readRecords(snapshotFile, initialSnapshots),
+    ]);
+    const workspace = workspaces.find((candidate) => candidate.id === workspaceId);
+    const historical = !issue && !workspace ? snapshots.find((candidate) => candidate.workspaceId === workspaceId) : null;
+    if (!issue && !workspace && !historical) notFound();
+    const classroomItem = classroom(issue?.classroomId ?? workspace?.classroomId ?? historical.classroomId);
+    if (user.role !== 'admin' && !isDsaManager(classroomItem)) deny();
+    rejectResetBlockedTerm(classroomItem.termId);
+    const current = workspace?.termId === classroomItem.termId ? workspace : null;
+    if (!issue && workspace && !current) notFound();
+    const assignmentId = issue?.assignmentId ?? historical?.assignmentId
+      ?? (current ? current.assignmentId ?? workspaceContext(current).labAssignment?.assignmentId : null);
+    const assignmentVersionId = issue?.assignmentVersionId ?? historical?.assignmentVersionId
+      ?? (current ? resolveWorkspaceAssessmentVersion(current, workspaceContext(current))?.id : null);
+    const scope = {
+      workspaceId, assignmentId, assignmentVersionId, classroomId: classroomItem.id,
+      studentEmail: issue?.studentEmail ?? current?.ownerEmail ?? historical.studentEmail,
+      evidence: issue?.evidence,
+    };
+    const selectedId = requestUrl.searchParams.get('eventId') ?? issue?.evidence[0]?.snapshotId;
+    const [assessments, runs, ledger, legacySubmissions, olderSubmissions, judgments] = await Promise.all([
+      issueDetection.listAssessments(classroomItem.id),
+      executions.list(),
+      readSubmissions(),
+      readRecords(submissionFile, initialCodePulseSubmissions),
+      readStudentSubmissions(scope.studentEmail),
+      readRecords(judgmentFile, initialJudgments),
+    ]);
+    const data = inspectStudentWork({
+      scope, workspace: current, snapshots, assessments,
+      executions: runs.filter((item) => !item.termId || item.termId === classroomItem.termId),
+      submissions: [...new Map([...olderSubmissions, ...legacySubmissions, ...ledger]
+        .filter((item) => !item.termId || item.termId === classroomItem.termId)
+        .map((item) => [item.id, item])).values()],
+      judgments, selectedEventId: selectedId,
+    });
+    if (requestUrl.searchParams.has('eventId') && !data.selectedEvent) notFound();
+    const version = assignmentVersions.find((item) => item.id === assignmentVersionId
+      && item.classroomId === classroomItem.id && item.assignmentId === assignmentId);
+    const assignment = assignments.find((item) => item.id === assignmentId && item.classroomId === classroomItem.id);
+    if (user.role === 'admin') {
+      await recordAuditLog({ actor: user.email, action: 'CODEPULSE_INSPECTION_READ',
+        target: issue?.id ?? workspaceId, details: { classroomId: classroomItem.id } });
+    }
+    sendJson(response, 200, { item: {
+      ...data, issue,
+      studentEmail: scope.studentEmail,
+      problem: { id: assignmentId ?? null, title: version?.title ?? assignment?.title ?? null,
+        versionId: assignmentVersionId ?? null, version: version?.version ?? null },
+    } });
+    return;
+  }
+
+  if (isCaseDetail && request.method === 'PATCH') {
     if (user.role !== 'lecturer') deny();
     const current = await issueDetection.getIssueCase(parts[3]);
     if (!current) notFound();
-    if (!isDsaManager(classroom(current.classroomId))) deny();
+    const classroomItem = classroom(current.classroomId);
+    if (!isDsaManager(classroomItem)) deny();
+    rejectResetBlockedTerm(classroomItem.termId);
     const body = await readRequestBody(request);
     const status = String(body.status ?? '').toUpperCase();
     if (!['RESOLVED', 'DISMISSED'].includes(status)) {
       throw apiError(400, 'INVALID_INPUT', 'Issue case status must be RESOLVED or DISMISSED.');
     }
-    const item = await issueDetection.updateIssueCaseStatus(current.id, status);
+    const item = await executions.runTermTask(classroomItem.termId, () =>
+      issueDetection.updateIssueCaseStatus(current.id, status, { reason: body.reason, actor: user.email }));
+    if (!item) notFound();
     if (!item) notFound();
     sendJson(response, 200, { item });
     return;
