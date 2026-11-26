@@ -27,6 +27,9 @@ vi.mock('@/services/codepulse-api', () => ({
     listExecutions: vi.fn(),
     listWorkspaceSubmissions: vi.fn(),
     submitWorkspace: vi.fn(),
+    publishLiveDraft: vi.fn(),
+    heartbeatLiveDraft: vi.fn(),
+    leaveLiveDraft: vi.fn(),
   },
   waitForExecution: vi.fn(),
 }));
@@ -114,6 +117,12 @@ describe('student practice access', () => {
         },
       }),
     );
+    vi.mocked(codePulseApi.publishLiveDraft).mockResolvedValue({
+      status: 200,
+      data: { revision: 1, updatedAt: new Date().toISOString(), connected: true },
+    });
+    vi.mocked(codePulseApi.heartbeatLiveDraft).mockResolvedValue({ status: 200, data: { connected: true } });
+    vi.mocked(codePulseApi.leaveLiveDraft).mockResolvedValue({ status: 200, data: {} });
   });
 
   it('autosaves after one second of inactivity using the current revision', async () => {

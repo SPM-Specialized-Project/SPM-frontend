@@ -52,6 +52,20 @@ export type CodePulseWorkspace = {
   updatedAt?: string;
 };
 
+export type CodePulseLiveWorkspace = {
+  workspaceId: string;
+  studentEmail: string;
+  studentName: string;
+  problemTitle: string;
+  connected: boolean;
+};
+
+export type CodePulseLiveDraftEvent = {
+  type: 'draft' | 'disconnected' | 'ended' | 'transport-error';
+  draft?: { sourceCode: string; revision: number; updatedAt: string };
+  reason?: string;
+};
+
 export type RevisionConflictDetails = {
   conflict: boolean;
   currentRevision: number;
@@ -655,6 +669,10 @@ export const codePulseApi = {
         `/codepulse/classrooms/${encodeURIComponent(id)}/dashboard`,
       ),
     ),
+  listLiveWorkspaces: (classroomId: string, labId: string) =>
+    request(() => apiClient.get<{ items: CodePulseLiveWorkspace[]; live: boolean }>(
+      `/codepulse/classrooms/${encodeURIComponent(classroomId)}/labs/${encodeURIComponent(labId)}/live-workspaces`,
+    )),
   listAssessments: (classroomId: string) =>
     request(() =>
       apiClient.get<{ items: CodePulseAssessment[] }>('/codepulse/assessments', {
@@ -880,6 +898,50 @@ export const codePulseApi = {
         practiceWindow?: CodePulseLabAssignment;
       }>(`/codepulse/workspaces/${encodeURIComponent(id)}`),
     ),
+  publishLiveDraft: (id: string, publisherId: string, sourceCode: string, claim = false) =>
+    request(() => apiClient.post<{ revision: number; updatedAt: string; connected: boolean }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/live-draft`, { publisherId, sourceCode, claim },
+    )),
+  heartbeatLiveDraft: (id: string, publisherId: string) =>
+    request(() => apiClient.post<{ connected: boolean }>(
+      `/codepulse/workspaces/${encodeURIComponent(id)}/live-draft/heartbeat`, { publisherId },
+    )),
+  leaveLiveDraft: (id: string, publisherId: string) =>
+    request(() => apiClient.post(`/codepulse/workspaces/${encodeURIComponent(id)}/live-draft/leave`, { publisherId })),
+  subscribeLiveDraft(workspaceId: string, onEvent: (event: CodePulseLiveDraftEvent) => void, signal: AbortSignal) {
+    const url = apiClient.getUri({ url: `/codepulse/workspaces/${encodeURIComponent(workspaceId)}/live-draft/events` });
+    const token = useAuthStore.getState().token;
+    void (async () => {
+      try {
+        const response = await fetch(url, {
+          credentials: 'include',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal,
+        });
+        if (response.status === 409) { onEvent({ type: 'ended', reason: 'lab-ended' }); return; }
+        if (response.status === 401 || response.status === 403) { onEvent({ type: 'ended', reason: 'forbidden' }); return; }
+        if (!response.ok || !response.body) throw new Error(`Live stream unavailable (${response.status}).`);
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        while (!signal.aborted) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const frames = buffer.split(/\r?\n\r?\n/);
+          buffer = frames.pop() ?? '';
+          for (const frame of frames) {
+            const eventName = frame.match(/^event: (.+)$/m)?.[1];
+            const data = frame.match(/^data: (.+)$/m)?.[1];
+            if (eventName && data) onEvent(JSON.parse(data) as CodePulseLiveDraftEvent);
+          }
+        }
+        if (!signal.aborted) onEvent({ type: 'transport-error' });
+      } catch {
+        if (!signal.aborted) onEvent({ type: 'transport-error' });
+      }
+    })();
+  },
   getStudentWorkspace: (classroomId: string, assignmentId: string) =>
     request(() =>
       apiClient.get<{ item: CodePulseWorkspace }>(

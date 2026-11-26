@@ -13,6 +13,7 @@ import {
 } from '@/services/codepulse-api';
 
 import { GradingResult } from './grading-result';
+import { LecturerLiveInspection } from './lecturer-live-inspection';
 import { StudentLabWorkspace } from './student-lab-workspace';
 
 type LabSessionManagementProps = {
@@ -541,6 +542,9 @@ export function LabSessionManagement({
                     </button>
                   ))}
                 </div>
+              )}
+              {isLecturer && (
+                <LecturerLiveInspection classroomId={classroomId} labId={lab.id} live={lab.status === 'LIVE'} />
               )}
               {isLecturer && (
                 <LecturerLabSubmissions classroomId={classroomId} labId={lab.id} />
