@@ -33,6 +33,7 @@ SNAPSHOTS_FILE,
   CORS_ORIGIN,
 } from './config.mjs';
 import { createIssueDetectionService } from './issue-detection.mjs';
+import { createLiveDrafts } from './live-drafts.mjs';
 import {
   assignmentRepositoryName,
   commitRepositoryFile,
@@ -76,6 +77,7 @@ const MAX_MEMORY_LIMIT_MB = 1_024;
 const MAX_SOURCE_CODE_LENGTH = 200_000;
 const MAX_REQUEST_KEY_LENGTH = 128;
 const REQUEST_KEY_PATTERN = /^[A-Za-z0-9._:-]+$/;
+const liveDrafts = createLiveDrafts();
 
 const initialTerms = [
   { id: 'term-2026-1', courseId: '13', name: '2026 Semester 1', startDate: '2026-01-01', endDate: '2027-01-01', resetDate: '2027-01-02', status: 'ACTIVE' },
@@ -816,6 +818,35 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     }
   };
   const isAssignedLecturer = (item) => user.role === 'lecturer' && isDsaManager(item);
+  const isLiveLecturer = (item) => user.role === 'lecturer' && (
+    normalizeEmail(item.lecturerEmail) === normalizeEmail(user.email)
+    || item.managerEmails?.some((email) => normalizeEmail(email) === normalizeEmail(user.email))
+  );
+  const liveLabOpen = (lab, classroomItem) => lab?.status === 'LIVE'
+    && classroomItem.status === 'ACTIVE'
+    && isAcademicTermActive(terms.find((item) => item.id === classroomItem.termId))
+    && Date.now() >= parseDate(lab.startAt)
+    && Date.now() < parseDate(lab.endAt);
+  const liveWorkspaceContext = async (workspaceId) => {
+    const [workspaces, currentClassrooms, currentLabs, currentMemberships, currentTerms] = await Promise.all([
+      readRecords(workspaceFile, initialWorkspaces),
+      readRecords(classroomFile, initialClassrooms),
+      readRecords(labFile, initialLabs),
+      readRecords(membershipFile, INITIAL_MEMBERSHIPS),
+      readRecords(termFile, initialTerms),
+    ]);
+    const workspace = workspaces.find((item) => item.id === workspaceId) ?? notFound();
+    const classroomItem = currentClassrooms.find((item) => item.id === workspace.classroomId) ?? notFound();
+    const lab = currentLabs.find((item) => item.id === workspace.labId && item.classroomId === classroomItem.id);
+    const member = currentMemberships.some((item) => belongsToClassroom(item, classroomItem.id)
+      && normalizeEmail(item.studentEmail ?? item.userEmail) === normalizeEmail(workspace.ownerEmail)
+      && isActiveMembership(item));
+    const termItem = currentTerms.find((item) => item.id === classroomItem.termId);
+    const open = member && lab?.status === 'LIVE' && classroomItem.status === 'ACTIVE'
+      && isAcademicTermActive(termItem)
+      && Date.now() >= parseDate(lab.startAt) && Date.now() < parseDate(lab.endAt);
+    return { workspace, classroomItem, lab, member, open };
+  };
   const normalizeLabAssignment = (assignment) => {
     const { openAt, closeAt } = practiceWindowValues(assignment);
     return {
@@ -1904,6 +1935,29 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
     return;
   }
 
+  if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs'
+    && parts[5] && parts[6] === 'live-workspaces' && request.method === 'GET') {
+    const classroomItem = classroom(parts[3]);
+    if (!isLiveLecturer(classroomItem)) deny();
+    const lab = labs.find((item) => item.id === parts[5] && item.classroomId === classroomItem.id) ?? notFound();
+    const workspaces = await readRecords(workspaceFile, initialWorkspaces);
+    const items = workspaces.filter((workspace) => workspace.classroomId === classroomItem.id
+      && workspace.labId === lab.id
+      && memberships.some((member) => belongsToClassroom(member, classroomItem.id)
+        && normalizeEmail(member.studentEmail ?? member.userEmail) === normalizeEmail(workspace.ownerEmail)
+        && isActiveMembership(member)))
+      .map((workspace) => ({
+        workspaceId: workspace.id,
+        studentEmail: workspace.ownerEmail,
+        studentName: USERS.find((candidate) => normalizeEmail(candidate.email) === normalizeEmail(workspace.ownerEmail))?.name
+          ?? workspace.ownerEmail,
+        problemTitle: lab.assignments.find((assignment) => assignment.id === workspace.labAssignmentId)?.title ?? 'Problem',
+        connected: Boolean(liveLabOpen(lab, classroomItem) && liveDrafts.current(workspace.id)),
+      }));
+    sendJson(response, 200, { items, live: liveLabOpen(lab, classroomItem) });
+    return;
+  }
+
   if (parts[2] === 'classrooms' && parts[3] && parts[4] === 'labs' && !parts[5] && request.method === 'GET') {
     const classroomItem = classroom(parts[3]);
     if (!canAccessClass(classroomItem)) deny();
@@ -2080,6 +2134,7 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       });
       return latest;
     });
+    if (updated.status !== 'LIVE') liveDrafts.endLab(updated.id);
     sendJson(response, 200, { item: updated });
     return;
   }
@@ -2671,6 +2726,93 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
   }
 
   
+  if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'live-draft') {
+    const { workspace, classroomItem, lab, open } = await liveWorkspaceContext(parts[3]);
+    const isOwner = user.role === 'student' && normalizeEmail(user.email) === normalizeEmail(workspace.ownerEmail);
+    const isViewer = isLiveLecturer(classroomItem);
+    if (!isOwner && !isViewer) deny();
+    const action = parts[5];
+    if (request.method === 'GET' && action === 'events') {
+      if (!isViewer) deny();
+      if (!open) throw apiError(409, 'LIVE_DRAFT_UNAVAILABLE', 'LAB is not live.');
+      response.writeHead(200, {
+        'Access-Control-Allow-Credentials': 'true',
+        'Access-Control-Allow-Origin': CORS_ORIGIN,
+        'Cache-Control': 'no-store, no-transform',
+        Connection: 'keep-alive',
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'X-Accel-Buffering': 'no',
+      });
+      response.flushHeaders?.();
+      const sendEvent = (event) => {
+        if (response.destroyed || response.writableEnded) return;
+        const { draft, ...rest } = event;
+        const payload = draft
+          ? { ...rest, draft: { sourceCode: draft.sourceCode, revision: draft.revision, updatedAt: draft.updatedAt } }
+          : rest;
+        response.write(`event: ${event.type}\ndata: ${JSON.stringify(payload)}\n\n`);
+        if (event.type === 'ended') response.end();
+      };
+      const unsubscribe = liveDrafts.subscribe(workspace.id, sendEvent);
+      const initial = liveDrafts.current(workspace.id);
+      sendEvent(initial ? { type: 'draft', draft: initial } : { type: 'disconnected' });
+      let checking = false;
+      const heartbeat = setInterval(async () => {
+        if (checking || response.destroyed || response.writableEnded) return;
+        checking = true;
+        try {
+          const latest = await liveWorkspaceContext(workspace.id);
+          if (!latest.open || !isLiveLecturer(latest.classroomItem)) {
+            liveDrafts.end(workspace.id, latest.open ? 'forbidden' : 'lab-ended');
+            sendEvent({ type: 'ended', reason: latest.open ? 'forbidden' : 'lab-ended' });
+            response.end();
+            return;
+          }
+          liveDrafts.current(workspace.id);
+          response.write(': keep-alive\n\n');
+        } catch {
+          sendEvent({ type: 'ended', reason: 'unavailable' });
+          response.end();
+        } finally {
+          checking = false;
+        }
+      }, 2_000);
+      heartbeat.unref?.();
+      response.on('close', () => { clearInterval(heartbeat); unsubscribe(); });
+      return;
+    }
+    if (!isOwner || request.method !== 'POST' || !['', 'heartbeat', 'leave'].includes(action ?? '')) deny();
+    const body = await readRequestBody(request);
+    const publisherId = String(body.publisherId ?? '');
+    if (!/^[A-Za-z0-9-]{8,80}$/.test(publisherId)) {
+      throw apiError(400, 'INVALID_PUBLISHER', 'publisherId is invalid.');
+    }
+    if (action === 'leave') {
+      liveDrafts.leave(workspace.id, publisherId);
+      sendJson(response, 200, { connected: false });
+      return;
+    }
+    if (!open) {
+      liveDrafts.end(workspace.id, 'lab-ended');
+      throw apiError(409, 'LIVE_DRAFT_UNAVAILABLE', 'LAB is not live.');
+    }
+    if (action === 'heartbeat') {
+      const connected = liveDrafts.heartbeat(workspace.id, publisherId);
+      sendJson(response, 200, { connected });
+      return;
+    }
+    if (typeof body.sourceCode !== 'string') throw apiError(400, 'INVALID_INPUT', 'sourceCode must be a string.');
+    if (body.sourceCode.length > MAX_SOURCE_CODE_LENGTH) {
+      throw apiError(413, 'SOURCE_CODE_TOO_LARGE', 'Source code is too large.');
+    }
+    const draft = liveDrafts.publish(workspace.id, publisherId, body.sourceCode, body.claim === true);
+    if (!draft) throw apiError(409, 'LIVE_PUBLISHER_REPLACED', 'Another tab is sharing this workspace.');
+    liveDrafts.tagLab(workspace.id, lab.id);
+    liveDrafts.tagOwner(workspace.id, classroomItem.id, normalizeEmail(workspace.ownerEmail));
+    sendJson(response, 200, { revision: draft.revision, updatedAt: draft.updatedAt, connected: true });
+    return;
+  }
+
   if (parts[2] === 'workspaces' && parts[3] && parts[4] === 'status' && request.method === 'GET') {
     if (user.role === 'admin') deny();
     const workspaces = await readRecords(workspaceFile, initialWorkspaces);
@@ -3197,6 +3339,9 @@ export async function handleCodePulse({ request, response, requestUrl, user, sen
       stored.updatedAt = timestamp;
       return stored;
     });
+    if (requestedStatus === 'revoked') {
+      liveDrafts.endStudent(updated.classroomId, normalizeEmail(updated.studentEmail ?? updated.userEmail));
+    }
     sendJson(response, 200, { item: updated });
     return;
   }

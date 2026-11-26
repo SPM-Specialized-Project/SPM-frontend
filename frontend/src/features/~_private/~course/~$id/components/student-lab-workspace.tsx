@@ -4,6 +4,7 @@ import {
   useCodePulseWorkspaceAutosave,
   type WorkspaceAutosaveStatus,
 } from '@/hooks/use-codepulse-workspace-autosave';
+import { useLiveDraftPublisher } from '@/hooks/use-live-draft-publisher';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { waitForExecution } from '@/services/codepulse-api';
 import {
@@ -180,6 +181,11 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
   const sourceCode = selectedWorkspaceId
     ? (drafts[selectedWorkspaceId] ?? workspace?.sourceCode ?? '')
     : '';
+  const liveSharing = useLiveDraftPublisher({
+    workspaceId: workspace?.id === selectedWorkspaceId ? workspace.id : undefined,
+    sourceCode,
+    enabled: Boolean(practiceOpen && selected),
+  });
   const {
     status: saveStatus,
     error: saveError,
@@ -434,6 +440,11 @@ export function StudentLabWorkspace({ labs }: StudentLabWorkspaceProps) {
 
               <label className="mt-5 block text-sm font-semibold text-gray-800">
                 Source code
+                {liveSharing && (
+                  <span className="ml-2 rounded bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-800" role="status">
+                    Mã đang được chia sẻ với giảng viên
+                  </span>
+                )}
                 <textarea
                   aria-label="Source code"
                   value={sourceCode}

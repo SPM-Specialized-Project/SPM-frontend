@@ -13,6 +13,7 @@ import {
   useCodePulseWorkspaceAutosave,
   type WorkspaceAutosaveStatus,
 } from '@/hooks/use-codepulse-workspace-autosave';
+import { useLiveDraftPublisher } from '@/hooks/use-live-draft-publisher';
 import { usePracticeWindow } from '@/hooks/use-practice-window';
 import { api } from '@/services/api-client';
 import { waitForExecution } from '@/services/codepulse-api';
@@ -101,6 +102,11 @@ function StudentWorkspaceEditor({
   const [submission, setSubmission] = useState<CodePulseLabSubmission>();
   const { practiceOpen, practiceStatus, practiceMessage, activityContext } =
     usePracticeWindow(workspace?.id);
+  const liveSharing = useLiveDraftPublisher({
+    workspaceId: workspace?.id,
+    sourceCode,
+    enabled: practiceOpen && !loading,
+  });
   const [error, setError] = useState<string>();
   const [runError, setRunError] = useState<string>();
   const [submitError, setSubmitError] = useState<string>();
@@ -323,6 +329,11 @@ function StudentWorkspaceEditor({
           </label>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {liveSharing && (
+            <span className="rounded bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-800" role="status">
+              Mã đang được chia sẻ với giảng viên
+            </span>
+          )}
           <span
             className={`text-xs ${saveStateClass[saveState]}`}
             aria-live="polite"
